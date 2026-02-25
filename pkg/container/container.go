@@ -133,25 +133,25 @@ func (c *Client) Exec(containerName string, command []string) error {
 func (c *Client) Cleanup() error {
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")
 	if err := exec.Command(c.Engine, "stop", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
-		ui.Warn.Println(fmt.Sprintf("\nFailed to stop %s (might not be running): %v", ContainerSuiPlayground, err))
+		ui.Warn.Println(fmt.Sprintf("Failed to stop %s (might not be running): %v", ContainerSuiPlayground, err))
 	}
 	if err := exec.Command(c.Engine, "rm", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
-		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s: %v", ContainerSuiPlayground, err))
+		ui.Warn.Println(fmt.Sprintf("Failed to remove %s: %v", ContainerSuiPlayground, err))
 	}
 	spinner.Success(fmt.Sprintf("Container %s removal attempted", ContainerSuiPlayground))
 
 	spinner2, _ := ui.Spin("Removing sui-dev images...")
 	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDev).Run(); err != nil { // #nosec G204
-		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s image: %v", ImageDockerSuiDev, err))
+		ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", ImageDockerSuiDev, err))
 	}
 	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDevOld).Run(); err != nil { // #nosec G204
-		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s image: %v", ImageDockerSuiDevOld, err))
+		ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", ImageDockerSuiDevOld, err))
 	}
 	spinner2.Success("Images removal attempted")
 
 	spinner3, _ := ui.Spin("Removing config volume...")
 	if err := exec.Command(c.Engine, "volume", "rm", VolumeDockerSuiConfig).Run(); err != nil { // #nosec G204
-		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s volume: %v", VolumeDockerSuiConfig, err))
+		ui.Warn.Println(fmt.Sprintf("Failed to remove %s volume: %v", VolumeDockerSuiConfig, err))
 	}
 	spinner3.Success("Volume removal attempted")
 
