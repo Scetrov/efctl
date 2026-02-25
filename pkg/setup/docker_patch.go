@@ -46,39 +46,39 @@ func prepareDockerEnvironment(dockerDir string, withGraphql bool) error {
 
 		overrideYaml += "\nvolumes:\n  sui-pgdata:\n"
 
-		if err := os.WriteFile(overridePath, []byte(overrideYaml), 0644); err != nil {
+		if err := os.WriteFile(overridePath, []byte(overrideYaml), 0600); err != nil {
 			return fmt.Errorf("failed to write override yaml: %v", err)
 		}
 	} else {
 		// Clean up any existing override file
-		os.Remove(overridePath)
+		_ = os.Remove(overridePath)
 	}
 
 	// 1.5 Patch compose.yml
 	composePath := filepath.Join(dockerDir, "compose.yml")
-	compose, err := os.ReadFile(composePath)
+	compose, err := os.ReadFile(composePath) // #nosec G304
 	if err == nil {
 		content := string(compose)
 		if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
 			content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
-			os.WriteFile(composePath, []byte(content), 0644)
+			_ = os.WriteFile(composePath, []byte(content), 0600)
 		}
 	}
 
 	// 2. Patch Dockerfile
 	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
-	dockerfile, err := os.ReadFile(dockerfilePath)
+	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304
 	if err == nil {
 		content := string(dockerfile)
 		if !strings.Contains(content, "postgresql-client") {
 			content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
-			os.WriteFile(dockerfilePath, []byte(content), 0644)
+			_ = os.WriteFile(dockerfilePath, []byte(content), 0600)
 		}
 	}
 
 	// 3. Patch entrypoint.sh
 	entrypointPath := filepath.Join(dockerDir, "scripts", "entrypoint.sh")
-	entrypoint, err := os.ReadFile(entrypointPath)
+	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304
 	if err == nil {
 		content := string(entrypoint)
 
@@ -142,7 +142,7 @@ echo "[sui-dev] Node ready."`
 			content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
 		}
 
-		os.WriteFile(entrypointPath, []byte(content), 0755)
+		_ = os.WriteFile(entrypointPath, []byte(content), 0700) // #nosec G306
 	}
 
 	return nil

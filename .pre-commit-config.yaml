@@ -29,3 +29,19 @@ repos:
         types: [go]
         args: ["./..."]
         pass_filenames: false
+      - id: gosec
+        name: gosec
+        entry: gosec
+        language: golang
+        additional_dependencies: [github.com/securego/gosec/v2/cmd/gosec@latest]
+        types: [go]
+        args: ["./..."]
+        pass_filenames: false
+      - id: gocyclo
+        name: gocyclo
+        entry: gocyclo
+        language: golang
+        additional_dependencies: [github.com/fzipp/gocyclo/cmd/gocyclo@latest]
+        types: [go]
+        args: ["-over", "15", "."]
+        pass_filenames: false

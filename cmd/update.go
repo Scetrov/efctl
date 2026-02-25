@@ -34,7 +34,7 @@ var updateCmd = &cobra.Command{
 
 		spinner, _ := ui.Spin(fmt.Sprintf("Downloading %s", url))
 
-		resp, err := http.Get(url)
+		resp, err := http.Get(url) // #nosec G107
 		if err != nil {
 			if spinner != nil {
 				_ = spinner.Stop()
@@ -82,9 +82,9 @@ var updateCmd = &cobra.Command{
 		tmpPath := tmpFile.Name()
 
 		_, err = io.Copy(tmpFile, resp.Body)
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		if err != nil {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 			if spinner != nil {
 				_ = spinner.Stop()
 			}
@@ -93,8 +93,8 @@ var updateCmd = &cobra.Command{
 		}
 
 		// Make executable (no-op on Windows, but harmless)
-		if err := os.Chmod(tmpPath, 0755); err != nil {
-			os.Remove(tmpPath)
+		if err := os.Chmod(tmpPath, 0700); err != nil { // #nosec G302
+			_ = os.Remove(tmpPath)
 			if spinner != nil {
 				_ = spinner.Stop()
 			}
@@ -105,7 +105,7 @@ var updateCmd = &cobra.Command{
 		// Atomic swap: rename current binary out of the way, then move new one in
 		oldPath := execPath + ".old"
 		if err := os.Rename(execPath, oldPath); err != nil {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 			if spinner != nil {
 				_ = spinner.Stop()
 			}

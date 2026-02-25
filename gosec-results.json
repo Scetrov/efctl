@@ -1,0 +1,542 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": null,
+			"rule_id": "G704",
+			"details": "SSRF via taint analysis",
+			"file": "/home/scetrov/source/efctl/pkg/graphql/client.go",
+			"code": "49: \t}\n50: \tresp, err := client.Do(req)\n51: \tif err != nil {\n",
+			"line": "50",
+			"column": "24",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/home/scetrov/source/efctl/pkg/git/git.go",
+			"code": "19: \n20: \tcmd := exec.Command(\"git\", \"clone\", url, dest)\n21: \toutput, err := cmd.CombinedOutput()\n",
+			"line": "20",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "152: \tspinner3, _ := ui.Spin(\"Removing config volume...\")\n153: \tif err := exec.Command(c.Engine, \"volume\", \"rm\", VolumeDockerSuiConfig).Run(); err != nil {\n154: \t\tui.Warn.Println(fmt.Sprintf(\"\\nFailed to remove %s volume: %v\", VolumeDockerSuiConfig, err))\n",
+			"line": "153",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "146: \t}\n147: \tif err := exec.Command(c.Engine, \"rmi\", ImageDockerSuiDevOld).Run(); err != nil {\n148: \t\tui.Warn.Println(fmt.Sprintf(\"\\nFailed to remove %s image: %v\", ImageDockerSuiDevOld, err))\n",
+			"line": "147",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "143: \tspinner2, _ := ui.Spin(\"Removing sui-dev images...\")\n144: \tif err := exec.Command(c.Engine, \"rmi\", ImageDockerSuiDev).Run(); err != nil {\n145: \t\tui.Warn.Println(fmt.Sprintf(\"\\nFailed to remove %s image: %v\", ImageDockerSuiDev, err))\n",
+			"line": "144",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "137: \t}\n138: \tif err := exec.Command(c.Engine, \"rm\", ContainerSuiPlayground).Run(); err != nil {\n139: \t\tui.Warn.Println(fmt.Sprintf(\"\\nFailed to remove %s: %v\", ContainerSuiPlayground, err))\n",
+			"line": "138",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "134: \tspinner, _ := ui.Spin(\"Stopping and removing sui-playground container...\")\n135: \tif err := exec.Command(c.Engine, \"stop\", ContainerSuiPlayground).Run(); err != nil {\n136: \t\tui.Warn.Println(fmt.Sprintf(\"\\nFailed to stop %s (might not be running): %v\", ContainerSuiPlayground, err))\n",
+			"line": "135",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "119: \targs := append([]string{\"exec\", containerName}, command...)\n120: \tcmd := exec.Command(c.Engine, args...)\n121: \n",
+			"line": "120",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "66: \n67: \tcmd := exec.CommandContext(ctx, c.Engine, \"logs\", \"-f\", containerName)\n68: \t// We need both stdout and stderr since logs can go to either\n",
+			"line": "67",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "49: \n50: \tcmd := exec.Command(c.Engine, \"compose\", \"run\", \"-d\", \"--name\", ContainerSuiPlayground, \"--service-ports\", \"sui-dev\")\n51: \tcmd.Dir = dir\n",
+			"line": "50",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "32: \n33: \tcmd := exec.Command(c.Engine, \"compose\", \"build\")\n34: \tcmd.Dir = dir\n",
+			"line": "33",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/scetrov/source/efctl/pkg/setup/summary.go",
+			"code": "64: \tlogPath := filepath.Join(workspace, \"world-contracts\", \"deployments\", \"localnet\", \"deploy.log\")\n65: \tfile, err := os.Open(logPath)\n66: \tif err == nil {\n",
+			"line": "65",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/scetrov/source/efctl/pkg/setup/summary.go",
+			"code": "40: \tjsonPath := filepath.Join(workspace, \"world-contracts\", \"deployments\", \"localnet\", \"extracted-object-ids.json\")\n41: \tbytes, err := os.ReadFile(jsonPath)\n42: \n",
+			"line": "41",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "80: \tentrypointPath := filepath.Join(dockerDir, \"scripts\", \"entrypoint.sh\")\n81: \tentrypoint, err := os.ReadFile(entrypointPath)\n82: \tif err == nil {\n",
+			"line": "81",
+			"column": "21",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "69: \tdockerfilePath := filepath.Join(dockerDir, \"Dockerfile\")\n70: \tdockerfile, err := os.ReadFile(dockerfilePath)\n71: \tif err == nil {\n",
+			"line": "70",
+			"column": "21",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "58: \tcomposePath := filepath.Join(dockerDir, \"compose.yml\")\n59: \tcompose, err := os.ReadFile(composePath)\n60: \tif err == nil {\n",
+			"line": "59",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "88",
+				"url": "https://cwe.mitre.org/data/definitions/88.html"
+			},
+			"rule_id": "G107",
+			"details": "Potential HTTP request made with variable url",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "36: \n37: \t\tresp, err := http.Get(url)\n38: \t\tif err != nil {\n",
+			"line": "37",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "95: \t\t// Make executable (no-op on Windows, but harmless)\n96: \t\tif err := os.Chmod(tmpPath, 0755); err != nil {\n97: \t\t\tos.Remove(tmpPath)\n",
+			"line": "96",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G301",
+			"details": "Expect directory permissions to be 0750 or less",
+			"file": "/home/scetrov/source/efctl/pkg/git/git.go",
+			"code": "33: \tif _, err := os.Stat(path); os.IsNotExist(err) {\n34: \t\terr := os.MkdirAll(path, 0755)\n35: \t\tif err != nil {\n",
+			"line": "34",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "144: \n145: \t\tos.WriteFile(entrypointPath, []byte(content), 0755)\n146: \t}\n",
+			"line": "145",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "74: \t\t\tcontent = strings.Replace(content, \"dos2unix \\\\\", \"dos2unix \\\\\\n    postgresql-client \\\\\", 1)\n75: \t\t\tos.WriteFile(dockerfilePath, []byte(content), 0644)\n76: \t\t}\n",
+			"line": "75",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "63: \t\t\tcontent = strings.Replace(content, \"- ./world-contracts:/workspace/world-contracts\", \"- ../../world-contracts:/workspace/world-contracts\", 1)\n64: \t\t\tos.WriteFile(composePath, []byte(content), 0644)\n65: \t\t}\n",
+			"line": "64",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "48: \n49: \t\tif err := os.WriteFile(overridePath, []byte(overrideYaml), 0644); err != nil {\n50: \t\t\treturn fmt.Errorf(\"failed to write override yaml: %v\", err)\n",
+			"line": "49",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "144: \n145: \t\tos.WriteFile(entrypointPath, []byte(content), 0755)\n146: \t}\n",
+			"line": "145",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "74: \t\t\tcontent = strings.Replace(content, \"dos2unix \\\\\", \"dos2unix \\\\\\n    postgresql-client \\\\\", 1)\n75: \t\t\tos.WriteFile(dockerfilePath, []byte(content), 0644)\n76: \t\t}\n",
+			"line": "75",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "63: \t\t\tcontent = strings.Replace(content, \"- ./world-contracts:/workspace/world-contracts\", \"- ../../world-contracts:/workspace/world-contracts\", 1)\n64: \t\t\tos.WriteFile(composePath, []byte(content), 0644)\n65: \t\t}\n",
+			"line": "64",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/setup/docker_patch.go",
+			"code": "53: \t\t// Clean up any existing override file\n54: \t\tos.Remove(overridePath)\n55: \t}\n",
+			"line": "54",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/env/env.go",
+			"code": "61: \t}\n62: \tln.Close()\n63: \treturn true\n",
+			"line": "62",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/pkg/container/container.go",
+			"code": "107: \n108: \tcmd.Wait() // Reclaim process\n109: \n",
+			"line": "108",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "107: \t\tif err := os.Rename(execPath, oldPath); err != nil {\n108: \t\t\tos.Remove(tmpPath)\n109: \t\t\tif spinner != nil {\n",
+			"line": "108",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "96: \t\tif err := os.Chmod(tmpPath, 0755); err != nil {\n97: \t\t\tos.Remove(tmpPath)\n98: \t\t\tif spinner != nil {\n",
+			"line": "97",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "86: \t\tif err != nil {\n87: \t\t\tos.Remove(tmpPath)\n88: \t\t\tif spinner != nil {\n",
+			"line": "87",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/home/scetrov/source/efctl/cmd/update.go",
+			"code": "84: \t\t_, err = io.Copy(tmpFile, resp.Body)\n85: \t\ttmpFile.Close()\n86: \t\tif err != nil {\n",
+			"line": "85",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 23,
+		"lines": 1304,
+		"nosec": 0,
+		"found": 33
+	},
+	"GosecVersion": "dev"
+}

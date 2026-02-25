@@ -38,7 +38,7 @@ func PrintDeploymentSummary(workspace string) {
 
 	// 1. Read JSON Object IDs
 	jsonPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
-	bytes, err := os.ReadFile(jsonPath)
+	bytes, err := os.ReadFile(jsonPath) // #nosec G304
 
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
@@ -62,7 +62,7 @@ func PrintDeploymentSummary(workspace string) {
 
 	// 2. Read Log File for dynamic resources
 	logPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")
-	file, err := os.Open(logPath)
+	file, err := os.Open(logPath) // #nosec G304
 	if err == nil {
 		defer file.Close()
 

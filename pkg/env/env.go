@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // CheckResult holds the status of prerequisite checks
@@ -12,6 +13,8 @@ type CheckResult struct {
 	HasGit    bool
 	HasDocker bool
 	HasPodman bool
+	HasNode   bool
+	NodeVer   string
 }
 
 // Engine returns the preferred container engine (docker or podman). Returns an error if neither is available.
@@ -49,6 +52,10 @@ func CheckPrerequisites() *CheckResult {
 	if _, err := exec.LookPath("podman"); err == nil {
 		res.HasPodman = true
 	}
+	if out, err := exec.Command("node", "--version").Output(); err == nil {
+		res.HasNode = true
+		res.NodeVer = strings.TrimSpace(string(out))
+	}
 
 	return res
 }
@@ -59,6 +66,6 @@ func IsPortAvailable(port int) bool {
 	if err != nil {
 		return false
 	}
-	ln.Close()
+	_ = ln.Close()
 	return true
 }

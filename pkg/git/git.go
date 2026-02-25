@@ -17,7 +17,7 @@ func CloneRepository(url string, dest string) error {
 
 	spinner, _ := ui.Spin(fmt.Sprintf("%s Cloning %s...", ui.GitEmoji, url))
 
-	cmd := exec.Command("git", "clone", url, dest)
+	cmd := exec.Command("git", "clone", url, dest) // #nosec G204
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to clone %s", url))
@@ -31,7 +31,7 @@ func CloneRepository(url string, dest string) error {
 // SetupWorkDir creates the workspace directory if it doesn't exist
 func SetupWorkDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.MkdirAll(path, 0755)
+		err := os.MkdirAll(path, 0750)
 		if err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", path, err)
 		}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"efctl/pkg/ui"
@@ -37,6 +38,10 @@ func RunQuery(endpoint, query string, variables map[string]interface{}) (*GraphQ
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		return nil, fmt.Errorf("invalid endpoint URL scheme")
+	}
+
 	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -47,7 +52,7 @@ func RunQuery(endpoint, query string, variables map[string]interface{}) (*GraphQ
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G107 G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}

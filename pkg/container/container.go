@@ -30,7 +30,7 @@ func NewClient() (*Client, error) {
 func (c *Client) ComposeBuild(dir string) error {
 	spinner, _ := ui.Spin("Building containers...")
 
-	cmd := exec.Command(c.Engine, "compose", "build")
+	cmd := exec.Command(c.Engine, "compose", "build") // #nosec G204
 	cmd.Dir = dir
 
 	output, err := cmd.CombinedOutput()
@@ -47,7 +47,7 @@ func (c *Client) ComposeBuild(dir string) error {
 func (c *Client) ComposeRun(dir string) error {
 	spinner, _ := ui.Spin("Starting sui-playground...")
 
-	cmd := exec.Command(c.Engine, "compose", "run", "-d", "--name", ContainerSuiPlayground, "--service-ports", "sui-dev")
+	cmd := exec.Command(c.Engine, "compose", "run", "-d", "--name", ContainerSuiPlayground, "--service-ports", "sui-dev") // #nosec G204
 	cmd.Dir = dir
 
 	output, err := cmd.CombinedOutput()
@@ -64,7 +64,7 @@ func (c *Client) ComposeRun(dir string) error {
 func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to initialize...", containerName))
 
-	cmd := exec.CommandContext(ctx, c.Engine, "logs", "-f", containerName)
+	cmd := exec.CommandContext(ctx, c.Engine, "logs", "-f", containerName) // #nosec G204
 	// We need both stdout and stderr since logs can go to either
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -105,7 +105,7 @@ func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchSt
 		}
 	}
 
-	cmd.Wait() // Reclaim process
+	_ = cmd.Wait() // Reclaim process
 
 	spinner.Success(fmt.Sprintf("%s is ready", containerName))
 	return nil
@@ -117,7 +117,7 @@ func (c *Client) Exec(containerName string, command []string) error {
 
 	// We do not use -it because we don't have a tty
 	args := append([]string{"exec", containerName}, command...)
-	cmd := exec.Command(c.Engine, args...)
+	cmd := exec.Command(c.Engine, args...) // #nosec G204
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -132,25 +132,25 @@ func (c *Client) Exec(containerName string, command []string) error {
 // Cleanup stops/removes the container, removes images, volumes
 func (c *Client) Cleanup() error {
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")
-	if err := exec.Command(c.Engine, "stop", ContainerSuiPlayground).Run(); err != nil {
+	if err := exec.Command(c.Engine, "stop", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
 		ui.Warn.Println(fmt.Sprintf("\nFailed to stop %s (might not be running): %v", ContainerSuiPlayground, err))
 	}
-	if err := exec.Command(c.Engine, "rm", ContainerSuiPlayground).Run(); err != nil {
+	if err := exec.Command(c.Engine, "rm", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
 		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s: %v", ContainerSuiPlayground, err))
 	}
 	spinner.Success(fmt.Sprintf("Container %s removal attempted", ContainerSuiPlayground))
 
 	spinner2, _ := ui.Spin("Removing sui-dev images...")
-	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDev).Run(); err != nil {
+	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDev).Run(); err != nil { // #nosec G204
 		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s image: %v", ImageDockerSuiDev, err))
 	}
-	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDevOld).Run(); err != nil {
+	if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDevOld).Run(); err != nil { // #nosec G204
 		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s image: %v", ImageDockerSuiDevOld, err))
 	}
 	spinner2.Success("Images removal attempted")
 
 	spinner3, _ := ui.Spin("Removing config volume...")
-	if err := exec.Command(c.Engine, "volume", "rm", VolumeDockerSuiConfig).Run(); err != nil {
+	if err := exec.Command(c.Engine, "volume", "rm", VolumeDockerSuiConfig).Run(); err != nil { // #nosec G204
 		ui.Warn.Println(fmt.Sprintf("\nFailed to remove %s volume: %v", VolumeDockerSuiConfig, err))
 	}
 	spinner3.Success("Volume removal attempted")

@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"efctl/pkg/env"
 	"efctl/pkg/setup"
@@ -17,6 +19,26 @@ var envUpCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Info.Println("Checking prerequisites...")
 		res := env.CheckPrerequisites()
+
+		if !res.HasNode {
+			ui.Error.Println("Node.js is not installed. Please install Node.js >= 20.0.0 to continue.")
+			os.Exit(1)
+		}
+		if strings.HasPrefix(res.NodeVer, "v") {
+			parts := strings.Split(res.NodeVer[1:], ".")
+			if len(parts) >= 1 {
+				major, err := strconv.Atoi(parts[0])
+				if err == nil {
+					if major < 20 {
+						ui.Error.Println("Node.js version must be 20.0.0 or higher. Found: " + res.NodeVer)
+						os.Exit(1)
+					} else if major != 24 {
+						ui.Warn.Println("Node.js version is within range but different from project standard (24.x.x). Found: " + res.NodeVer)
+					}
+				}
+			}
+		}
+
 		if !res.HasDocker && !res.HasPodman {
 			ui.Error.Println("Neither Docker nor Podman is installed. Please install one to continue.")
 			os.Exit(1)
