@@ -207,7 +207,7 @@ pnpm configure-world
 
 ## 6. Spawning Structures (Gate Setup)
 
-Run the automated seeding script to create a working Smart Gate environment:
+Run the automated seeding script to create a working Smart Assembly testing environment:
 
 ```bash
 pnpm create-test-resources

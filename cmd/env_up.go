@@ -15,7 +15,7 @@ import (
 var envUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Bring up the local environment",
-	Long:  `Runs check, setup, start, and deploy sequentially to bring up a fully working EVE Frontier Smart Gate environment.`,
+	Long:  `Runs check, setup, start, and deploy sequentially to bring up a fully working EVE Frontier Smart Assembly testing environment.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Info.Println("Checking prerequisites...")
 		res := env.CheckPrerequisites()

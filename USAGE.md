@@ -16,7 +16,7 @@ The `env` command groups operations to bring up and tear down the EVE Frontier l
 
 ### `efctl env up`
 
-Brings up the local environment. It sequentially runs checks, setup, start, and deployment instructions to spin up a fully working EVE Frontier Smart Gate environment.
+Brings up the local environment. It sequentially runs checks, setup, start, and deployment instructions to spin up a fully working EVE Frontier Smart Assembly testing environment.
 
 **Options:**
 
