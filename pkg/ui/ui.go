@@ -17,7 +17,7 @@ var (
 	GlobeEmoji   = "🌍"
 
 	// Printers
-	Info    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " INFO  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Info    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "  INF  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 	Success = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 	Warn    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 	Error   = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
@@ -65,5 +65,9 @@ func Spin(text string) (*pterm.SpinnerPrinter, error) {
 	}
 
 	pterm.DefaultSpinner.Sequence = gradientSeq
+	pterm.DefaultSpinner.SuccessPrinter = &Success
+	pterm.DefaultSpinner.FailPrinter = &Error
+	pterm.DefaultSpinner.WarningPrinter = &Warn
+	pterm.DefaultSpinner.InfoPrinter = &Info
 	return pterm.DefaultSpinner.WithText(text).Start()
 }
