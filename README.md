@@ -51,20 +51,18 @@ curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwi
 ### Windows (PowerShell)
 
 ```powershell
-iex ((New-Object Net.WebClient).DownloadString('data:text/plain,') + @'
-$arch = if ([Environment]::Is64BitOperatingSystem) {
-    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
-} else { "amd64" }
-$url = "https://github.com/Scetrov/efctl/releases/latest/download/efctl-windows-$arch.exe"
-$dest = "$env:LOCALAPPDATA\efctl\efctl.exe"
-New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
-Invoke-WebRequest -Uri $url -OutFile $dest
-$path = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($path -notlike "*$(Split-Path $dest)*") {
-    [Environment]::SetEnvironmentVariable("Path", "$path;$(Split-Path $dest)", "User")
+& {
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+  $url = "https://github.com/Scetrov/efctl/releases/latest/download/efctl-windows-$arch.exe"
+  $dest = Join-Path $env:LOCALAPPDATA "efctl\efctl.exe"
+  New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+  Invoke-WebRequest -Uri $url -OutFile $dest
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ($userPath -notlike "*$(Split-Path $dest)*") {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$(Split-Path $dest)", "User")
+  }
+  Write-Host "efctl installed to $dest — restart your terminal to use it."
 }
-Write-Host "efctl installed to $dest — restart your terminal to use it."
-'@)
 ```
 
 > **Note:** This installs to `%LOCALAPPDATA%\efctl` and adds it to your user `PATH`. You may need to restart your terminal for the `PATH` change to take effect.
