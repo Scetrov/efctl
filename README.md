@@ -15,7 +15,8 @@
 
 Below are one-liner installers for each platform. They automatically detect your CPU architecture (`amd64` / `arm64`) and download the correct binary from [GitHub Releases](https://github.com/Scetrov/efctl/releases).
 
-> **Tip:** Replace `latest` with a specific tag (e.g. `v0.1.0`) to pin a version.
+> [!TIP]
+> Replace `latest` with a specific tag (e.g. `v0.1.0`) to pin a version.
 
 ---
 
@@ -25,14 +26,14 @@ Below are one-liner installers for each platform. They automatically detect your
 
 ```bash
 curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  -o /tmp/efctl && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+  -o /tmp/efctl && chmod +x /tmp/efctl && mkdir -p ~/.local/bin && mv /tmp/efctl ~/.local/bin/efctl
 ```
 
 #### wget
 
 ```bash
 wget -qO /tmp/efctl https://github.com/Scetrov/efctl/releases/latest/download/efctl-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+  && chmod +x /tmp/efctl && mkdir -p ~/.local/bin && mv /tmp/efctl ~/.local/bin/efctl
 ```
 
 ---
@@ -43,7 +44,7 @@ wget -qO /tmp/efctl https://github.com/Scetrov/efctl/releases/latest/download/ef
 
 ```bash
 curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwin-$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/') \
-  -o /tmp/efctl && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+  -o /tmp/efctl && chmod +x /tmp/efctl && mkdir -p ~/.local/bin && mv /tmp/efctl ~/.local/bin/efctl
 ```
 
 ---
@@ -54,7 +55,7 @@ curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwi
 & {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
   $url = "https://github.com/Scetrov/efctl/releases/latest/download/efctl-windows-$arch.exe"
-  $dest = Join-Path $env:LOCALAPPDATA "efctl\efctl.exe"
+  $dest = Join-Path $HOME "bin\scetrov\efctl\efctl.exe"
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   Invoke-WebRequest -Uri $url -OutFile $dest
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -65,7 +66,8 @@ curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwi
 }
 ```
 
-> **Note:** This installs to `%LOCALAPPDATA%\efctl` and adds it to your user `PATH`. You may need to restart your terminal for the `PATH` change to take effect.
+> [!NOTE]
+> This installs to `~/bin/scetrov/efctl` and adds it to your user `PATH`. You may need to restart your terminal for the `PATH` change to take effect.
 
 ---
 
@@ -77,15 +79,20 @@ Ensure you have [Go 1.25+](https://go.dev/dl/) installed.
 git clone https://github.com/Scetrov/efctl.git
 cd efctl
 go build -trimpath -ldflags="-s -w" -o efctl main.go
-sudo mv efctl /usr/local/bin/   # Linux/macOS
+mkdir -p ~/.local/bin && mv efctl ~/.local/bin/   # Linux/macOS
 # Windows: move efctl.exe to a directory in your PATH
 ```
+
+> [!NOTE]
+> Make sure `~/.local/bin` is in your `PATH`. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile if needed.
 
 ## Quick Start
 
 To spin up your local environment:
 
 ```bash
+mkdir -p ~/ef
+cd ~/ef
 efctl env up
 ```
 
