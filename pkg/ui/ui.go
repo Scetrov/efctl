@@ -17,11 +17,27 @@ var (
 	GlobeEmoji   = "🌍"
 
 	// Printers
-	Info    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " INFO  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Success = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Warn    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Error   = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
+	Info    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " INFO  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Success = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Warn    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Error   = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 )
+
+type SpacedPrinter struct {
+	pterm.PrefixPrinter
+}
+
+func (s SpacedPrinter) Println(a ...any) *pterm.TextPrinter {
+	p := s.PrefixPrinter.Println(a...)
+	pterm.Println()
+	return p
+}
+
+func (s SpacedPrinter) Printf(format string, a ...any) *pterm.TextPrinter {
+	p := s.PrefixPrinter.Printf(format, a...)
+	pterm.Println()
+	return p
+}
 
 func init() {
 	pterm.EnableColor()
