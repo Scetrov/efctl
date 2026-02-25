@@ -1,6 +1,6 @@
 # efctl
 
-![efctl Logo](./assets/efctl-logo.png)
+![efctl Logo](https://raw.githubusercontent.com/Scetrov/efctl/refs/heads/main/assets/logo.png)
 
 `efctl` is a fast and flexible CLI designed to automate the setup, deployment, and teardown of the EVE Frontier local world contracts and smart gates. Built with Go, it provides an intuitive interface to seamlessly initialize the Sui playground environment and interact with the local blockchain.
 
