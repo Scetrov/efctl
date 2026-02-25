@@ -86,7 +86,7 @@ var envUpCmd = &cobra.Command{
 
 		setup.PrintDeploymentSummary(workspacePath)
 
-		ui.Success.Println(fmt.Sprintf("\n%s Environment is up! The Sui playground is running and gates are spawned.", ui.GlobeEmoji))
+		ui.Success.Println(fmt.Sprintf("%s Environment is up! The Sui playground is running and gates are spawned.", ui.GlobeEmoji))
 	},
 }
 
