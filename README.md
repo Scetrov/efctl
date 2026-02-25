@@ -13,15 +13,74 @@
 
 ## Installation
 
-### From Source
+Below are one-liner installers for each platform. They automatically detect your CPU architecture (`amd64` / `arm64`) and download the correct binary from [GitHub Releases](https://github.com/Scetrov/efctl/releases).
 
-Ensure you have Go installed on your machine (1.20+ recommended).
+> **Tip:** Replace `latest` with a specific tag (e.g. `v0.1.0`) to pin a version.
+
+---
+
+### Linux
+
+#### curl
 
 ```bash
-git clone https://github.com/your-org/efctl.git
+curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+  -o /tmp/efctl && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+```
+
+#### wget
+
+```bash
+wget -qO /tmp/efctl https://github.com/Scetrov/efctl/releases/latest/download/efctl-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+  && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+```
+
+---
+
+### macOS
+
+#### curl (Homebrew not required)
+
+```bash
+curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwin-$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/') \
+  -o /tmp/efctl && chmod +x /tmp/efctl && sudo mv /tmp/efctl /usr/local/bin/efctl
+```
+
+---
+
+### Windows (PowerShell)
+
+```powershell
+iex ((New-Object Net.WebClient).DownloadString('data:text/plain,') + @'
+$arch = if ([Environment]::Is64BitOperatingSystem) {
+    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+} else { "amd64" }
+$url = "https://github.com/Scetrov/efctl/releases/latest/download/efctl-windows-$arch.exe"
+$dest = "$env:LOCALAPPDATA\efctl\efctl.exe"
+New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+Invoke-WebRequest -Uri $url -OutFile $dest
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($path -notlike "*$(Split-Path $dest)*") {
+    [Environment]::SetEnvironmentVariable("Path", "$path;$(Split-Path $dest)", "User")
+}
+Write-Host "efctl installed to $dest — restart your terminal to use it."
+'@)
+```
+
+> **Note:** This installs to `%LOCALAPPDATA%\efctl` and adds it to your user `PATH`. You may need to restart your terminal for the `PATH` change to take effect.
+
+---
+
+### From Source
+
+Ensure you have [Go 1.25+](https://go.dev/dl/) installed.
+
+```bash
+git clone https://github.com/Scetrov/efctl.git
 cd efctl
-go build -o efctl main.go
-sudo mv efctl /usr/local/bin/
+go build -trimpath -ldflags="-s -w" -o efctl main.go
+sudo mv efctl /usr/local/bin/   # Linux/macOS
+# Windows: move efctl.exe to a directory in your PATH
 ```
 
 ## Quick Start
