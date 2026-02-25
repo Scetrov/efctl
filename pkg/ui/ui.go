@@ -17,10 +17,10 @@ var (
 	GlobeEmoji   = "🌍"
 
 	// Printers
-	Info    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: InfoEmoji, Style: pterm.NewStyle(pterm.FgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Success = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: SuccessEmoji, Style: pterm.NewStyle(pterm.FgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Warn    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "⚠️ ", Style: pterm.NewStyle(pterm.FgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
-	Error   = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: ErrorEmoji, Style: pterm.NewStyle(pterm.FgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
+	Info    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "INFO", Style: pterm.NewStyle(pterm.FgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
+	Success = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
+	Warn    = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
+	Error   = pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "ERROR", Style: pterm.NewStyle(pterm.FgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}
 )
 
 func init() {
