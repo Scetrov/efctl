@@ -4,7 +4,7 @@
         {
             "label": "Build efctl",
             "type": "shell",
-            "command": "go build -o efctl main.go && echo \"\\n\\u2705 Build Complete. Built efctl successfully!\"",
+            "command": "go build -o output/efctl main.go && echo \"\\n\\u2705 Build Complete. Built efctl successfully!\"",
             "group": {
                 "kind": "build",
                 "isDefault": true
