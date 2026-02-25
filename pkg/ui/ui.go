@@ -27,6 +27,12 @@ type SpacedPrinter struct {
 	pterm.PrefixPrinter
 }
 
+func (s SpacedPrinter) Print(a ...any) *pterm.TextPrinter {
+	p := s.PrefixPrinter.Print(a...)
+	pterm.Println()
+	return p
+}
+
 func (s SpacedPrinter) Println(a ...any) *pterm.TextPrinter {
 	p := s.PrefixPrinter.Println(a...)
 	pterm.Println()
@@ -37,6 +43,28 @@ func (s SpacedPrinter) Printf(format string, a ...any) *pterm.TextPrinter {
 	p := s.PrefixPrinter.Printf(format, a...)
 	pterm.Println()
 	return p
+}
+
+func (s SpacedPrinter) Printfln(format string, a ...any) *pterm.TextPrinter {
+	p := s.PrefixPrinter.Printfln(format, a...)
+	pterm.Println()
+	return p
+}
+
+func (s SpacedPrinter) Sprint(a ...any) string {
+	return s.PrefixPrinter.Sprint(a...) + "\n"
+}
+
+func (s SpacedPrinter) Sprintln(a ...any) string {
+	return s.PrefixPrinter.Sprintln(a...) + "\n"
+}
+
+func (s SpacedPrinter) Sprintf(format string, a ...any) string {
+	return s.PrefixPrinter.Sprintf(format, a...) + "\n"
+}
+
+func (s SpacedPrinter) Sprintfln(format string, a ...any) string {
+	return s.PrefixPrinter.Sprintfln(format, a...) + "\n"
 }
 
 func init() {
