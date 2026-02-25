@@ -29,6 +29,25 @@ func init() {
 
 // Spin configures and returns a spinner
 func Spin(text string) (*pterm.SpinnerPrinter, error) {
-	pterm.DefaultSpinner.Sequence = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	chars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	seqLen := 40
+	var gradientSeq []string
+
+	orange := pterm.NewRGB(255, 116, 0)
+	complementary := pterm.NewRGB(0, 139, 255) // Blue complementary color
+
+	for i := 0; i < seqLen; i++ {
+		char := chars[i%len(chars)]
+		var c pterm.RGB
+		half := seqLen / 2
+		if i < half {
+			c = orange.Fade(0, float32(half-1), float32(i), complementary)
+		} else {
+			c = complementary.Fade(float32(half), float32(seqLen-1), float32(i), orange)
+		}
+		gradientSeq = append(gradientSeq, c.Sprint(char))
+	}
+
+	pterm.DefaultSpinner.Sequence = gradientSeq
 	return pterm.DefaultSpinner.WithText(text).Start()
 }
