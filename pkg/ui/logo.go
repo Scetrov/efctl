@@ -11,7 +11,7 @@ func PrintBanner() {
 	cyan := pterm.NewRGB(0, 255, 255)
 	orange := pterm.NewRGB(255, 116, 0)
 
-	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("$> EFCTL")).Srender()
+	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("> fctl")).Srender()
 
 	lines := strings.Split(raw, "\n")
 	for _, line := range lines {
