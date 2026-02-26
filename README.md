@@ -96,6 +96,8 @@ cd ~/ef
 efctl env up
 ```
 
+![efctl demo](https://raw.githubusercontent.com/Scetrov/efctl/main/assets/efctl_2026_02_opt.gif)
+
 For more detailed usage instructions, check out the [USAGE.md](USAGE.md) file.
 
 ## Contributing

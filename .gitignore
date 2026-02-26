@@ -25,3 +25,6 @@ sui-frontier/
 # Build output
 output/
 my-workspace/
+builder-scaffold/
+world-contracts/
+
