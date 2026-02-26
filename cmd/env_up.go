@@ -8,6 +8,7 @@ import (
 
 	"efctl/pkg/env"
 	"efctl/pkg/setup"
+	"efctl/pkg/sui"
 	"efctl/pkg/ui"
 	"github.com/spf13/cobra"
 )
@@ -82,6 +83,18 @@ var envUpCmd = &cobra.Command{
 			ui.Error.Println("Deployment failed: " + err.Error())
 			ui.Warn.Println("The environment may be partially initialized. It is recommended to run `efctl down` before trying again.")
 			os.Exit(1)
+		}
+
+		if sui.IsSuiInstalled() {
+			if err := sui.ConfigureSui(workspacePath); err != nil {
+				ui.Warn.Println("Sui client configuration failed: " + err.Error())
+			} else {
+				ui.Info.Println("Sui client has been configured for this environment.")
+				fmt.Println("Try running these commands to test:")
+				fmt.Println("  sui client active-env")
+				fmt.Println("  sui client addresses")
+				fmt.Println()
+			}
 		}
 
 		setup.PrintDeploymentSummary(workspacePath)

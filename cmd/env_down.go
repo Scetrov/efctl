@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"efctl/pkg/setup"
+	"efctl/pkg/sui"
 	"efctl/pkg/ui"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,12 @@ var envDownCmd = &cobra.Command{
 			ui.Error.Println("Cleanup failed: " + err.Error())
 			os.Exit(1)
 		}
+
+		// Also teardown Sui client configuration
+		if err := sui.TeardownSui(); err != nil {
+			ui.Warn.Println("Sui client teardown failed: " + err.Error())
+		}
+
 		ui.Success.Println(fmt.Sprintf("%s Environment cleaned up successfully.", ui.CleanEmoji))
 	},
 }

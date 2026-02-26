@@ -99,3 +99,10 @@ func Spin(text string) (*pterm.SpinnerPrinter, error) {
 	pterm.DefaultSpinner.InfoPrinter = &Info
 	return pterm.DefaultSpinner.WithText(text).Start()
 }
+
+// Confirm asks the user for permission
+func Confirm(message string) bool {
+	result, _ := pterm.DefaultInteractiveConfirm.WithDefaultText(message).Show()
+	pterm.Println()
+	return result
+}

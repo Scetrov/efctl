@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 
@@ -157,6 +158,11 @@ func parseEnvLog(scanner *bufio.Scanner) ParsedEnv {
 }
 
 func extractDynamicIds(workspace string, tObjects, tAddresses table.Writer) {
+	extractDeployLogIds(workspace, tObjects)
+	extractEnvAddresses(workspace, tAddresses)
+}
+
+func extractDeployLogIds(workspace string, tObjects table.Writer) {
 	logPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")
 	file, err := os.Open(logPath) // #nosec G304
 	if err == nil {
@@ -178,31 +184,67 @@ func extractDynamicIds(workspace string, tObjects, tAddresses table.Writer) {
 	} else {
 		ui.Warn.Println("Could not read deploy.log, skipping dynamic resource IDs...")
 	}
+}
 
+func extractEnvAddresses(workspace string, tAddresses table.Writer) {
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
 	envFile, err := os.Open(envPath) // #nosec G304
 	if err == nil {
 		defer envFile.Close()
 		env := parseEnvLog(bufio.NewScanner(envFile))
 
-		if env.adminAddress != "" {
-			tAddresses.AppendRow(table.Row{"Admin", env.adminAddress})
-		} else if env.adminKey != "" {
-			tAddresses.AppendRow(table.Row{"Admin", "(Derived via Key: " + env.adminKey[:16] + "...)"})
-		}
-
-		if env.playerAAddress != "" {
-			tAddresses.AppendRow(table.Row{"Player A", env.playerAAddress})
-		} else if env.playerAKey != "" {
-			tAddresses.AppendRow(table.Row{"Player A", "(Derived via Key: " + env.playerAKey[:16] + "...)"})
-		}
-
-		if env.playerBAddress != "" {
-			tAddresses.AppendRow(table.Row{"Player B", env.playerBAddress})
-		} else if env.playerBKey != "" {
-			tAddresses.AppendRow(table.Row{"Player B", "(Derived via Key: " + env.playerBKey[:16] + "...)"})
-		}
+		appendRoleAddress(tAddresses, "Admin", "ef-admin", env.adminAddress, env.adminKey)
+		appendRoleAddress(tAddresses, "Player A", "ef-player-a", env.playerAAddress, env.playerAKey)
+		appendRoleAddress(tAddresses, "Player B", "ef-player-b", env.playerBAddress, env.playerBKey)
 	} else {
 		ui.Warn.Println("Could not read .env, skipping addresses...")
 	}
+}
+
+func appendRoleAddress(t table.Writer, role, alias, address, key string) {
+	if address != "" {
+		t.AppendRow(table.Row{role, address})
+		return
+	}
+	addr := resolveAddress(alias)
+	if addr != "" {
+		t.AppendRow(table.Row{role, addr})
+	} else if key != "" {
+		t.AppendRow(table.Row{role, "(Derived via Key: " + key[:16] + "...)"})
+	}
+}
+
+func resolveAddress(alias string) string {
+	// sui client addresses --json
+	out, err := exec.Command("sui", "client", "addresses", "--json").Output()
+	if err != nil {
+		return ""
+	}
+
+	// Sui 1.66 JSON structure: {"activeAddress": "...", "addresses": [["alias", "0x..."], ...]}
+	var data struct {
+		Addresses [][]string `json:"addresses"`
+	}
+	if err := json.Unmarshal(out, &data); err != nil {
+		// Fallback for older versions which might return a simple map[string]string or similar
+		var fallback map[string]string
+		if err := json.Unmarshal(out, &fallback); err == nil {
+			for addr, a := range fallback {
+				if a == alias || addr == alias {
+					return addr
+				}
+			}
+		}
+		return ""
+	}
+
+	for _, pair := range data.Addresses {
+		if len(pair) >= 2 {
+			if pair[0] == alias {
+				return pair[1]
+			}
+		}
+	}
+
+	return ""
 }
