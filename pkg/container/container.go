@@ -140,7 +140,7 @@ func (c *Client) Exec(containerName string, command []string) error {
 
 	// Print output if any, regardless of success/fail
 	if len(output) > 0 {
-		fmt.Print(string(output))
+		fmt.Printf("\n%s", string(output))
 	}
 
 	if err != nil {
