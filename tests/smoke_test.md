@@ -9,12 +9,12 @@ Run from the root of this repository unless otherwise stated.
 
 Ensure the following are installed and available on your `$PATH`:
 
-| Tool | Min version | Check |
-|------|-------------|-------|
-| Docker or Podman | Docker 24+ / Podman 4+ | `docker --version` or `podman --version` |
-| Git | any | `git --version` |
-| Node.js | ≥ 20 | `node --version` |
-| Sui CLI (optional) | any | `sui --version` |
+| Tool               | Min version            | Check                                    |
+| ------------------ | ---------------------- | ---------------------------------------- |
+| Docker or Podman   | Docker 24+ / Podman 4+ | `docker --version` or `podman --version` |
+| Git                | any                    | `git --version`                          |
+| Node.js            | ≥ 20                   | `node --version`                         |
+| Sui CLI (optional) | any                    | `sui --version`                          |
 
 ---
 
@@ -51,6 +51,7 @@ efctl env up
 ```
 
 **Expected output (in order):**
+
 - ✅ Prerequisites checked (Node, Docker/Podman, Git, Port 9000 free)
 - ✅ Clones `world-contracts` and `builder-scaffold` into the workspace
 - ✅ Builds and starts the `sui-playground` container
@@ -78,6 +79,7 @@ efctl env extension init
 ```
 
 **Expected output:**
+
 - ✅ `Copied world artifacts into builder-scaffold deployments.`
 - ✅ `Configured builder-scaffold .env.`
 - ✅ `builder-scaffold successfully initialized.`
@@ -101,12 +103,13 @@ efctl env extension publish smart_gate
 ```
 
 **Expected output:**
+
 - ✅ `Executing publish inside container at /workspace/builder-scaffold/move-contracts/smart_gate...`
 - ✅ `INCLUDING DEPENDENCY MoveStdlib` / `Sui` / `World`
 - ✅ `BUILDING smart_gate`
 - ✅ A JSON blob from the Sui CLI
 - ✅ `BUILDER_PACKAGE_ID = 0x...`
-- ✅ `EXTENSION_CONFIG_ID = 0x...` *(if the contract creates an ExtensionConfig object)*
+- ✅ `EXTENSION_CONFIG_ID = 0x...` _(if the contract creates an ExtensionConfig object)_
 - ✅ `builder-scaffold/.env updated with published IDs.`
 - ✅ `Extension contract published successfully.`
 
@@ -116,7 +119,7 @@ efctl env extension publish smart_gate
 efctl env extension publish smart_gate
 ```
 
-**Expected:** Same success output. Should **not** fail with *"Your package is already published"*.
+**Expected:** Same success output. Should **not** fail with _"Your package is already published"_.
 
 **Verify .env was updated:**
 
@@ -162,6 +165,7 @@ efctl env down
 ```
 
 **Expected output:**
+
 - ✅ Container `sui-playground` stopped and removed
 - ✅ Docker images removed
 - ✅ Volumes removed
@@ -186,14 +190,14 @@ rm -rf smoke-test
 
 ## Pass criteria
 
-| Step | Command | Pass condition |
-|------|---------|----------------|
-| 2 | `efctl --version` | Prints version |
-| 3 | `efctl env up` | `🌍 Environment is up!` line present |
-| 4 | `efctl env extension init` | `builder-scaffold successfully initialized.` |
-| 5 (first run) | `efctl env extension publish smart_gate` | `Extension contract published successfully.` |
-| 5 (second run) | `efctl env extension publish smart_gate` | Same success, no "already published" error |
-| 5 (.env) | `cat builder-scaffold/.env` | `BUILDER_PACKAGE_ID` and `EXTENSION_CONFIG_ID` set |
-| 6 | `efctl env run ...` | Output from inside container |
-| 7 | `efctl graphql object ...` | JSON object response |
-| 8 | `efctl env down` | Container removed |
+| Step           | Command                                  | Pass condition                                     |
+| -------------- | ---------------------------------------- | -------------------------------------------------- |
+| 2              | `efctl --version`                        | Prints version                                     |
+| 3              | `efctl env up`                           | `🌍 Environment is up!` line present               |
+| 4              | `efctl env extension init`               | `builder-scaffold successfully initialized.`       |
+| 5 (first run)  | `efctl env extension publish smart_gate` | `Extension contract published successfully.`       |
+| 5 (second run) | `efctl env extension publish smart_gate` | Same success, no "already published" error         |
+| 5 (.env)       | `cat builder-scaffold/.env`              | `BUILDER_PACKAGE_ID` and `EXTENSION_CONFIG_ID` set |
+| 6              | `efctl env run ...`                      | Output from inside container                       |
+| 7              | `efctl graphql object ...`               | JSON object response                               |
+| 8              | `efctl env down`                         | Container removed                                  |
