@@ -144,6 +144,21 @@ func (c *Client) Exec(containerName string, command []string) error {
 	return nil
 }
 
+// ExecCapture runs a command inside a container and returns the combined output.
+func (c *Client) ExecCapture(containerName string, command []string) (string, error) {
+	args := make([]string, 0, 2+len(command))
+	args = append(args, "exec", containerName)
+	args = append(args, command...)
+	cmd := exec.Command(c.Engine, args...) // #nosec G204
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("exec error: %w\n%s", err, string(output))
+	}
+
+	return string(output), nil
+}
+
 // Cleanup stops/removes the container, removes images, volumes
 func (c *Client) Cleanup() error {
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")

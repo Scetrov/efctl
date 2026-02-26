@@ -8,6 +8,7 @@
 
 - **Automated setup**: Fetches and prepares the local EVE Frontier environment in seconds.
 - **Smart Gate lifecycle**: Supports `up` and `down` commands to gracefully manage container lifecycles.
+- **Builder Flow automation**: Includes `extension` and `run` commands to quickly initialize, publish, and interact with extensions in the builder-scaffold container.
 - **GraphQL query tools**: Interact dynamically with the local Sui GraphQL RPC to query objects and packages.
 - **Dependency validation**: Quickly verifies mandatory local prerequisites (like Docker/Podman, Git, and open ports).
 

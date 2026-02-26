@@ -31,6 +31,41 @@ Tears down the local environment, stopping containers and cleaning up images/vol
 
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
+- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+---
+
+## Extension Flow
+
+The `extension` command groups operations defined in the EVE Frontier Builder Flow for Docker, automating the setup and publishing of custom extensions.
+
+### `efctl env extension init`
+
+Initializes the builder-scaffold by copying world artifacts `deployments/localnet` into the `builder-scaffold` directory and configuring its `.env` file inline.
+
+**Options:**
+
+- `-n, --network string`: The network to copy artifacts from (default: `localnet`)
+- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+### `efctl env extension publish [contract-path]`
+
+Publishes the custom extension to the smart assembly testnet and updates the builder.env. `[contract-path]` must be relative to `builder-scaffold/move-contracts`.
+
+**Options:**
+
+- `-n, --network string`: The network to publish to (default: `localnet`)
+
+---
+
+## Script Execution
+
+### `efctl env run [script-name] [args...]`
+
+Runs a predefined script (e.g. from `package.json`) or a custom command directly inside the container in the `/workspace/builder-scaffold` directory.
+
+Example: `efctl env run authorise-gate`
+
 ---
 
 ## GraphQL Interaction
