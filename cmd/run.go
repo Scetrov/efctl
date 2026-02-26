@@ -29,13 +29,13 @@ var runCmd = &cobra.Command{
 		}
 
 		// Prepare the command
-		// We use `pnpm run <script>` by default for convenience if passing a script name
-		// like "authorise-gate". If the user wants to pass arguments, we append them.
-
 		var bashCmd string
-		if len(scriptArgs) > 0 {
-			bashCmd = fmt.Sprintf("cd /workspace/builder-scaffold && pnpm %s %s", scriptName, strings.Join(scriptArgs, " "))
+		if len(scriptArgs) > 0 || strings.Contains(scriptName, " ") {
+			// If it contains spaces or has extra args, treat as a raw command
+			bashCmd = fmt.Sprintf("cd /workspace/builder-scaffold && %s %s", scriptName, strings.Join(scriptArgs, " "))
+			bashCmd = strings.TrimSpace(bashCmd)
 		} else {
+			// Otherwise default to pnpm for convenience
 			bashCmd = fmt.Sprintf("cd /workspace/builder-scaffold && pnpm %s", scriptName)
 		}
 
@@ -45,7 +45,7 @@ var runCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		ui.Success.Println(fmt.Sprintf("Script '%s' completed successfully.", scriptName))
+		ui.Success.Println(fmt.Sprintf("Execution of '%s' completed.", scriptName))
 	},
 }
 

@@ -131,10 +131,18 @@ func (c *Client) Exec(containerName string, command []string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Executing in %s...", containerName))
 
 	// We do not use -it because we don't have a tty
-	args := append([]string{"exec", containerName}, command...)
+	args := make([]string, 0, 2+len(command))
+	args = append(args, "exec", containerName)
+	args = append(args, command...)
 	cmd := exec.Command(c.Engine, args...) // #nosec G204
 
 	output, err := cmd.CombinedOutput()
+
+	// Print output if any, regardless of success/fail
+	if len(output) > 0 {
+		fmt.Print(string(output))
+	}
+
 	if err != nil {
 		spinner.Fail("Execution failed")
 		return fmt.Errorf("exec error: %w\n%s", err, string(output))
