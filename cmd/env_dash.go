@@ -39,7 +39,7 @@ var envDashCmd = &cobra.Command{
 		m := initialModel(engine, workspacePath)
 		f, _ := tea.LogToFile("/tmp/tea.log", "debug")
 		defer f.Close()
-		p := tea.NewProgram(m, tea.WithAltScreen())
+		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 		// Start log collection
 		ctx, cancel := context.WithCancel(context.Background())
@@ -66,6 +66,7 @@ var (
 	gray   = lipgloss.Color("#666666")
 	red    = lipgloss.Color("#FF4444")
 	green  = lipgloss.Color("#00CC66")
+	yellow = lipgloss.Color("#FFAA00")
 
 	headerStyle = lipgloss.NewStyle().
 			Foreground(dark).
@@ -101,8 +102,22 @@ type chainStat struct {
 	RecentTxs  []recentTx
 }
 
+type worldEvent struct {
+	EventType  string
+	Module     string
+	Sender     string
+	Age        string
+	ParsedJSON map[string]interface{}
+}
+
 type TickMsg time.Time
 type LogMsg string
+
+// restartUpMsg is sent after a successful env down to chain into env up during restart.
+type restartUpMsg struct {
+	upCmd *exec.Cmd
+}
+
 type StatsMsg struct {
 	Sui        containerStat
 	Pg         containerStat
@@ -113,6 +128,7 @@ type StatsMsg struct {
 	WorldObjs  map[string]string // component → object ID from extracted-object-ids.json
 	Addresses  map[string]string // role → address (Admin, Player A, Player B, Sponsor)
 	WorldPkgID string
+	Events     []worldEvent
 }
 
 func tickCmd() tea.Cmd {
@@ -208,6 +224,12 @@ func shortKind(kind string) string {
 		return "PrgTx"
 	case "ConsensusCommitPrologue", "ConsensusCommitPrologueV2", "ConsensusCommitPrologueV3":
 		return "Consensus"
+	case "AuthenticatorStateUpdate", "AuthenticatorStateUpdateV2":
+		return "AuthState"
+	case "RandomnessStateUpdate":
+		return "Randomness"
+	case "EndOfEpochTransaction":
+		return "EndEpoch"
 	case "ChangeEpoch":
 		return "Epoch"
 	case "Genesis":
@@ -449,7 +471,74 @@ func fetchStats(engine string, workspace string) StatsMsg {
 	msg.EnvVars = extractEnvVars(workspace)
 	msg.Addresses = buildAddresses(msg.Admin, msg.EnvVars)
 
+	if msg.WorldPkgID != "" && msg.Admin != "" && msg.Admin != "Unknown" && msg.Admin != "Not Found" {
+		msg.Events = fetchWorldEvents(client, msg.WorldPkgID, msg.Admin)
+	}
+
 	return msg
+}
+
+// fetchWorldEvents queries recent events emitted by the world package.
+// It queries events by Sender (admin) and filters to those matching the world package ID.
+func fetchWorldEvents(client *http.Client, pkgID string, admin string) []worldEvent {
+	var events []worldEvent
+
+	// Query events by sender (admin deploys and interacts with world contracts)
+	payload := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"suix_queryEvents","params":[{"Sender":"%s"},null,20,true]}`, admin)
+	req, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req) // #nosec G704 -- hardcoded localhost URL
+	if err != nil {
+		return events
+	}
+	var res struct {
+		Result struct {
+			Data []struct {
+				ID struct {
+					TxDigest string `json:"txDigest"`
+				} `json:"id"`
+				PackageID   string                 `json:"packageId"`
+				Module      string                 `json:"transactionModule"`
+				Sender      string                 `json:"sender"`
+				Type        string                 `json:"type"`
+				TimestampMs string                 `json:"timestampMs"`
+				ParsedJSON  map[string]interface{} `json:"parsedJson"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&res)
+	_ = resp.Body.Close()
+
+	for _, ev := range res.Result.Data {
+		// Only include events from the world package
+		if ev.PackageID != pkgID {
+			continue
+		}
+		age := "-"
+		if ms, err := strconv.ParseInt(ev.TimestampMs, 10, 64); err == nil {
+			age = formatAge(time.Since(time.UnixMilli(ms)))
+		}
+		sender := ev.Sender
+		if len(sender) > 14 {
+			sender = sender[:6] + ".." + sender[len(sender)-4:]
+		}
+		eventType := ev.Type
+		if idx := strings.LastIndex(eventType, "::"); idx >= 0 {
+			eventType = eventType[idx+2:]
+		}
+		if idx := strings.Index(eventType, "<"); idx >= 0 {
+			eventType = eventType[:idx]
+		}
+		events = append(events, worldEvent{
+			EventType:  eventType,
+			Module:     ev.Module,
+			Sender:     sender,
+			Age:        age,
+			ParsedJSON: ev.ParsedJSON,
+		})
+	}
+
+	return events
 }
 
 // deriveAddress uses sui keytool to derive an address from a bech32 private key.
@@ -558,9 +647,18 @@ type model struct {
 	addresses      map[string]string
 	worldPkgID     string
 	logs           []string
+	logScroll      int          // lines scrolled up from the bottom (0 = tailing)
+	graphqlOn      bool         // whether GraphQL/Indexer is currently enabled
+	worldEvents    []worldEvent // recent events from the world package
 }
 
 func initialModel(engine string, workspace string) model {
+	// Detect whether GraphQL is currently enabled by checking the override file
+	gqlOn := false
+	overridePath := filepath.Join(workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
+	if _, err := os.Stat(overridePath); err == nil {
+		gqlOn = true
+	}
 	return model{
 		engine:    engine,
 		workspace: workspace,
@@ -568,6 +666,7 @@ func initialModel(engine string, workspace string) model {
 		suiStat:   containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
 		pgStat:    containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
 		adminAddr: "Checking...",
+		graphqlOn: gqlOn,
 	}
 }
 
@@ -575,67 +674,162 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
 		func() tea.Msg { return fetchStats(m.engine, m.workspace) },
+		tea.SetWindowTitle("efctl dashboard"),
 	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
+	case tea.MouseMsg:
+		m.handleMouseScroll(msg)
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "r":
-			// run up
-			c := exec.Command("efctl", "env", "up", "-w", m.workspace) // #nosec G204 -- workspace path from trusted CLI flag
-			return m, tea.ExecProcess(c, func(err error) tea.Msg {
-				if err != nil {
-					return LogMsg("Error running env up: " + err.Error())
-				}
-				return LogMsg("Env UP completed.")
-			})
-		case "d":
-			// run down
-			c := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204 -- workspace path from trusted CLI flag
-			return m, tea.ExecProcess(c, func(err error) tea.Msg {
-				if err != nil {
-					return LogMsg("Error running env down: " + err.Error())
-				}
-				return LogMsg("Env DOWN completed.")
-			})
-		}
-
+		return m.handleKeyMsg(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
 	case TickMsg:
 		return m, tea.Batch(
 			tickCmd(),
 			func() tea.Msg { return fetchStats(m.engine, m.workspace) },
 		)
-
 	case StatsMsg:
-		m.suiStat = msg.Sui
-		m.pgStat = msg.Pg
-		m.chainInfo = msg.Chain
-		m.recentTxs = msg.Chain.RecentTxs
-		m.objectTrackers = msg.Objects
-		m.adminAddr = msg.Admin
-		m.envVars = msg.EnvVars
-		m.worldObjs = msg.WorldObjs
-		m.addresses = msg.Addresses
-		m.worldPkgID = msg.WorldPkgID
-
+		m.applyStats(msg)
+	case restartUpMsg:
+		return m, tea.ExecProcess(msg.upCmd, func(err error) tea.Msg {
+			if err != nil {
+				return LogMsg("Error during restart (up): " + err.Error())
+			}
+			return LogMsg("Environment restarted successfully.")
+		})
 	case LogMsg:
 		m.logs = append(m.logs, string(msg))
-		// Keep only the last 100 log lines to avoid unbounded memory growth
-		if len(m.logs) > 100 {
-			m.logs = m.logs[len(m.logs)-100:]
+		if len(m.logs) > 500 {
+			m.logs = m.logs[len(m.logs)-500:]
 		}
 	}
-
 	return m, nil
+}
+
+// handleMouseScroll adjusts logScroll for mouse wheel events.
+func (m *model) handleMouseScroll(msg tea.MouseMsg) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.logScroll += 3
+		if ms := m.maxLogScroll(); m.logScroll > ms {
+			m.logScroll = ms
+		}
+	case tea.MouseButtonWheelDown:
+		m.logScroll -= 3
+		if m.logScroll < 0 {
+			m.logScroll = 0
+		}
+	}
+}
+
+// clampScroll clamps logScroll within [0, maxLogScroll].
+func (m *model) clampScroll() {
+	if ms := m.maxLogScroll(); m.logScroll > ms {
+		m.logScroll = ms
+	}
+	if m.logScroll < 0 {
+		m.logScroll = 0
+	}
+}
+
+// handleKeyMsg processes keyboard input and returns the updated model and command.
+func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		m.logScroll++
+		m.clampScroll()
+	case "down", "j":
+		m.logScroll--
+		m.clampScroll()
+	case "home":
+		m.logScroll = m.maxLogScroll()
+	case "end":
+		m.logScroll = 0
+	case "pgup":
+		m.logScroll += 20
+		m.clampScroll()
+	case "pgdown":
+		m.logScroll -= 20
+		m.clampScroll()
+	case "r":
+		return m.handleRestart()
+	case "d":
+		return m.handleEnvDown()
+	case "g":
+		return m.handleEnableGraphQL()
+	}
+	return m, nil
+}
+
+// handleRestart runs env down then env up, preserving --with-graphql if enabled.
+func (m model) handleRestart() (tea.Model, tea.Cmd) {
+	args := []string{"env", "up", "-w", m.workspace}
+	if m.graphqlOn {
+		args = append(args, "--with-graphql")
+	}
+	downCmd := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204
+	upArgs := args
+	return m, tea.ExecProcess(downCmd, func(err error) tea.Msg {
+		if err != nil {
+			return LogMsg("Error during restart (down): " + err.Error())
+		}
+		upCmd := exec.Command("efctl", upArgs...) // #nosec G204
+		return restartUpMsg{upCmd: upCmd}
+	})
+}
+
+// handleEnvDown runs efctl env down.
+func (m model) handleEnvDown() (tea.Model, tea.Cmd) {
+	c := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return LogMsg("Error running env down: " + err.Error())
+		}
+		return LogMsg("Env DOWN completed.")
+	})
+}
+
+// handleEnableGraphQL enables GraphQL if not already on.
+func (m model) handleEnableGraphQL() (tea.Model, tea.Cmd) {
+	if !m.graphqlOn {
+		c := exec.Command("efctl", "env", "up", "-w", m.workspace, "--with-graphql") // #nosec G204
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			if err != nil {
+				return LogMsg("Error enabling GraphQL: " + err.Error())
+			}
+			return LogMsg("GraphQL enabled successfully.")
+		})
+	}
+	return m, nil
+}
+
+// applyStats updates the model with fresh stats data.
+func (m *model) applyStats(msg StatsMsg) {
+	m.suiStat = msg.Sui
+	m.pgStat = msg.Pg
+	m.chainInfo = msg.Chain
+	m.recentTxs = msg.Chain.RecentTxs
+	m.objectTrackers = msg.Objects
+	m.adminAddr = msg.Admin
+	m.envVars = msg.EnvVars
+	m.worldObjs = msg.WorldObjs
+	m.addresses = msg.Addresses
+	m.worldPkgID = msg.WorldPkgID
+	m.worldEvents = msg.Events
+	overridePath := filepath.Join(m.workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
+	m.graphqlOn = fileExists(overridePath)
+}
+
+// fileExists returns true if the path exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // borderStr renders s in the border (cyan) colour.
@@ -643,11 +837,39 @@ func borderStr(s string) string {
 	return lipgloss.NewStyle().Foreground(cyan).Render(s)
 }
 
-// efctlLogoLines holds the raw (uncolored) pterm BigText for "EFCTL".
+// logViewportRows returns the number of log lines visible in the log panel
+// given the current terminal height and number of world events.
+func logViewportRows(height, numEvents int) int {
+	headerH := 1
+	available := height - headerH
+	topRows := (available * 30) / 100
+	if topRows < 8 {
+		topRows = 8
+	}
+	// Events are now side-by-side with logs, so they don't consume vertical space
+	botRows := available - topRows - 3 // 3 = top/mid/bottom borders
+	if botRows < 3 {
+		botRows = 3
+	}
+	return botRows
+}
+
+// maxLogScroll returns the maximum logScroll value so the viewport
+// never extends beyond the first log line.
+func (m model) maxLogScroll() int {
+	viewport := logViewportRows(m.height, len(m.worldEvents))
+	max := len(m.logs) - viewport
+	if max < 0 {
+		return 0
+	}
+	return max
+}
+
+// efctlLogoLines holds the raw (uncolored) pterm BigText for "> EFCTL".
 var efctlLogoLines []string
 
 func init() {
-	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("EFCTL")).Srender()
+	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("> EFCTL")).Srender()
 	for _, line := range strings.Split(raw, "\n") {
 		clean := pterm.RemoveColorFromString(line)
 		if strings.TrimSpace(clean) != "" {
@@ -660,14 +882,15 @@ func renderLogo() []string {
 	result := make([]string, len(efctlLogoLines))
 	for i, line := range efctlLogoLines {
 		runes := []rune(line)
+		numCols := float64(max(len(runes)-1, 1))
 		var out strings.Builder
 		for j, r := range runes {
-			// Gradient from cyan (#00FFFF) to orange (#FF7400)
-			t := float64(j) / float64(max(len(runes)-1, 1))
-			red := int(0 + t*255)
-			grn := int(255 - t*(255-116))
-			blu := int(255 - t*255)
-			c := lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", red, grn, blu))
+			// Linear horizontal gradient from cyan (#00FFFF) to orange (#FF7400)
+			t := float64(j) / numCols
+			rd := int(t * 255)
+			gn := int(255 - t*(255-116))
+			bl := int(255 - t*255)
+			c := lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", rd, gn, bl))
 			out.WriteString(lipgloss.NewStyle().Foreground(c).Render(string(r)))
 		}
 		result[i] = out.String()
@@ -816,95 +1039,153 @@ func buildBottomBorder(totalW int, footer string) string {
 		borderStr(strings.Repeat("─", d)+"╯")
 }
 
+// buildFullBorder builds: ├─ Title ──────────────┤ (full width, no junction)
+func buildFullBorder(totalW int, title string) string {
+	tw := lipgloss.Width(title)
+	d := totalW - 5 - tw
+	if d < 0 {
+		d = 0
+	}
+	return borderStr("├─") + " " + labelStyle.Render(title) + " " +
+		borderStr(strings.Repeat("─", d)+"┤")
+}
+
+// buildSplitMiddleBorder builds: ├─ LeftTitle ──┼─ RightTitle ──┤
+// Used when a vertical divider continues through top and bottom sections.
+func buildSplitMiddleBorder(leftW, rightW int, leftTitle, rightTitle string) string {
+	ltw := lipgloss.Width(leftTitle)
+	rtw := lipgloss.Width(rightTitle)
+	ld := leftW - 3 - ltw
+	if ld < 0 {
+		ld = 0
+	}
+	rd := rightW - 3 - rtw
+	if rd < 0 {
+		rd = 0
+	}
+	return borderStr("├─") + " " + labelStyle.Render(leftTitle) + " " +
+		borderStr(strings.Repeat("─", ld)+"┼─") + " " + labelStyle.Render(rightTitle) + " " +
+		borderStr(strings.Repeat("─", rd)+"┤")
+}
+
+// buildBottomBorderWithJunction builds: ╰─ footer ──┴──────╯
+// Places a ┴ junction at the vertical divider position.
+func buildBottomBorderWithJunction(totalW, leftW int, footer string) string {
+	fw := lipgloss.Width(footer)
+	totalDashes := totalW - 5 - fw
+	if totalDashes < 0 {
+		totalDashes = 0
+	}
+	junction := leftW - 3 - fw
+	if junction >= 0 && junction < totalDashes {
+		return borderStr("╰─") + " " + grayStyle.Render(footer) + " " +
+			borderStr(strings.Repeat("─", junction)+"┴"+strings.Repeat("─", totalDashes-junction-1)+"╯")
+	}
+	// Junction falls outside dashes — skip it
+	return borderStr("╰─") + " " + grayStyle.Render(footer) + " " +
+		borderStr(strings.Repeat("─", totalDashes)+"╯")
+}
+
 func (m model) View() string {
 	if m.width == 0 {
 		return "Initializing..."
 	}
 
-	// ── Header bar ──
-	uptime := time.Since(m.startTime).Round(time.Second)
-	headerTitle := fmt.Sprintf(" efctl dashboard | Uptime: %v ", uptime)
-	padLen := m.width - lipgloss.Width(headerTitle)
-	if padLen < 0 {
-		padLen = 0
-	}
-	header := headerStyle.Width(m.width).Render(headerTitle + strings.Repeat(" ", padLen))
+	header := m.renderHeader()
 	headerH := lipgloss.Height(header)
 
 	// ── Layout geometry ──
-	// Frame uses shared borders for a masonry look:
-	//   ╭─ Container ─┬─ Chain ──────╮
-	//   │             │              │
-	//   ├─ Env Info ──┤              │
-	//   │             │              │
-	//   ├─ Logs ──────┴──────────────┤
-	//   │                            │
-	//   ╰─ keybindings ─────────────╯
-	//
-	// Horizontal: 1(│) + leftInner + 1(│) + rightInner + 1(│) = width
-	leftInner := (m.width - 3) / 2
-	rightInner := m.width - 3 - leftInner
-	logInner := m.width - 2
+	leftInner, rightInner, logInner := m.panelWidths()
+	hasEvents := len(m.worldEvents) > 0
 
-	if leftInner < 1 {
-		leftInner = 1
-	}
-	if rightInner < 1 {
-		rightInner = 1
-	}
-	if logInner < 1 {
-		logInner = 1
-	}
-
-	// Vertical budget:
-	// headerH + topBorder(1) + containerRows + leftMidBorder(1) + envRows + midBorder(1) + logRows + botBorder(1)
+	// Vertical budget
 	available := m.height - headerH
-	topRows := (available * 2) / 5
-	if topRows < 8 {
-		topRows = 8
-	}
-	// Split top rows: container panel gets ~40%, env panel gets ~60%
-	containerRows := topRows * 2 / 5
-	if containerRows < 3 {
-		containerRows = 3
-	}
-	envRows := topRows - containerRows - 1 // -1 for the left-mid border
-	if envRows < 3 {
-		envRows = 3
-	}
-	rightRows := containerRows + envRows + 1 // right panel spans full height including left-mid border line
-	botRows := available - topRows - 3
-	if botRows < 3 {
-		botRows = 3
-	}
+	containerRows := 4
+	topRows := max((available*30)/100, 8)
+	envRows := max(topRows-containerRows-1, 3)
+	rightRows := containerRows + envRows + 1
+	botRows := max(available-topRows-3, 3)
 
 	// ── Render panel content ──
 	containerLines := padLines(renderToLines(m.renderContainerContent(), leftInner), containerRows, leftInner)
 	envLines := padLines(renderToLines(m.renderEnvContent(), leftInner), envRows, leftInner)
 	rightLines := padLines(renderToLines(m.renderRightContent(rightRows), rightInner), rightRows, rightInner)
 
-	maxLogs := botRows
-	startIdx := len(m.logs) - maxLogs
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	coloredLogs := make([]string, len(m.logs[startIdx:]))
-	for i, line := range m.logs[startIdx:] {
-		coloredLogs[i] = colorizeLogLine(line)
-	}
-	logLines := padLines(renderToLines(strings.Join(coloredLogs, "\n"), logInner), botRows, logInner)
-	logLines = overlayLogo(logLines, logInner)
+	logW, logLines, eventLines := m.renderBottomPanels(hasEvents, botRows, leftInner, rightInner, logInner)
 
 	// ── Assemble frame ──
 	var out strings.Builder
 	out.WriteString(header)
 	out.WriteByte('\n')
+	m.writeTopSection(&out, leftInner, rightInner, containerRows, envRows, containerLines, envLines, rightLines)
+	m.writeBottomSection(&out, hasEvents, botRows, leftInner, rightInner, logW, logLines, eventLines)
 
-	// Top border
-	out.WriteString(buildTopBorder(leftInner, rightInner, "Container Status", "Chain Info"))
+	return out.String()
+}
+
+// renderHeader builds the header bar showing service status and uptime.
+func (m model) renderHeader() string {
+	uptime := time.Since(m.startTime).Round(time.Second)
+	suiUp := "UP"
+	if m.suiStat.Status != "Running" {
+		suiUp = "DOWN"
+	}
+	dbUp := "UP"
+	if m.pgStat.Status != "Running" {
+		dbUp = "DOWN"
+	}
+	gqlStatus := "gql:OFF"
+	if m.graphqlOn {
+		gqlStatus = "gql:ON"
+	}
+	headerTitle := fmt.Sprintf(" efctl dashboard │ sui:%s  db:%s  %s │ Uptime: %v ", suiUp, dbUp, gqlStatus, uptime)
+	padLen := m.width - lipgloss.Width(headerTitle)
+	if padLen < 0 {
+		padLen = 0
+	}
+	return headerStyle.Width(m.width).Render(headerTitle + strings.Repeat(" ", padLen))
+}
+
+// panelWidths returns the inner widths for left, right, and full-width panels.
+func (m model) panelWidths() (leftInner, rightInner, logInner int) {
+	leftInner = max((m.width-3)/2, 1)
+	rightInner = max(m.width-3-leftInner, 1)
+	logInner = max(m.width-2, 1)
+	return
+}
+
+// renderBottomPanels prepares the events and log line arrays for the bottom section.
+func (m model) renderBottomPanels(hasEvents bool, botRows, leftInner, rightInner, logInner int) (int, []string, []string) {
+	var eventLines []string
+	logW := logInner
+	if hasEvents {
+		eventLines = padLines(renderToLines(m.renderEventsContent(botRows, leftInner), leftInner), botRows, leftInner)
+		logW = rightInner
+	}
+
+	endIdx := len(m.logs) - m.logScroll
+	if endIdx < 0 {
+		endIdx = 0
+	}
+	startIdx := endIdx - botRows
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	visibleLogs := m.logs[startIdx:endIdx]
+	coloredLogs := make([]string, len(visibleLogs))
+	for i, line := range visibleLogs {
+		coloredLogs[i] = colorizeLogLine(line)
+	}
+	logLines := padLines(renderToLines(strings.Join(coloredLogs, "\n"), logW), botRows, logW)
+	logLines = overlayLogo(logLines, logW)
+	return logW, logLines, eventLines
+}
+
+// writeTopSection writes the Services/Environment + Chain rows to the output.
+func (m model) writeTopSection(out *strings.Builder, leftInner, rightInner, containerRows, envRows int, containerLines, envLines, rightLines []string) {
+	out.WriteString(buildTopBorder(leftInner, rightInner, "Services", "Chain"))
 	out.WriteByte('\n')
 
-	// Container rows (top-left) + right panel rows
 	rightIdx := 0
 	for i := 0; i < containerRows; i++ {
 		out.WriteString(borderStr("│") + containerLines[i] + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
@@ -912,113 +1193,157 @@ func (m model) View() string {
 		rightIdx++
 	}
 
-	// Left-mid border row (Environment Info title) + right panel continues
-	leftMidBorder := buildLeftMidBorder(leftInner, "Environment Info")
-	out.WriteString(leftMidBorder + rightLines[rightIdx] + borderStr("│"))
+	out.WriteString(buildLeftMidBorder(leftInner, "Environment") + rightLines[rightIdx] + borderStr("│"))
 	out.WriteByte('\n')
 	rightIdx++
 
-	// Environment rows (bottom-left) + right panel rows
 	for i := 0; i < envRows; i++ {
 		out.WriteString(borderStr("│") + envLines[i] + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
 		out.WriteByte('\n')
 		rightIdx++
 	}
+}
 
-	// Middle border (logs)
-	out.WriteString(buildMiddleBorder(m.width, leftInner, "Combined Log View"))
-	out.WriteByte('\n')
-
-	// Log rows
-	for i := 0; i < botRows; i++ {
-		out.WriteString(borderStr("│") + logLines[i] + borderStr("│"))
-		out.WriteByte('\n')
+// writeBottomSection writes the Events+Logs (split) or Logs (full-width) rows and footer.
+func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows, leftInner, rightInner, logW int, logLines, eventLines []string) {
+	logTitle := "Logs ● LIVE"
+	if m.logScroll > 0 {
+		logTitle = fmt.Sprintf("Logs ‖ PAUSED (↑%d lines)", m.logScroll)
 	}
 
-	// Bottom border with keybindings
-	out.WriteString(buildBottomBorder(m.width, "[r] env up | [d] env down | [q] quit"))
+	if hasEvents {
+		eventsTitle := fmt.Sprintf("World Events (%d)", len(m.worldEvents))
+		if m.logScroll > 0 {
+			logTitle = fmt.Sprintf("Logs ‖ PAUSED (↑%d)", m.logScroll)
+		}
+		out.WriteString(buildSplitMiddleBorder(leftInner, rightInner, eventsTitle, logTitle))
+		out.WriteByte('\n')
+		for i := 0; i < botRows; i++ {
+			out.WriteString(borderStr("│") + eventLines[i] + borderStr("│") + logLines[i] + borderStr("│"))
+			out.WriteByte('\n')
+		}
+	} else {
+		out.WriteString(buildMiddleBorder(m.width, leftInner, logTitle))
+		out.WriteByte('\n')
+		for i := 0; i < botRows; i++ {
+			out.WriteString(borderStr("│") + logLines[i] + borderStr("│"))
+			out.WriteByte('\n')
+		}
+	}
 
-	return out.String()
+	footerKeys := "[r] restart  [d] env down  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
+	if !m.graphqlOn {
+		footerKeys = "[r] restart  [d] env down  [g] enable graphql  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
+	}
+	if hasEvents {
+		out.WriteString(buildBottomBorderWithJunction(m.width, leftInner, footerKeys))
+	} else {
+		out.WriteString(buildBottomBorder(m.width, footerKeys))
+	}
 }
 
 func (m model) renderContainerContent() string {
 	var b bytes.Buffer
-	b.WriteString("\n sui-playground\n")
-	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n\n", renderStatus(m.suiStat.Status), m.suiStat.CPU, m.suiStat.Mem))
-	b.WriteString(" database\n")
-	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n", renderStatus(m.pgStat.Status), m.pgStat.CPU, m.pgStat.Mem))
+	renderRow := func(name string, stat containerStat) {
+		dot := lipgloss.NewStyle().Foreground(green).Bold(true).Render("●")
+		if stat.Status == "Stopped" {
+			dot = lipgloss.NewStyle().Foreground(red).Bold(true).Render("●")
+		} else if stat.Status != "Running" {
+			dot = lipgloss.NewStyle().Foreground(yellow).Bold(true).Render("●")
+		}
+		b.WriteString(fmt.Sprintf(" %s %-18s %s %-7s  %s %s\n",
+			dot, name,
+			grayStyle.Render("CPU"), valueStyle.Render(stat.CPU),
+			grayStyle.Render("Mem"), valueStyle.Render(stat.Mem)))
+	}
+	b.WriteString("\n")
+	renderRow("sui-playground", m.suiStat)
+	renderRow("database", m.pgStat)
+	b.WriteString("\n")
 	return b.String()
 }
 
 func (m model) renderEnvContent() string {
 	var b bytes.Buffer
+	shorten := m.hexShortener()
 
-	// Compute max display length for values based on panel width.
-	// leftInner = (width-3)/2; content area = leftInner - 2 (padding); label prefix ~18 chars.
+	b.WriteString("\n")
+	m.writeEnvConfig(&b, shorten)
+	m.writeEnvAddresses(&b, shorten)
+	m.writeEnvObjects(&b, shorten)
+
+	return b.String()
+}
+
+// hexShortener returns a function that abbreviates hex values for readability.
+func (m model) hexShortener() func(string) string {
 	maxVal := (m.width-3)/2 - 20
 	if maxVal < 10 {
 		maxVal = 10
 	}
-
-	// Shorten a value only when it exceeds the available width.
-	shorten := func(s string) string {
-		if len(s) > maxVal {
-			return s[:maxVal-3] + "..."
+	return func(s string) string {
+		if len(s) <= maxVal {
+			return s
 		}
-		return s
+		if strings.HasPrefix(s, "0x") && len(s) > 16 {
+			return s[:10] + "…" + s[len(s)-4:]
+		}
+		return s[:maxVal-1] + "…"
 	}
+}
 
-	b.WriteString("\n")
-
-	// ── Configuration ──
+// writeEnvConfig writes network/RPC/tenant config lines.
+func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 	network := "localnet"
 	if v, ok := m.envVars["SUI_NETWORK"]; ok {
 		network = v
 	}
-	b.WriteString(labelStyle.Render(" Network:  ") + " " + network)
-	b.WriteString("   " + labelStyle.Render("RPC: ") + " http://localhost:9000")
+	b.WriteString(labelStyle.Render(" Network:") + " " + valueStyle.Render(network))
+	b.WriteString("   " + labelStyle.Render("RPC:") + " " + valueStyle.Render("http://localhost:9000"))
 	if v, ok := m.envVars["TENANT"]; ok {
-		b.WriteString("   " + labelStyle.Render("Tenant: ") + " " + v)
+		b.WriteString("   " + labelStyle.Render("Tenant:") + " " + valueStyle.Render(v))
 	}
 	b.WriteString("\n")
-
-	// ── Package ──
 	if m.worldPkgID != "" {
-		b.WriteString(labelStyle.Render(" World Pkg:") + " " + shorten(m.worldPkgID) + "\n")
+		b.WriteString(labelStyle.Render(" World Pkg:") + " " + valueStyle.Render(shorten(m.worldPkgID)) + "\n")
 	}
+}
 
-	// ── Addresses ──
-	if len(m.addresses) > 0 {
-		b.WriteString("\n " + labelStyle.Render("Addresses") + "\n")
-		// Ordered display
-		for _, role := range []string{"Admin", "Sponsor", "Player A", "Player B"} {
-			if addr, ok := m.addresses[role]; ok {
-				b.WriteString(fmt.Sprintf("  %-9s %s\n", labelStyle.Render(role), shorten(addr)))
-			}
+// writeEnvAddresses writes the addresses section.
+func (m model) writeEnvAddresses(b *bytes.Buffer, shorten func(string) string) {
+	if len(m.addresses) == 0 {
+		return
+	}
+	b.WriteString("\n " + labelStyle.Render("Addresses") + "\n")
+	for _, role := range []string{"Admin", "Sponsor", "Player A", "Player B"} {
+		if addr, ok := m.addresses[role]; ok {
+			b.WriteString(fmt.Sprintf("  %-10s %s\n", labelStyle.Render(role), valueStyle.Render(shorten(addr))))
 		}
 	}
+}
 
-	// ── World Objects ──
-	if len(m.worldObjs) > 0 {
-		b.WriteString("\n " + labelStyle.Render("Objects") + "\n")
-		for _, key := range []string{"governorCap", "adminAcl", "objectRegistry", "serverAddressRegistry", "energyConfig", "fuelConfig", "gateConfig"} {
-			if v, ok := m.worldObjs[key]; ok {
-				label := humanizeCamelCase(key)
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", labelStyle.Render(label), grayStyle.Render(shorten(v))))
-			}
-		}
-		// Any remaining keys not in the ordered list
-		for k, v := range m.worldObjs {
-			switch k {
-			case "governorCap", "adminAcl", "objectRegistry", "serverAddressRegistry", "energyConfig", "fuelConfig", "gateConfig":
-				continue
-			}
-			label := humanizeCamelCase(k)
-			b.WriteString(fmt.Sprintf("  %-20s %s\n", labelStyle.Render(label), grayStyle.Render(shorten(v))))
+// writeEnvObjects writes the world objects section.
+func (m model) writeEnvObjects(b *bytes.Buffer, shorten func(string) string) {
+	if len(m.worldObjs) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("\n "+labelStyle.Render("Objects")+" %s\n", grayStyle.Render(fmt.Sprintf("(%d)", len(m.worldObjs)))))
+	knownKeys := []string{"governorCap", "adminAcl", "objectRegistry", "serverAddressRegistry", "energyConfig", "fuelConfig", "gateConfig"}
+	for _, key := range knownKeys {
+		if v, ok := m.worldObjs[key]; ok {
+			b.WriteString(fmt.Sprintf("  %-22s %s\n", labelStyle.Render(humanizeCamelCase(key)), grayStyle.Render(shorten(v))))
 		}
 	}
-
-	return b.String()
+	knownSet := make(map[string]bool, len(knownKeys))
+	for _, k := range knownKeys {
+		knownSet[k] = true
+	}
+	for k, v := range m.worldObjs {
+		if knownSet[k] {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("  %-22s %s\n", labelStyle.Render(humanizeCamelCase(k)), grayStyle.Render(shorten(v))))
+	}
 }
 
 // humanizeCamelCase converts "governorCap" to "Governor Cap", etc.
@@ -1043,33 +1368,73 @@ func humanizeCamelCase(s string) string {
 func (m model) renderRightContent(topRows int) string {
 	var b bytes.Buffer
 	b.WriteString("\n")
-	b.WriteString(labelStyle.Render(" Checkpoint:   ") + valueStyle.Render(formatWithCommas(m.chainInfo.Checkpoint)) + "\n")
-	b.WriteString(labelStyle.Render(" Transactions: ") + valueStyle.Render(formatWithCommas(m.chainInfo.TxCount)) + "\n")
-	b.WriteString(labelStyle.Render(" Epoch:        ") + valueStyle.Render(m.chainInfo.Epoch) + "\n")
+	b.WriteString(fmt.Sprintf(" %s %s     %s %s\n",
+		labelStyle.Render("Checkpoint:"),
+		valueStyle.Render(formatWithCommas(m.chainInfo.Checkpoint)),
+		labelStyle.Render("Epoch:"),
+		valueStyle.Render(m.chainInfo.Epoch)))
+	b.WriteString(fmt.Sprintf(" %s %s\n",
+		labelStyle.Render("Transactions:"),
+		valueStyle.Render(formatWithCommas(m.chainInfo.TxCount))))
 
-	// Recent transactions -- adaptive: fill remaining rows
-	// Fixed lines above: 1 blank + 3 stats = 4
-	fixedLines := 4
-	availForTx := topRows - fixedLines - 2 // 2 = header line + blank line before txs
+	// Recent transactions with column headers — adaptive to available rows
+	fixedLines := 3                        // blank + 2 stat lines
+	availForTx := topRows - fixedLines - 3 // 3 = blank + title + column header
 	if availForTx > 0 && len(m.recentTxs) > 0 {
-		b.WriteString("\nRecent Transactions\n\n")
+		b.WriteString("\n " + labelStyle.Render("Recent Transactions") + "\n")
+		b.WriteString(grayStyle.Render("  ST  SENDER          TYPE        GAS       AGE") + "\n")
 		showCount := availForTx
 		if showCount > len(m.recentTxs) {
 			showCount = len(m.recentTxs)
 		}
 		for i := 0; i < showCount; i++ {
 			tx := m.recentTxs[i]
-			statusStr := grayStyle.Render(tx.Status)
+			statusIcon := grayStyle.Render(" ?")
 			if tx.Status == "success" {
-				statusStr = valueStyle.Render("OK")
+				statusIcon = lipgloss.NewStyle().Foreground(green).Render(" ✓")
 			} else if tx.Status == "failure" {
-				statusStr = lipgloss.NewStyle().Foreground(red).Render("FAIL")
+				statusIcon = lipgloss.NewStyle().Foreground(red).Render(" ✗")
 			}
-			senderStr := grayStyle.Render(tx.Sender)
-			kindStr := grayStyle.Render(fmt.Sprintf("%-9s", tx.Kind))
-			gasStr := grayStyle.Render(fmt.Sprintf("%8s", tx.GasUsed))
-			ageStr := grayStyle.Render(fmt.Sprintf("%4s", tx.Age))
-			b.WriteString(fmt.Sprintf("  %-6s %s  %s %s %s\n", statusStr, senderStr, kindStr, gasStr, ageStr))
+			senderStr := grayStyle.Render(fmt.Sprintf("%-14s", tx.Sender))
+			kindStr := grayStyle.Render(fmt.Sprintf("%-10s", tx.Kind))
+			gasStr := grayStyle.Render(fmt.Sprintf("%9s", tx.GasUsed))
+			ageStr := grayStyle.Render(fmt.Sprintf("%5s", tx.Age))
+			b.WriteString(fmt.Sprintf("  %s %s  %s %s %s\n", statusIcon, senderStr, kindStr, gasStr, ageStr))
+		}
+	}
+	return b.String()
+}
+
+func (m model) renderEventsContent(maxRows int, panelW int) string {
+	var b bytes.Buffer
+	b.WriteString("\n")
+
+	// Adaptive columns based on panel width
+	// Narrow panel: EVENT + MODULE + AGE
+	// Wide panel (≥70): add SENDER column
+	wide := panelW >= 70
+	if wide {
+		b.WriteString(grayStyle.Render("  EVENT                        MODULE                SENDER          AGE") + "\n")
+	} else {
+		b.WriteString(grayStyle.Render("  EVENT                    MODULE          AGE") + "\n")
+	}
+	showCount := maxRows - 2 // subtract blank + column header line
+	if showCount > len(m.worldEvents) {
+		showCount = len(m.worldEvents)
+	}
+	for i := 0; i < showCount; i++ {
+		ev := m.worldEvents[i]
+		if wide {
+			eventStr := valueStyle.Render(fmt.Sprintf("%-28s", ev.EventType))
+			moduleStr := grayStyle.Render(fmt.Sprintf("%-20s", ev.Module))
+			senderStr := grayStyle.Render(fmt.Sprintf("%-14s", ev.Sender))
+			ageStr := grayStyle.Render(fmt.Sprintf("%5s", ev.Age))
+			b.WriteString(fmt.Sprintf("  %s  %s  %s  %s\n", eventStr, moduleStr, senderStr, ageStr))
+		} else {
+			eventStr := valueStyle.Render(fmt.Sprintf("%-24s", ev.EventType))
+			moduleStr := grayStyle.Render(fmt.Sprintf("%-14s", ev.Module))
+			ageStr := grayStyle.Render(fmt.Sprintf("%5s", ev.Age))
+			b.WriteString(fmt.Sprintf("  %s  %s  %s\n", eventStr, moduleStr, ageStr))
 		}
 	}
 	return b.String()
