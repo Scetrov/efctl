@@ -104,12 +104,15 @@ type chainStat struct {
 type TickMsg time.Time
 type LogMsg string
 type StatsMsg struct {
-	Sui     containerStat
-	Pg      containerStat
-	Chain   chainStat
-	Objects []string
-	Admin   string
-	EnvVars map[string]string
+	Sui        containerStat
+	Pg         containerStat
+	Chain      chainStat
+	Objects    []string
+	Admin      string
+	EnvVars    map[string]string
+	WorldObjs  map[string]string // component → object ID from extracted-object-ids.json
+	Addresses  map[string]string // role → address (Admin, Player A, Player B, Sponsor)
+	WorldPkgID string
 }
 
 func tickCmd() tea.Cmd {
@@ -234,6 +237,9 @@ func colorizeLogLine(line string) string {
 	if strings.HasPrefix(line, "[docker]") {
 		return lipgloss.NewStyle().Foreground(cyan).Render("[docker]") + line[8:]
 	}
+	if strings.HasPrefix(line, "[db]") {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#CC88FF")).Render("[db]") + line[4:]
+	}
 	if strings.HasPrefix(line, "[deploy]") {
 		return lipgloss.NewStyle().Foreground(green).Render("[deploy]") + line[8:]
 	}
@@ -357,67 +363,113 @@ func fetchChainInfo(client *http.Client) chainStat {
 	return info
 }
 
-func fetchStats(engine string, workspace string) StatsMsg {
-	msg := StatsMsg{
-		Sui: containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
-		Pg:  containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
-	}
-
-	// fetch container stats
+// parseContainerStats parses docker stats output into sui and postgres container stats.
+func parseContainerStats(engine string) (sui, pg containerStat) {
+	sui = containerStat{Status: "Stopped", CPU: "-", Mem: "-"}
+	pg = containerStat{Status: "Stopped", CPU: "-", Mem: "-"}
 	out, err := exec.Command(engine, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output() // #nosec G204
-	if err == nil {
-		lines := strings.Split(string(out), "\n")
-		for _, l := range lines {
-			parts := strings.Split(l, "\t")
-			if len(parts) >= 3 {
-				name := strings.TrimSpace(parts[0])
-				if name == container.ContainerSuiPlayground {
-					msg.Sui.Status = "Running"
-					msg.Sui.CPU = parts[1]
-					msg.Sui.Mem = parts[2]
-				}
-				if name == container.ContainerPostgres {
-					msg.Pg.Status = "Running"
-					msg.Pg.CPU = parts[1]
-					msg.Pg.Mem = parts[2]
-				}
+	if err != nil {
+		return
+	}
+	for _, l := range strings.Split(string(out), "\n") {
+		parts := strings.Split(l, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == container.ContainerSuiPlayground {
+			sui = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+		}
+		if name == container.ContainerPostgres || name == container.ContainerPostgresOld {
+			pg = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+		}
+	}
+	return
+}
+
+// extractWorldObjects reads the extracted-object-ids.json and returns world objects and package ID.
+func extractWorldObjects(workspace string) (objs map[string]string, pkgID string) {
+	objs = make(map[string]string)
+	extractFile := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
+	data, err := os.ReadFile(extractFile) // #nosec G304 -- path constructed from known workspace prefix
+	if err != nil {
+		return
+	}
+	var objMap map[string]interface{}
+	if json.Unmarshal(data, &objMap) != nil {
+		return
+	}
+	world, ok := objMap["world"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for k, v := range world {
+		if str, ok := v.(string); ok {
+			if k == "packageId" {
+				pkgID = str
+			} else {
+				objs[k] = str
 			}
 		}
 	}
+	return
+}
+
+// buildAddresses assembles the role→address map from env vars and derived keys.
+func buildAddresses(admin string, envVars map[string]string) map[string]string {
+	addrs := make(map[string]string)
+	if admin != "" && admin != "Unknown" && admin != "Not Found" {
+		addrs["Admin"] = admin
+	}
+	if v, ok := envVars["SPONSOR_ADDRESS"]; ok {
+		addrs["Sponsor"] = v
+	}
+	if pk, ok := envVars["PLAYER_A_PRIVATE_KEY"]; ok {
+		if addr := deriveAddress(pk); addr != "" {
+			addrs["Player A"] = addr
+		}
+	}
+	if pk, ok := envVars["PLAYER_B_PRIVATE_KEY"]; ok {
+		if addr := deriveAddress(pk); addr != "" {
+			addrs["Player B"] = addr
+		}
+	}
+	return addrs
+}
+
+func fetchStats(engine string, workspace string) StatsMsg {
+	msg := StatsMsg{}
+	msg.Sui, msg.Pg = parseContainerStats(engine)
 
 	client := &http.Client{Timeout: 1 * time.Second}
 	msg.Chain = fetchChainInfo(client)
 
-	// Check extracted objects
-	extractFile := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
-	if data, err := os.ReadFile(extractFile); err == nil { // #nosec G304 -- path constructed from known workspace prefix
-		var objMap map[string]interface{}
-		if json.Unmarshal(data, &objMap) == nil {
-			for k, v := range objMap {
-				if str, ok := v.(string); ok {
-					// Only keep first few chars or handle them nicely
-					shortObj := str
-					if len(str) > 10 {
-						shortObj = str[:6] + "..." + str[len(str)-4:]
-					}
-					msg.Objects = append(msg.Objects, fmt.Sprintf("%-20s %s", k, shortObj))
-				}
-			}
-		}
-	}
-
-	// Admin
+	msg.WorldObjs, msg.WorldPkgID = extractWorldObjects(workspace)
 	msg.Admin = extractAdmin(workspace)
-
-	// Environment variables
 	msg.EnvVars = extractEnvVars(workspace)
+	msg.Addresses = buildAddresses(msg.Admin, msg.EnvVars)
 
 	return msg
 }
 
-func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) {
-	// 1. Container logs
-	cmd := exec.CommandContext(ctx, engine, "logs", "-f", "--tail", "20", container.ContainerSuiPlayground) // #nosec G204
+// deriveAddress uses sui keytool to derive an address from a bech32 private key.
+func deriveAddress(privkey string) string {
+	out, err := exec.Command("sui", "keytool", "import", privkey, "ed25519", "--json").Output() // #nosec G204 -- privkey from trusted .env file
+	if err != nil {
+		return ""
+	}
+	var res struct {
+		SuiAddress string `json:"suiAddress"`
+	}
+	if json.Unmarshal(out, &res) == nil {
+		return res.SuiAddress
+	}
+	return ""
+}
+
+// streamContainerLogs starts tailing a container's logs and sends lines with the given prefix.
+func streamContainerLogs(ctx context.Context, p *tea.Program, engine, containerName, prefix string) {
+	cmd := exec.CommandContext(ctx, engine, "logs", "-f", "--tail", "20", containerName) // #nosec G204
 	stdout, err := cmd.StdoutPipe()
 	cmd.Stderr = cmd.Stdout
 	if err == nil {
@@ -425,12 +477,28 @@ func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) 
 			go func() {
 				scanner := bufio.NewScanner(stdout)
 				for scanner.Scan() {
-					p.Send(LogMsg(fmt.Sprintf("[docker] %s", scanner.Text())))
+					p.Send(LogMsg(fmt.Sprintf("%s %s", prefix, scanner.Text())))
 				}
 				_ = cmd.Wait() // Reclaim process
 			}()
 		}
 	}
+}
+
+func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) {
+	// 1. Sui container logs
+	streamContainerLogs(ctx, p, engine, container.ContainerSuiPlayground, "[docker]")
+
+	// 2. Database container logs (try both naming conventions)
+	dbContainer := container.ContainerPostgres
+	// Check which name is running
+	if out, err := exec.Command(engine, "ps", "--format", "{{.Names}}").Output(); err == nil { // #nosec G204
+		names := string(out)
+		if strings.Contains(names, container.ContainerPostgresOld) {
+			dbContainer = container.ContainerPostgresOld
+		}
+	}
+	streamContainerLogs(ctx, p, engine, dbContainer, "[db]")
 
 	// 2. Deploy logs
 	deployLogPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")
@@ -486,6 +554,9 @@ type model struct {
 	objectTrackers []string
 	adminAddr      string
 	envVars        map[string]string
+	worldObjs      map[string]string
+	addresses      map[string]string
+	worldPkgID     string
 	logs           []string
 }
 
@@ -552,6 +623,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectTrackers = msg.Objects
 		m.adminAddr = msg.Admin
 		m.envVars = msg.EnvVars
+		m.worldObjs = msg.WorldObjs
+		m.addresses = msg.Addresses
+		m.worldPkgID = msg.WorldPkgID
 
 	case LogMsg:
 		m.logs = append(m.logs, string(msg))
@@ -894,32 +968,76 @@ func (m model) renderEnvContent() string {
 		return s
 	}
 
-	adminDisp := shorten(m.adminAddr)
 	b.WriteString("\n")
-	b.WriteString(labelStyle.Render(" ADMIN_ADDRESS:  ") + " " + adminDisp + "\n")
 
-	if v, ok := m.envVars["SPONSOR_ADDRESS"]; ok {
-		b.WriteString(labelStyle.Render(" SPONSOR_ADDR:   ") + " " + shorten(v) + "\n")
-	}
-
+	// ── Configuration ──
 	network := "localnet"
 	if v, ok := m.envVars["SUI_NETWORK"]; ok {
 		network = v
 	}
-	b.WriteString(labelStyle.Render(" SUI_NETWORK:    ") + " " + network + "\n")
-	b.WriteString(labelStyle.Render(" RPC URL:        ") + " http://localhost:9000\n")
-
-	if v, ok := m.envVars["WORLD_PACKAGE_ID"]; ok {
-		b.WriteString(labelStyle.Render(" WORLD_PKG:      ") + " " + shorten(v) + "\n")
-	}
-	if v, ok := m.envVars["BUILDER_PACKAGE_ID"]; ok {
-		b.WriteString(labelStyle.Render(" BUILDER_PKG:    ") + " " + shorten(v) + "\n")
-	}
+	b.WriteString(labelStyle.Render(" Network:  ") + " " + network)
+	b.WriteString("   " + labelStyle.Render("RPC: ") + " http://localhost:9000")
 	if v, ok := m.envVars["TENANT"]; ok {
-		b.WriteString(labelStyle.Render(" TENANT:         ") + " " + v + "\n")
+		b.WriteString("   " + labelStyle.Render("Tenant: ") + " " + v)
+	}
+	b.WriteString("\n")
+
+	// ── Package ──
+	if m.worldPkgID != "" {
+		b.WriteString(labelStyle.Render(" World Pkg:") + " " + shorten(m.worldPkgID) + "\n")
+	}
+
+	// ── Addresses ──
+	if len(m.addresses) > 0 {
+		b.WriteString("\n " + labelStyle.Render("Addresses") + "\n")
+		// Ordered display
+		for _, role := range []string{"Admin", "Sponsor", "Player A", "Player B"} {
+			if addr, ok := m.addresses[role]; ok {
+				b.WriteString(fmt.Sprintf("  %-9s %s\n", labelStyle.Render(role), shorten(addr)))
+			}
+		}
+	}
+
+	// ── World Objects ──
+	if len(m.worldObjs) > 0 {
+		b.WriteString("\n " + labelStyle.Render("Objects") + "\n")
+		for _, key := range []string{"governorCap", "adminAcl", "objectRegistry", "serverAddressRegistry", "energyConfig", "fuelConfig", "gateConfig"} {
+			if v, ok := m.worldObjs[key]; ok {
+				label := humanizeCamelCase(key)
+				b.WriteString(fmt.Sprintf("  %-20s %s\n", labelStyle.Render(label), grayStyle.Render(shorten(v))))
+			}
+		}
+		// Any remaining keys not in the ordered list
+		for k, v := range m.worldObjs {
+			switch k {
+			case "governorCap", "adminAcl", "objectRegistry", "serverAddressRegistry", "energyConfig", "fuelConfig", "gateConfig":
+				continue
+			}
+			label := humanizeCamelCase(k)
+			b.WriteString(fmt.Sprintf("  %-20s %s\n", labelStyle.Render(label), grayStyle.Render(shorten(v))))
+		}
 	}
 
 	return b.String()
+}
+
+// humanizeCamelCase converts "governorCap" to "Governor Cap", etc.
+func humanizeCamelCase(s string) string {
+	var words []string
+	start := 0
+	for i := 1; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			words = append(words, s[start:i])
+			start = i
+		}
+	}
+	words = append(words, s[start:])
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 func (m model) renderRightContent(topRows int) string {
@@ -927,27 +1045,12 @@ func (m model) renderRightContent(topRows int) string {
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render(" Checkpoint:   ") + valueStyle.Render(formatWithCommas(m.chainInfo.Checkpoint)) + "\n")
 	b.WriteString(labelStyle.Render(" Transactions: ") + valueStyle.Render(formatWithCommas(m.chainInfo.TxCount)) + "\n")
-	b.WriteString(labelStyle.Render(" Epoch:        ") + valueStyle.Render(m.chainInfo.Epoch) + "\n\n")
-
-	b.WriteString("Object Tracker\n\n")
-
-	if len(m.objectTrackers) == 0 {
-		b.WriteString(grayStyle.Render("  No objects tracked yet.\n"))
-	} else {
-		for _, obj := range m.objectTrackers {
-			b.WriteString(fmt.Sprintf("  %s\n", obj))
-		}
-	}
+	b.WriteString(labelStyle.Render(" Epoch:        ") + valueStyle.Render(m.chainInfo.Epoch) + "\n")
 
 	// Recent transactions -- adaptive: fill remaining rows
-	// Fixed lines above: 1 blank + 3 stats + 1 blank + 1 header + 1 blank + object lines + 1 blank
-	fixedLines := 8
-	objLines := len(m.objectTrackers)
-	if objLines == 0 {
-		objLines = 1 // "No objects tracked yet."
-	}
-	usedLines := fixedLines + objLines
-	availForTx := topRows - usedLines - 2 // 2 = header line + blank line before txs
+	// Fixed lines above: 1 blank + 3 stats = 4
+	fixedLines := 4
+	availForTx := topRows - fixedLines - 2 // 2 = header line + blank line before txs
 	if availForTx > 0 && len(m.recentTxs) > 0 {
 		b.WriteString("\nRecent Transactions\n\n")
 		showCount := availForTx
