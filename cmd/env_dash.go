@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,11 +81,18 @@ type containerStat struct {
 	Mem    string
 }
 
+type recentTx struct {
+	Digest string
+	Status string
+	Kind   string
+	Age    string
+}
+
 type chainStat struct {
 	Checkpoint string
 	Epoch      string
 	TxCount    string
-	RecentTxs  []string
+	RecentTxs  []recentTx
 }
 
 type TickMsg time.Time
@@ -116,6 +124,20 @@ func extractAdmin(workspace string) string {
 		return matches[1]
 	}
 	return "Not Found"
+}
+
+// formatAge converts a duration into a short human-readable string.
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func fetchChainInfo(client *http.Client) chainStat {
@@ -163,14 +185,27 @@ func fetchChainInfo(client *http.Client) chainStat {
 	}
 
 	// Recent transactions (descending order, up to 20)
-	rpcPayloadRecent := `{"jsonrpc":"2.0","id":1,"method":"suix_queryTransactionBlocks","params":[{"options":{"showInput":false}},null,20,true]}`
+	rpcPayloadRecent := `{"jsonrpc":"2.0","id":1,"method":"suix_queryTransactionBlocks","params":[{"options":{"showInput":true,"showEffects":true}},null,20,true]}`
 	rpcReqRecent, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadRecent))
 	rpcReqRecent.Header.Set("Content-Type", "application/json")
 	if resp, err := client.Do(rpcReqRecent); err == nil { // #nosec G704 -- hardcoded localhost URL
 		var res struct {
 			Result struct {
 				Data []struct {
-					Digest string `json:"digest"`
+					Digest      string `json:"digest"`
+					TimestampMs string `json:"timestampMs"`
+					Transaction struct {
+						Data struct {
+							Transaction struct {
+								Kind string `json:"kind"`
+							} `json:"transaction"`
+						} `json:"data"`
+					} `json:"transaction"`
+					Effects struct {
+						Status struct {
+							Status string `json:"status"`
+						} `json:"status"`
+					} `json:"effects"`
 				} `json:"data"`
 			} `json:"result"`
 		}
@@ -180,7 +215,24 @@ func fetchChainInfo(client *http.Client) chainStat {
 			if len(d) > 16 {
 				d = d[:8] + "..." + d[len(d)-4:]
 			}
-			info.RecentTxs = append(info.RecentTxs, d)
+			age := "-"
+			if ms, err := strconv.ParseInt(tx.TimestampMs, 10, 64); err == nil {
+				age = formatAge(time.Since(time.UnixMilli(ms)))
+			}
+			status := tx.Effects.Status.Status
+			if status == "" {
+				status = "?"
+			}
+			kind := tx.Transaction.Data.Transaction.Kind
+			if kind == "" {
+				kind = "tx"
+			}
+			info.RecentTxs = append(info.RecentTxs, recentTx{
+				Digest: d,
+				Status: status,
+				Kind:   kind,
+				Age:    age,
+			})
 		}
 		_ = resp.Body.Close()
 	}
@@ -310,7 +362,7 @@ type model struct {
 	suiStat        containerStat
 	pgStat         containerStat
 	chainInfo      chainStat
-	recentTxs      []string
+	recentTxs      []recentTx
 	objectTrackers []string
 	adminAddr      string
 	logs           []string
@@ -615,7 +667,17 @@ func (m model) renderRightContent(topRows int) string {
 			showCount = len(m.recentTxs)
 		}
 		for i := 0; i < showCount; i++ {
-			b.WriteString(grayStyle.Render(fmt.Sprintf("  %s", m.recentTxs[i])) + "\n")
+			tx := m.recentTxs[i]
+			statusStr := grayStyle.Render(tx.Status)
+			if tx.Status == "success" {
+				statusStr = valueStyle.Render("OK")
+			} else if tx.Status == "failure" {
+				statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Render("FAIL")
+			}
+			kindStr := grayStyle.Render(fmt.Sprintf("%-16s", tx.Kind))
+			digestStr := grayStyle.Render(tx.Digest)
+			ageStr := grayStyle.Render(tx.Age)
+			b.WriteString(fmt.Sprintf("  %-6s %s %s %s\n", statusStr, kindStr, digestStr, ageStr))
 		}
 	}
 	return b.String()
