@@ -84,6 +84,7 @@ type chainStat struct {
 	Checkpoint string
 	Epoch      string
 	TxCount    string
+	RecentTxs  []string
 }
 
 type TickMsg time.Time
@@ -117,6 +118,76 @@ func extractAdmin(workspace string) string {
 	return "Not Found"
 }
 
+func fetchChainInfo(client *http.Client) chainStat {
+	info := chainStat{Checkpoint: "Offline", TxCount: "-", Epoch: "-"}
+
+	// Checkpoint
+	rpcPayload := `{"jsonrpc":"2.0","id":1,"method":"sui_getLatestCheckpointSequenceNumber","params":[]}`
+	rpcReq, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayload))
+	rpcReq.Header.Set("Content-Type", "application/json")
+	if resp, err := client.Do(rpcReq); err == nil { // #nosec G704 -- hardcoded localhost URL
+		var res struct {
+			Result string `json:"result"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		info.Checkpoint = res.Result
+		_ = resp.Body.Close()
+	}
+
+	// Total transactions
+	rpcPayloadTx := `{"jsonrpc":"2.0","id":1,"method":"sui_getTotalTransactionBlocks","params":[]}`
+	rpcReqTx, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadTx))
+	rpcReqTx.Header.Set("Content-Type", "application/json")
+	if resp, err := client.Do(rpcReqTx); err == nil { // #nosec G704 -- hardcoded localhost URL
+		var res struct {
+			Result string `json:"result"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		info.TxCount = res.Result
+		_ = resp.Body.Close()
+	}
+
+	// Epoch
+	rpcPayloadEpoch := `{"jsonrpc":"2.0","id":1,"method":"sui_getLatestSuiSystemState","params":[]}`
+	rpcReqEpoch, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadEpoch))
+	rpcReqEpoch.Header.Set("Content-Type", "application/json")
+	if resp, err := client.Do(rpcReqEpoch); err == nil { // #nosec G704 -- hardcoded localhost URL
+		var res struct {
+			Result map[string]interface{} `json:"result"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		if ep, ok := res.Result["epoch"].(string); ok {
+			info.Epoch = ep
+		}
+		_ = resp.Body.Close()
+	}
+
+	// Recent transactions (descending order, up to 20)
+	rpcPayloadRecent := `{"jsonrpc":"2.0","id":1,"method":"suix_queryTransactionBlocks","params":[{"options":{"showInput":false}},null,20,true]}`
+	rpcReqRecent, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadRecent))
+	rpcReqRecent.Header.Set("Content-Type", "application/json")
+	if resp, err := client.Do(rpcReqRecent); err == nil { // #nosec G704 -- hardcoded localhost URL
+		var res struct {
+			Result struct {
+				Data []struct {
+					Digest string `json:"digest"`
+				} `json:"data"`
+			} `json:"result"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		for _, tx := range res.Result.Data {
+			d := tx.Digest
+			if len(d) > 16 {
+				d = d[:8] + "..." + d[len(d)-4:]
+			}
+			info.RecentTxs = append(info.RecentTxs, d)
+		}
+		_ = resp.Body.Close()
+	}
+
+	return info
+}
+
 func fetchStats(engine string, workspace string) StatsMsg {
 	msg := StatsMsg{
 		Sui: containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
@@ -146,53 +217,7 @@ func fetchStats(engine string, workspace string) StatsMsg {
 	}
 
 	client := &http.Client{Timeout: 1 * time.Second}
-
-	// fetch chain info via JSON RPC
-	rpcPayload := `{"jsonrpc":"2.0","id":1,"method":"sui_getLatestCheckpointSequenceNumber","params":[]}`
-	rpcReq, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayload))
-	rpcReq.Header.Set("Content-Type", "application/json")
-	if resp, err := client.Do(rpcReq); err == nil { // #nosec G704 -- hardcoded localhost URL
-		var res struct {
-			Result string `json:"result"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&res)
-		msg.Chain.Checkpoint = res.Result
-		_ = resp.Body.Close()
-	} else {
-		msg.Chain.Checkpoint = "Offline"
-	}
-
-	// Check total txs
-	rpcPayloadTx := `{"jsonrpc":"2.0","id":1,"method":"sui_getTotalTransactionBlocks","params":[]}`
-	rpcReqTx, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadTx))
-	rpcReqTx.Header.Set("Content-Type", "application/json")
-	if resp, err := client.Do(rpcReqTx); err == nil { // #nosec G704 -- hardcoded localhost URL
-		var res struct {
-			Result string `json:"result"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&res)
-		msg.Chain.TxCount = res.Result
-		_ = resp.Body.Close()
-	} else {
-		msg.Chain.TxCount = "-"
-	}
-
-	// Check epoch
-	rpcPayloadEpoch := `{"jsonrpc":"2.0","id":1,"method":"sui_getLatestSuiSystemState","params":[]}`
-	rpcReqEpoch, _ := http.NewRequest("POST", "http://localhost:9000", strings.NewReader(rpcPayloadEpoch))
-	rpcReqEpoch.Header.Set("Content-Type", "application/json")
-	if resp, err := client.Do(rpcReqEpoch); err == nil { // #nosec G704 -- hardcoded localhost URL
-		var res struct {
-			Result map[string]interface{} `json:"result"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&res)
-		if ep, ok := res.Result["epoch"].(string); ok {
-			msg.Chain.Epoch = ep
-		}
-		_ = resp.Body.Close()
-	} else {
-		msg.Chain.Epoch = "-"
-	}
+	msg.Chain = fetchChainInfo(client)
 
 	// Check extracted objects
 	extractFile := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
@@ -285,6 +310,7 @@ type model struct {
 	suiStat        containerStat
 	pgStat         containerStat
 	chainInfo      chainStat
+	recentTxs      []string
 	objectTrackers []string
 	adminAddr      string
 	logs           []string
@@ -349,6 +375,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.suiStat = msg.Sui
 		m.pgStat = msg.Pg
 		m.chainInfo = msg.Chain
+		m.recentTxs = msg.Chain.RecentTxs
 		m.objectTrackers = msg.Objects
 		m.adminAddr = msg.Admin
 
@@ -491,7 +518,7 @@ func (m model) View() string {
 
 	// ── Render panel content ──
 	leftLines := padLines(renderToLines(m.renderLeftContent(), leftInner), topRows, leftInner)
-	rightLines := padLines(renderToLines(m.renderRightContent(), rightInner), topRows, rightInner)
+	rightLines := padLines(renderToLines(m.renderRightContent(topRows), rightInner), topRows, rightInner)
 
 	maxLogs := botRows
 	startIdx := len(m.logs) - maxLogs
@@ -555,7 +582,7 @@ func (m model) renderLeftContent() string {
 	return b.String()
 }
 
-func (m model) renderRightContent() string {
+func (m model) renderRightContent(topRows int) string {
 	var b bytes.Buffer
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render(" Checkpoint:   ") + valueStyle.Render(m.chainInfo.Checkpoint) + "\n")
@@ -569,6 +596,26 @@ func (m model) renderRightContent() string {
 	} else {
 		for _, obj := range m.objectTrackers {
 			b.WriteString(fmt.Sprintf("  %s\n", obj))
+		}
+	}
+
+	// Recent transactions -- adaptive: fill remaining rows
+	// Fixed lines above: 1 blank + 3 stats + 1 blank + 1 header + 1 blank + object lines + 1 blank
+	fixedLines := 8
+	objLines := len(m.objectTrackers)
+	if objLines == 0 {
+		objLines = 1 // "No objects tracked yet."
+	}
+	usedLines := fixedLines + objLines
+	availForTx := topRows - usedLines - 2 // 2 = header line + blank line before txs
+	if availForTx > 0 && len(m.recentTxs) > 0 {
+		b.WriteString("\nRecent Transactions\n\n")
+		showCount := availForTx
+		if showCount > len(m.recentTxs) {
+			showCount = len(m.recentTxs)
+		}
+		for i := 0; i < showCount; i++ {
+			b.WriteString(grayStyle.Render(fmt.Sprintf("  %s", m.recentTxs[i])) + "\n")
 		}
 	}
 	return b.String()
