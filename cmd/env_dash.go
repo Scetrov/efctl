@@ -650,8 +650,7 @@ func (m model) View() string {
 
 	// Left-mid border row (Environment Info title) + right panel continues
 	leftMidBorder := buildLeftMidBorder(leftInner, "Environment Info")
-	// Pad to exact leftInner+2 visual width, then add │ + right + │
-	out.WriteString(leftMidBorder + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
+	out.WriteString(leftMidBorder + rightLines[rightIdx] + borderStr("│"))
 	out.WriteByte('\n')
 	rightIdx++
 
