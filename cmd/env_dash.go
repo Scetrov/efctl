@@ -63,6 +63,7 @@ var (
 	white  = lipgloss.Color("#FFFFFF")
 	gray   = lipgloss.Color("#666666")
 	red    = lipgloss.Color("#FF4444")
+	green  = lipgloss.Color("#00CC66")
 
 	headerStyle = lipgloss.NewStyle().
 			Foreground(dark).
@@ -83,10 +84,12 @@ type containerStat struct {
 }
 
 type recentTx struct {
-	Digest string
-	Status string
-	Kind   string
-	Age    string
+	Digest  string
+	Status  string
+	Kind    string
+	Age     string
+	Sender  string
+	GasUsed string
 }
 
 type chainStat struct {
@@ -193,6 +196,48 @@ func formatWithCommas(s string) string {
 	return sign + string(buf)
 }
 
+// shortKind abbreviates common Sui transaction kind names.
+func shortKind(kind string) string {
+	switch kind {
+	case "ProgrammableTransaction":
+		return "PrgTx"
+	case "ConsensusCommitPrologue", "ConsensusCommitPrologueV2", "ConsensusCommitPrologueV3":
+		return "Consensus"
+	case "ChangeEpoch":
+		return "Epoch"
+	case "Genesis":
+		return "Genesis"
+	default:
+		if len(kind) > 10 {
+			return kind[:10]
+		}
+		return kind
+	}
+}
+
+// formatGas computes net gas used from Sui gas fields and returns a compact string.
+func formatGas(computation, storage, rebate string) string {
+	comp, _ := strconv.ParseInt(computation, 10, 64)
+	stor, _ := strconv.ParseInt(storage, 10, 64)
+	reb, _ := strconv.ParseInt(rebate, 10, 64)
+	total := comp + stor - reb
+	if total <= 0 {
+		return "-"
+	}
+	return formatWithCommas(strconv.FormatInt(total, 10))
+}
+
+// colorizeLogLine applies colour to log line prefixes.
+func colorizeLogLine(line string) string {
+	if strings.HasPrefix(line, "[docker]") {
+		return lipgloss.NewStyle().Foreground(cyan).Render("[docker]") + line[8:]
+	}
+	if strings.HasPrefix(line, "[deploy]") {
+		return lipgloss.NewStyle().Foreground(green).Render("[deploy]") + line[8:]
+	}
+	return line
+}
+
 func fetchChainInfo(client *http.Client) chainStat {
 	info := chainStat{Checkpoint: "Offline", TxCount: "-", Epoch: "-"}
 
@@ -249,6 +294,7 @@ func fetchChainInfo(client *http.Client) chainStat {
 					TimestampMs string `json:"timestampMs"`
 					Transaction struct {
 						Data struct {
+							Sender      string `json:"sender"`
 							Transaction struct {
 								Kind string `json:"kind"`
 							} `json:"transaction"`
@@ -258,6 +304,11 @@ func fetchChainInfo(client *http.Client) chainStat {
 						Status struct {
 							Status string `json:"status"`
 						} `json:"status"`
+						GasUsed struct {
+							ComputationCost string `json:"computationCost"`
+							StorageCost     string `json:"storageCost"`
+							StorageRebate   string `json:"storageRebate"`
+						} `json:"gasUsed"`
 					} `json:"effects"`
 				} `json:"data"`
 			} `json:"result"`
@@ -266,7 +317,7 @@ func fetchChainInfo(client *http.Client) chainStat {
 		for _, tx := range res.Result.Data {
 			d := tx.Digest
 			if len(d) > 16 {
-				d = d[:8] + "..." + d[len(d)-4:]
+				d = d[:8] + ".." + d[len(d)-4:]
 			}
 			age := "-"
 			if ms, err := strconv.ParseInt(tx.TimestampMs, 10, 64); err == nil {
@@ -280,11 +331,22 @@ func fetchChainInfo(client *http.Client) chainStat {
 			if kind == "" {
 				kind = "tx"
 			}
+			sender := tx.Transaction.Data.Sender
+			if len(sender) > 14 {
+				sender = sender[:6] + ".." + sender[len(sender)-4:]
+			}
+			gas := formatGas(
+				tx.Effects.GasUsed.ComputationCost,
+				tx.Effects.GasUsed.StorageCost,
+				tx.Effects.GasUsed.StorageRebate,
+			)
 			info.RecentTxs = append(info.RecentTxs, recentTx{
-				Digest: d,
-				Status: status,
-				Kind:   kind,
-				Age:    age,
+				Digest:  d,
+				Status:  status,
+				Kind:    shortKind(kind),
+				Age:     age,
+				Sender:  sender,
+				GasUsed: gas,
 			})
 		}
 		_ = resp.Body.Close()
@@ -660,7 +722,11 @@ func (m model) View() string {
 	if startIdx < 0 {
 		startIdx = 0
 	}
-	logLines := padLines(renderToLines(strings.Join(m.logs[startIdx:], "\n"), logInner), botRows, logInner)
+	coloredLogs := make([]string, len(m.logs[startIdx:]))
+	for i, line := range m.logs[startIdx:] {
+		coloredLogs[i] = colorizeLogLine(line)
+	}
+	logLines := padLines(renderToLines(strings.Join(coloredLogs, "\n"), logInner), botRows, logInner)
 
 	// ── Assemble frame ──
 	var out strings.Builder
@@ -801,12 +867,13 @@ func (m model) renderRightContent(topRows int) string {
 			if tx.Status == "success" {
 				statusStr = valueStyle.Render("OK")
 			} else if tx.Status == "failure" {
-				statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Render("FAIL")
+				statusStr = lipgloss.NewStyle().Foreground(red).Render("FAIL")
 			}
-			kindStr := grayStyle.Render(fmt.Sprintf("%-16s", tx.Kind))
-			digestStr := grayStyle.Render(tx.Digest)
-			ageStr := grayStyle.Render(tx.Age)
-			b.WriteString(fmt.Sprintf("  %-6s %s %s %s\n", statusStr, kindStr, digestStr, ageStr))
+			senderStr := grayStyle.Render(tx.Sender)
+			kindStr := grayStyle.Render(fmt.Sprintf("%-9s", tx.Kind))
+			gasStr := grayStyle.Render(fmt.Sprintf("%8s", tx.GasUsed))
+			ageStr := grayStyle.Render(fmt.Sprintf("%4s", tx.Age))
+			b.WriteString(fmt.Sprintf("  %-6s %s  %s %s %s\n", statusStr, senderStr, kindStr, gasStr, ageStr))
 		}
 	}
 	return b.String()
