@@ -567,6 +567,93 @@ func borderStr(s string) string {
 	return lipgloss.NewStyle().Foreground(cyan).Render(s)
 }
 
+// efctlLogo returns a compact ASCII art logo with cyan→orange gradient.
+var efctlLogoLines = []string{
+	"┏━━┓┏━━┓┏━━┓┏━━━━┓┏┓   ",
+	"┃┏━┛┃┏━┛┃┏━┛┗━┓┓━┛┃┃   ",
+	"┃┗━┓┃┗━┓┃┃    ┃┃  ┃┃   ",
+	"┃┏━┛┃┏━┛┃┃    ┃┃  ┃┃   ",
+	"┃┗━┓┃┃  ┃┗━┓ ┃┃  ┃┗━┓ ",
+	"┗━━┛┗┛  ┗━━┛ ┗┛  ┗━━┛ ",
+}
+
+func renderLogo() []string {
+	result := make([]string, len(efctlLogoLines))
+	for i, line := range efctlLogoLines {
+		runes := []rune(line)
+		var out strings.Builder
+		for j, r := range runes {
+			// Gradient from cyan (#00FFFF) to orange (#FF7400)
+			t := float64(j) / float64(max(len(runes)-1, 1))
+			red := int(0 + t*255)
+			grn := int(255 - t*(255-116))
+			blu := int(255 - t*255)
+			c := lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", red, grn, blu))
+			out.WriteString(lipgloss.NewStyle().Foreground(c).Render(string(r)))
+		}
+		result[i] = out.String()
+	}
+	return result
+}
+
+// overlayLogo places the gradient logo on the bottom-right of the log lines.
+func overlayLogo(logLines []string, innerW int) []string {
+	logo := renderLogo()
+	logoW := lipgloss.Width(efctlLogoLines[0])
+	logoH := len(logo)
+	if len(logLines) < logoH || innerW < logoW+4 {
+		return logLines // not enough space
+	}
+	for i := 0; i < logoH; i++ {
+		row := len(logLines) - logoH + i
+		line := logLines[row]
+		// Place logo with 2-char right margin
+		padLeft := innerW - logoW - 2
+		if padLeft < 0 {
+			padLeft = 0
+		}
+		// Take existing content up to padLeft, then logo, then fill
+		var runes []rune
+		for _, r := range line {
+			runes = append(runes, r)
+		}
+		leftPart := strings.Repeat(" ", padLeft)
+		if lipgloss.Width(line) >= padLeft {
+			// truncate visible content to padLeft width
+			leftPart = truncateToWidth(line, padLeft)
+		}
+		combined := leftPart + logo[i]
+		cw := lipgloss.Width(combined)
+		if cw < innerW {
+			combined += strings.Repeat(" ", innerW-cw)
+		}
+		logLines[row] = combined
+	}
+	return logLines
+}
+
+// truncateToWidth truncates a styled string to at most maxW visible characters.
+func truncateToWidth(s string, maxW int) string {
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	// Byte-by-byte approach: take characters until width reached
+	var out strings.Builder
+	for _, r := range s {
+		out.WriteRune(r)
+		if lipgloss.Width(out.String()) >= maxW {
+			break
+		}
+	}
+	// Pad if needed
+	result := out.String()
+	w := lipgloss.Width(result)
+	if w < maxW {
+		result += strings.Repeat(" ", maxW-w)
+	}
+	return result
+}
+
 // renderToLines renders content with 1-char horizontal padding into a
 // slice of lines, each exactly innerW visual characters wide.
 func renderToLines(content string, innerW int) []string {
@@ -727,6 +814,7 @@ func (m model) View() string {
 		coloredLogs[i] = colorizeLogLine(line)
 	}
 	logLines := padLines(renderToLines(strings.Join(coloredLogs, "\n"), logInner), botRows, logInner)
+	logLines = overlayLogo(logLines, logInner)
 
 	// ── Assemble frame ──
 	var out strings.Builder
