@@ -20,6 +20,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pterm/pterm"
+	"github.com/pterm/pterm/putils"
 	"github.com/spf13/cobra"
 )
 
@@ -567,14 +569,17 @@ func borderStr(s string) string {
 	return lipgloss.NewStyle().Foreground(cyan).Render(s)
 }
 
-// efctlLogo returns a compact ASCII art logo with cyan→orange gradient.
-var efctlLogoLines = []string{
-	"┏━━┓┏━━┓┏━━┓┏━━━━┓┏┓   ",
-	"┃┏━┛┃┏━┛┃┏━┛┗━┓┓━┛┃┃   ",
-	"┃┗━┓┃┗━┓┃┃    ┃┃  ┃┃   ",
-	"┃┏━┛┃┏━┛┃┃    ┃┃  ┃┃   ",
-	"┃┗━┓┃┃  ┃┗━┓ ┃┃  ┃┗━┓ ",
-	"┗━━┛┗┛  ┗━━┛ ┗┛  ┗━━┛ ",
+// efctlLogoLines holds the raw (uncolored) pterm BigText for "EFCTL".
+var efctlLogoLines []string
+
+func init() {
+	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("EFCTL")).Srender()
+	for _, line := range strings.Split(raw, "\n") {
+		clean := pterm.RemoveColorFromString(line)
+		if strings.TrimSpace(clean) != "" {
+			efctlLogoLines = append(efctlLogoLines, clean)
+		}
+	}
 }
 
 func renderLogo() []string {
