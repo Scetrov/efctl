@@ -62,6 +62,7 @@ var (
 	dark   = lipgloss.Color("#111111")
 	white  = lipgloss.Color("#FFFFFF")
 	gray   = lipgloss.Color("#666666")
+	red    = lipgloss.Color("#FF4444")
 
 	headerStyle = lipgloss.NewStyle().
 			Foreground(dark).
@@ -160,6 +161,36 @@ func formatAge(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// renderStatus returns a styled status string, using red for Stopped.
+func renderStatus(s string) string {
+	if s == "Stopped" {
+		return lipgloss.NewStyle().Foreground(red).Render(s)
+	}
+	return valueStyle.Render(s)
+}
+
+// formatWithCommas adds thousand separators to a numeric string.
+func formatWithCommas(s string) string {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return s
+	}
+	sign := ""
+	if n < 0 {
+		sign = "-"
+		n = -n
+	}
+	digits := strconv.FormatInt(n, 10)
+	var buf []byte
+	for i, c := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			buf = append(buf, ',')
+		}
+		buf = append(buf, byte(c)) // #nosec G115 -- digits are ASCII 0-9
+	}
+	return sign + string(buf)
 }
 
 func fetchChainInfo(client *http.Client) chainStat {
@@ -680,29 +711,36 @@ func (m model) View() string {
 func (m model) renderContainerContent() string {
 	var b bytes.Buffer
 	b.WriteString("\n sui-playground\n")
-	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n\n", valueStyle.Render(m.suiStat.Status), m.suiStat.CPU, m.suiStat.Mem))
+	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n\n", renderStatus(m.suiStat.Status), m.suiStat.CPU, m.suiStat.Mem))
 	b.WriteString(" database\n")
-	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n", valueStyle.Render(m.pgStat.Status), m.pgStat.CPU, m.pgStat.Mem))
+	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n", renderStatus(m.pgStat.Status), m.pgStat.CPU, m.pgStat.Mem))
 	return b.String()
 }
 
 func (m model) renderEnvContent() string {
 	var b bytes.Buffer
 
-	// Shorten an address/value for display
-	shorten := func(s string, maxLen int) string {
-		if len(s) > maxLen {
-			return s[:maxLen-3] + "..."
+	// Compute max display length for values based on panel width.
+	// leftInner = (width-3)/2; content area = leftInner - 2 (padding); label prefix ~18 chars.
+	maxVal := (m.width-3)/2 - 20
+	if maxVal < 10 {
+		maxVal = 10
+	}
+
+	// Shorten a value only when it exceeds the available width.
+	shorten := func(s string) string {
+		if len(s) > maxVal {
+			return s[:maxVal-3] + "..."
 		}
 		return s
 	}
 
-	adminDisp := shorten(m.adminAddr, 42)
+	adminDisp := shorten(m.adminAddr)
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render(" ADMIN_ADDRESS:  ") + " " + adminDisp + "\n")
 
 	if v, ok := m.envVars["SPONSOR_ADDRESS"]; ok {
-		b.WriteString(labelStyle.Render(" SPONSOR_ADDR:   ") + " " + shorten(v, 42) + "\n")
+		b.WriteString(labelStyle.Render(" SPONSOR_ADDR:   ") + " " + shorten(v) + "\n")
 	}
 
 	network := "localnet"
@@ -713,10 +751,10 @@ func (m model) renderEnvContent() string {
 	b.WriteString(labelStyle.Render(" RPC URL:        ") + " http://localhost:9000\n")
 
 	if v, ok := m.envVars["WORLD_PACKAGE_ID"]; ok {
-		b.WriteString(labelStyle.Render(" WORLD_PKG:      ") + " " + shorten(v, 42) + "\n")
+		b.WriteString(labelStyle.Render(" WORLD_PKG:      ") + " " + shorten(v) + "\n")
 	}
 	if v, ok := m.envVars["BUILDER_PACKAGE_ID"]; ok {
-		b.WriteString(labelStyle.Render(" BUILDER_PKG:    ") + " " + shorten(v, 42) + "\n")
+		b.WriteString(labelStyle.Render(" BUILDER_PKG:    ") + " " + shorten(v) + "\n")
 	}
 	if v, ok := m.envVars["TENANT"]; ok {
 		b.WriteString(labelStyle.Render(" TENANT:         ") + " " + v + "\n")
@@ -728,8 +766,8 @@ func (m model) renderEnvContent() string {
 func (m model) renderRightContent(topRows int) string {
 	var b bytes.Buffer
 	b.WriteString("\n")
-	b.WriteString(labelStyle.Render(" Checkpoint:   ") + valueStyle.Render(m.chainInfo.Checkpoint) + "\n")
-	b.WriteString(labelStyle.Render(" Transactions: ") + valueStyle.Render(m.chainInfo.TxCount) + "\n")
+	b.WriteString(labelStyle.Render(" Checkpoint:   ") + valueStyle.Render(formatWithCommas(m.chainInfo.Checkpoint)) + "\n")
+	b.WriteString(labelStyle.Render(" Transactions: ") + valueStyle.Render(formatWithCommas(m.chainInfo.TxCount)) + "\n")
 	b.WriteString(labelStyle.Render(" Epoch:        ") + valueStyle.Render(m.chainInfo.Epoch) + "\n\n")
 
 	b.WriteString("Object Tracker\n\n")
