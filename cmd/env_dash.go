@@ -103,6 +103,7 @@ type StatsMsg struct {
 	Chain   chainStat
 	Objects []string
 	Admin   string
+	EnvVars map[string]string
 }
 
 func tickCmd() tea.Cmd {
@@ -124,6 +125,27 @@ func extractAdmin(workspace string) string {
 		return matches[1]
 	}
 	return "Not Found"
+}
+
+// extractEnvVars reads key=value pairs from the world-contracts .env file.
+func extractEnvVars(workspace string) map[string]string {
+	result := make(map[string]string)
+	envPath := filepath.Join(workspace, "world-contracts", ".env")
+	data, err := os.ReadFile(envPath) // #nosec G304 -- path constructed from known workspace prefix
+	if err != nil {
+		return result
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
 }
 
 // formatAge converts a duration into a short human-readable string.
@@ -292,6 +314,9 @@ func fetchStats(engine string, workspace string) StatsMsg {
 	// Admin
 	msg.Admin = extractAdmin(workspace)
 
+	// Environment variables
+	msg.EnvVars = extractEnvVars(workspace)
+
 	return msg
 }
 
@@ -365,6 +390,7 @@ type model struct {
 	recentTxs      []recentTx
 	objectTrackers []string
 	adminAddr      string
+	envVars        map[string]string
 	logs           []string
 }
 
@@ -430,6 +456,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recentTxs = msg.Chain.RecentTxs
 		m.objectTrackers = msg.Objects
 		m.adminAddr = msg.Admin
+		m.envVars = msg.EnvVars
 
 	case LogMsg:
 		m.logs = append(m.logs, string(msg))
@@ -490,6 +517,17 @@ func buildTopBorder(leftW, rightW int, leftTitle, rightTitle string) string {
 		borderStr(strings.Repeat("─", rd)+"╮")
 }
 
+// buildLeftMidBorder builds: ├─ Title ──────────┤ (left-side only, with ┤ connecting to │)
+func buildLeftMidBorder(leftW int, title string) string {
+	tw := lipgloss.Width(title)
+	d := leftW - 3 - tw
+	if d < 0 {
+		d = 0
+	}
+	return borderStr("├─") + " " + labelStyle.Render(title) + " " +
+		borderStr(strings.Repeat("─", d)+"┤")
+}
+
 // buildMiddleBorder builds: ├─ Title ──┴────────┤
 // The ┴ character is placed where the top-section vertical divider was.
 func buildMiddleBorder(totalW, leftW int, title string) string {
@@ -536,11 +574,13 @@ func (m model) View() string {
 
 	// ── Layout geometry ──
 	// Frame uses shared borders for a masonry look:
-	//   ╭─ Left ────┬─ Right ───╮
-	//   │           │           │
-	//   ├─ Logs ─┴──────────────┤
-	//   │                       │
-	//   ╰─ keybindings ─────────╯
+	//   ╭─ Container ─┬─ Chain ──────╮
+	//   │             │              │
+	//   ├─ Env Info ──┤              │
+	//   │             │              │
+	//   ├─ Logs ──────┴──────────────┤
+	//   │                            │
+	//   ╰─ keybindings ─────────────╯
 	//
 	// Horizontal: 1(│) + leftInner + 1(│) + rightInner + 1(│) = width
 	leftInner := (m.width - 3) / 2
@@ -557,20 +597,32 @@ func (m model) View() string {
 		logInner = 1
 	}
 
-	// Vertical budget: headerH + 1(top border) + topRows + 1(mid border) + botRows + 1(bot border)
+	// Vertical budget:
+	// headerH + topBorder(1) + containerRows + leftMidBorder(1) + envRows + midBorder(1) + logRows + botBorder(1)
 	available := m.height - headerH
 	topRows := (available * 2) / 5
-	if topRows < 5 {
-		topRows = 5
+	if topRows < 8 {
+		topRows = 8
 	}
+	// Split top rows: container panel gets ~40%, env panel gets ~60%
+	containerRows := topRows * 2 / 5
+	if containerRows < 3 {
+		containerRows = 3
+	}
+	envRows := topRows - containerRows - 1 // -1 for the left-mid border
+	if envRows < 3 {
+		envRows = 3
+	}
+	rightRows := containerRows + envRows + 1 // right panel spans full height including left-mid border line
 	botRows := available - topRows - 3
 	if botRows < 3 {
 		botRows = 3
 	}
 
 	// ── Render panel content ──
-	leftLines := padLines(renderToLines(m.renderLeftContent(), leftInner), topRows, leftInner)
-	rightLines := padLines(renderToLines(m.renderRightContent(topRows), rightInner), topRows, rightInner)
+	containerLines := padLines(renderToLines(m.renderContainerContent(), leftInner), containerRows, leftInner)
+	envLines := padLines(renderToLines(m.renderEnvContent(), leftInner), envRows, leftInner)
+	rightLines := padLines(renderToLines(m.renderRightContent(rightRows), rightInner), rightRows, rightInner)
 
 	maxLogs := botRows
 	startIdx := len(m.logs) - maxLogs
@@ -585,20 +637,33 @@ func (m model) View() string {
 	out.WriteByte('\n')
 
 	// Top border
-	leftTitle := "Container Status"
-	rightTitle := "Chain Info"
-	out.WriteString(buildTopBorder(leftInner, rightInner, leftTitle, rightTitle))
+	out.WriteString(buildTopBorder(leftInner, rightInner, "Container Status", "Chain Info"))
 	out.WriteByte('\n')
 
-	// Top panel rows
-	for i := 0; i < topRows; i++ {
-		out.WriteString(borderStr("│") + leftLines[i] + borderStr("│") + rightLines[i] + borderStr("│"))
+	// Container rows (top-left) + right panel rows
+	rightIdx := 0
+	for i := 0; i < containerRows; i++ {
+		out.WriteString(borderStr("│") + containerLines[i] + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
 		out.WriteByte('\n')
+		rightIdx++
 	}
 
-	// Middle border
-	logTitle := "Combined Log View"
-	out.WriteString(buildMiddleBorder(m.width, leftInner, logTitle))
+	// Left-mid border row (Environment Info title) + right panel continues
+	leftMidBorder := buildLeftMidBorder(leftInner, "Environment Info")
+	// Pad to exact leftInner+2 visual width, then add │ + right + │
+	out.WriteString(leftMidBorder + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
+	out.WriteByte('\n')
+	rightIdx++
+
+	// Environment rows (bottom-left) + right panel rows
+	for i := 0; i < envRows; i++ {
+		out.WriteString(borderStr("│") + envLines[i] + borderStr("│") + rightLines[rightIdx] + borderStr("│"))
+		out.WriteByte('\n')
+		rightIdx++
+	}
+
+	// Middle border (logs)
+	out.WriteString(buildMiddleBorder(m.width, leftInner, "Combined Log View"))
 	out.WriteByte('\n')
 
 	// Log rows
@@ -613,24 +678,51 @@ func (m model) View() string {
 	return out.String()
 }
 
-func (m model) renderLeftContent() string {
+func (m model) renderContainerContent() string {
 	var b bytes.Buffer
 	b.WriteString("\n sui-playground\n")
 	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n\n", valueStyle.Render(m.suiStat.Status), m.suiStat.CPU, m.suiStat.Mem))
-
 	b.WriteString(" database\n")
-	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n\n", valueStyle.Render(m.pgStat.Status), m.pgStat.CPU, m.pgStat.Mem))
+	b.WriteString(fmt.Sprintf("   Status: %-10s  CPU: %-8s Mem: %s\n", valueStyle.Render(m.pgStat.Status), m.pgStat.CPU, m.pgStat.Mem))
+	return b.String()
+}
 
-	b.WriteString("Environment Info\n\n")
+func (m model) renderEnvContent() string {
+	var b bytes.Buffer
 
-	adminDisp := m.adminAddr
-	if len(adminDisp) > 40 {
-		adminDisp = adminDisp[:37] + "..."
+	// Shorten an address/value for display
+	shorten := func(s string, maxLen int) string {
+		if len(s) > maxLen {
+			return s[:maxLen-3] + "..."
+		}
+		return s
 	}
 
-	b.WriteString(labelStyle.Render(" ADMIN_ADDRESS: ") + " " + adminDisp + "\n")
-	b.WriteString(labelStyle.Render(" SUI_NETWORK:   ") + " localnet\n")
-	b.WriteString(labelStyle.Render(" RPC URL:       ") + " http://localhost:9000\n")
+	adminDisp := shorten(m.adminAddr, 42)
+	b.WriteString("\n")
+	b.WriteString(labelStyle.Render(" ADMIN_ADDRESS:  ") + " " + adminDisp + "\n")
+
+	if v, ok := m.envVars["SPONSOR_ADDRESS"]; ok {
+		b.WriteString(labelStyle.Render(" SPONSOR_ADDR:   ") + " " + shorten(v, 42) + "\n")
+	}
+
+	network := "localnet"
+	if v, ok := m.envVars["SUI_NETWORK"]; ok {
+		network = v
+	}
+	b.WriteString(labelStyle.Render(" SUI_NETWORK:    ") + " " + network + "\n")
+	b.WriteString(labelStyle.Render(" RPC URL:        ") + " http://localhost:9000\n")
+
+	if v, ok := m.envVars["WORLD_PACKAGE_ID"]; ok {
+		b.WriteString(labelStyle.Render(" WORLD_PKG:      ") + " " + shorten(v, 42) + "\n")
+	}
+	if v, ok := m.envVars["BUILDER_PACKAGE_ID"]; ok {
+		b.WriteString(labelStyle.Render(" BUILDER_PKG:    ") + " " + shorten(v, 42) + "\n")
+	}
+	if v, ok := m.envVars["TENANT"]; ok {
+		b.WriteString(labelStyle.Render(" TENANT:         ") + " " + v + "\n")
+	}
+
 	return b.String()
 }
 
