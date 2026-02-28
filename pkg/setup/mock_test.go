@@ -32,6 +32,11 @@ func (m *mockContainerClient) ContainerLogs(name string, tail int) string {
 	return m.Called(name, tail).String(0)
 }
 
+func (m *mockContainerClient) ContainerExitCode(name string) (int, error) {
+	args := m.Called(name)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *mockContainerClient) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	return m.Called(ctx, containerName, searchString).Error(0)
 }

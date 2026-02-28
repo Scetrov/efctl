@@ -20,6 +20,7 @@ type ContainerClient interface {
 	ComposeUp(dir string, services ...string) error
 	ContainerRunning(name string) bool
 	ContainerLogs(name string, tail int) string
+	ContainerExitCode(name string) (int, error)
 	WaitForLogs(ctx context.Context, containerName string, searchString string) error
 	InteractiveShell(containerName string) error
 	Exec(containerName string, command []string) error
@@ -118,6 +119,19 @@ func (c *Client) ContainerLogs(name string, tail int) string {
 	return strings.TrimSpace(string(out))
 }
 
+// ContainerExitCode returns the exit code of a stopped container.
+func (c *Client) ContainerExitCode(name string) (int, error) {
+	out, err := exec.Command(c.Engine, "inspect", "--format", "{{.State.ExitCode}}", name).Output() // #nosec G204
+	if err != nil {
+		return -1, fmt.Errorf("failed to inspect container %s: %w", name, err)
+	}
+	var code int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &code); err != nil {
+		return -1, fmt.Errorf("failed to parse exit code for %s: %w", name, err)
+	}
+	return code, nil
+}
+
 // WaitForLogs waits for a specific string in the container logs
 func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to initialize...", containerName))
@@ -155,11 +169,20 @@ func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchSt
 	select {
 	case <-ctx.Done():
 		spinner.Fail("Timed out waiting for logs")
-		return fmt.Errorf("timeout waiting for %q in %s logs", searchString, containerName)
+		lastLogs := c.ContainerLogs(containerName, 20)
+		return fmt.Errorf("timeout waiting for %q in %s logs.\n\nLast 20 lines of container logs:\n%s", searchString, containerName, lastLogs)
 	case found := <-done:
 		if !found {
-			spinner.Fail("Log search string not found before EOF")
-			return fmt.Errorf("search string %q not found in logs", searchString)
+			// Container exited before the ready string appeared — provide diagnostics
+			exitCode, exitErr := c.ContainerExitCode(containerName)
+			lastLogs := c.ContainerLogs(containerName, 30)
+			diag := fmt.Sprintf("Container %s exited before becoming ready.", containerName)
+			if exitErr == nil {
+				diag += fmt.Sprintf(" Exit code: %d.", exitCode)
+			}
+			diag += fmt.Sprintf("\n\nLast 30 lines of container logs:\n%s", lastLogs)
+			spinner.Fail(fmt.Sprintf("%s exited unexpectedly (search string %q not found)", containerName, searchString))
+			return fmt.Errorf("%s", diag)
 		}
 	}
 

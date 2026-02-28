@@ -3,7 +3,9 @@ package setup
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +13,19 @@ import (
 	"efctl/pkg/env"
 	"efctl/pkg/ui"
 )
+
+const defaultStartupTimeout = 5 * time.Minute
+
+// startupTimeoutFromEnv returns the startup timeout, defaulting to 5 minutes.
+// Override with EFCTL_STARTUP_TIMEOUT_SECONDS for CI or slow environments.
+func startupTimeoutFromEnv() time.Duration {
+	if v := os.Getenv("EFCTL_STARTUP_TIMEOUT_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return defaultStartupTimeout
+}
 
 // StartEnvironment builds and starts the docker-compose environment
 func StartEnvironment(c container.ContainerClient, workspace string, withGraphql bool, withFrontend bool) error {
@@ -34,7 +49,18 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Give the container a moment to start, then verify it is still running
+	// before entering the (potentially long) log-wait loop.
+	time.Sleep(3 * time.Second)
+	if !c.ContainerRunning(container.ContainerSuiPlayground) {
+		exitCode, _ := c.ContainerExitCode(container.ContainerSuiPlayground)
+		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 30)
+		return fmt.Errorf("%s exited immediately after launch (exit code %d).\n\nLast 30 lines of container logs:\n%s",
+			container.ContainerSuiPlayground, exitCode, lastLogs)
+	}
+
+	startupTimeout := startupTimeoutFromEnv()
+	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 
 	if err := c.WaitForLogs(ctx, container.ContainerSuiPlayground, container.ContainerLogReadyCtx); err != nil {
