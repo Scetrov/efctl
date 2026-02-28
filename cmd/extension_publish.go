@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"efctl/pkg/builder"
+	"efctl/pkg/container"
 	"efctl/pkg/ui"
 	"efctl/pkg/validate"
 	"github.com/spf13/cobra"
@@ -28,7 +29,13 @@ var extensionPublishCmd = &cobra.Command{
 
 		ui.Info.Printf("Publishing extension contract from %s...\n", contractPath)
 
-		if err := builder.PublishExtension(workspacePath, envNetwork, contractPath); err != nil {
+		c, err := container.NewClient()
+		if err != nil {
+			ui.Error.Println("Failed to create container client: " + err.Error())
+			os.Exit(1)
+		}
+
+		if err := builder.PublishExtension(c, workspacePath, envNetwork, contractPath); err != nil {
 			ui.Error.Println("Publish failed: " + err.Error())
 			os.Exit(1)
 		}

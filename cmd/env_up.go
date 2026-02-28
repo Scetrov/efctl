@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"efctl/pkg/config"
+	"efctl/pkg/container"
 	"efctl/pkg/env"
+	"efctl/pkg/git"
 	"efctl/pkg/setup"
 	"efctl/pkg/sui"
 	"efctl/pkg/ui"
@@ -82,7 +84,7 @@ var envUpCmd = &cobra.Command{
 		}
 
 		ui.Info.Println("Setting up workspace...")
-		if err := setup.CloneRepositories(workspacePath); err != nil {
+		if err := setup.CloneRepositories(git.NewClient(), workspacePath); err != nil {
 			ui.Error.Println("Setup failed: " + err.Error())
 			ui.Warn.Println("The environment may be partially initialized. It is recommended to run `efctl down` before trying again.")
 			os.Exit(1)
@@ -90,14 +92,20 @@ var envUpCmd = &cobra.Command{
 
 		ui.Info.Println("Starting environment...")
 
-		if err := setup.StartEnvironment(workspacePath, withGraphql, withFrontend); err != nil {
+		c, err := container.NewClient()
+		if err != nil {
+			ui.Error.Println("Failed to create container client: " + err.Error())
+			os.Exit(1)
+		}
+
+		if err := setup.StartEnvironment(c, workspacePath, withGraphql, withFrontend); err != nil {
 			ui.Error.Println("Start failed: " + err.Error())
 			ui.Warn.Println("The environment may be partially initialized. It is recommended to run `efctl down` before trying again.")
 			os.Exit(1)
 		}
 
 		ui.Info.Println("Deploying world contracts...")
-		if err := setup.DeployWorld(workspacePath); err != nil {
+		if err := setup.DeployWorld(c, workspacePath); err != nil {
 			ui.Error.Println("Deployment failed: " + err.Error())
 			ui.Warn.Println("The environment may be partially initialized. It is recommended to run `efctl down` before trying again.")
 			os.Exit(1)

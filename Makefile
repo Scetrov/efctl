@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt lint security sec-all gosec govulncheck clean
+.PHONY: build test test-unit test-integration test-e2e test-all test-coverage vet fmt lint security sec-all gosec govulncheck clean
 
 # ── Build & Test ──────────────────────────────────────────────
 
@@ -7,6 +7,22 @@ build:
 
 test:
 	go test -count=1 ./...
+
+test-unit: test
+
+test-integration:
+	go test -count=1 -tags integration -v ./tests/integration/...
+
+test-e2e: build
+	EFCTL_BINARY=$(PWD)/output/efctl go test -count=1 -tags e2e -timeout 15m -v ./tests/e2e/...
+
+test-all: test test-integration test-e2e
+
+test-coverage:
+	go test -count=1 -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out | tail -1
+	@echo ""
+	@echo "HTML report: go tool cover -html=coverage.out -o coverage.html"
 
 vet:
 	go vet ./...

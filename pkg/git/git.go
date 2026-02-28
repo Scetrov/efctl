@@ -8,6 +8,40 @@ import (
 	"efctl/pkg/ui"
 )
 
+// GitClient defines the interface for git operations.
+// Consumers should accept this interface to enable testing with mocks.
+type GitClient interface {
+	CloneRepository(url string, dest string) error
+	CheckoutBranch(repoPath string, branch string) error
+	SetupWorkDir(path string) error
+}
+
+// DefaultClient is the real git implementation.
+type DefaultClient struct{}
+
+// Compile-time check that DefaultClient implements GitClient.
+var _ GitClient = (*DefaultClient)(nil)
+
+// NewClient returns a new default git client.
+func NewClient() *DefaultClient {
+	return &DefaultClient{}
+}
+
+// CloneRepository clones a git repository to a specific path
+func (g *DefaultClient) CloneRepository(url string, dest string) error {
+	return CloneRepository(url, dest)
+}
+
+// CheckoutBranch checks out the specified branch in the given repository path.
+func (g *DefaultClient) CheckoutBranch(repoPath string, branch string) error {
+	return CheckoutBranch(repoPath, branch)
+}
+
+// SetupWorkDir creates the workspace directory if it doesn't exist
+func (g *DefaultClient) SetupWorkDir(path string) error {
+	return SetupWorkDir(path)
+}
+
 // CloneRepository clones a git repository to a specific path
 func CloneRepository(url string, dest string) error {
 	// Check if directory already exists

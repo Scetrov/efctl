@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"efctl/pkg/container"
 	"efctl/pkg/setup"
 	"efctl/pkg/sui"
 	"efctl/pkg/ui"
@@ -18,9 +19,13 @@ var envDownCmd = &cobra.Command{
 		ui.Info.Println("Starting cleanup...")
 		// Assuming setup.CleanEnvironment doesn't need workspacePath currently,
 		// but if it ever does, workspacePath is accessible from env.go
-		err := setup.CleanEnvironment()
+		c, err := container.NewClient()
 		if err != nil {
-			ui.Error.Println("Cleanup failed: " + err.Error())
+			ui.Error.Println("Failed to create container client: " + err.Error())
+			os.Exit(1)
+		}
+		if cleanErr := setup.CleanEnvironment(c); cleanErr != nil {
+			ui.Error.Println("Cleanup failed: " + cleanErr.Error())
 			os.Exit(1)
 		}
 

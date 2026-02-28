@@ -1,0 +1,2 @@
+# Test fixtures with obviously fake keys (suiprivkey0000fake0000 etc.)
+pkg/setup/summary_test.go:generic-api-key:54

@@ -12,6 +12,37 @@ import (
 	"efctl/pkg/ui"
 )
 
+// CommandExecutor defines the interface for running system commands.
+// This enables testing without real executables on the system.
+type CommandExecutor interface {
+	LookPath(file string) (string, error)
+	Run(name string, args ...string) error
+	RunWithStdin(stdin string, name string, args ...string) error
+}
+
+// DefaultExecutor uses os/exec to run real system commands.
+type DefaultExecutor struct{}
+
+// Compile-time check that DefaultExecutor implements CommandExecutor.
+var _ CommandExecutor = (*DefaultExecutor)(nil)
+
+func (e *DefaultExecutor) LookPath(file string) (string, error) {
+	return exec.LookPath(file)
+}
+
+func (e *DefaultExecutor) Run(name string, args ...string) error {
+	cmd := exec.Command(name, args...) // #nosec G204
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (e *DefaultExecutor) RunWithStdin(stdin string, name string, args ...string) error {
+	cmd := exec.Command(name, args...) // #nosec G204
+	cmd.Stdin = strings.NewReader(stdin)
+	return cmd.Run()
+}
+
 var adminKeyRegex = regexp.MustCompile(`^ADMIN_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
 var playerAKeyRegex = regexp.MustCompile(`^PLAYER_A_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
 var playerBKeyRegex = regexp.MustCompile(`^PLAYER_B_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)

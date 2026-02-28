@@ -137,8 +137,8 @@ var updateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Make executable
-		if err := os.Chmod(tmpPath, 0700); err != nil {
+		// Make executable — binary must have execute permissions.
+		if err := os.Chmod(tmpPath, 0700); err != nil { // #nosec G302 -- executable binary requires execute permission
 			if removeErr := os.Remove(tmpPath); removeErr != nil {
 				ui.Warn.Println(fmt.Sprintf("Warning: failed to clean up temp file: %s", removeErr.Error()))
 			}

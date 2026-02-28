@@ -16,12 +16,11 @@ import (
 	"time"
 
 	"efctl/pkg/container"
+	"efctl/pkg/dashboard"
 	"efctl/pkg/env"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pterm/pterm"
-	"github.com/pterm/pterm/putils"
 	"github.com/spf13/cobra"
 )
 
@@ -191,102 +190,34 @@ func extractEnvVars(workspace string) map[string]string {
 	return result
 }
 
-// formatAge converts a duration into a short human-readable string.
+// formatAge delegates to the dashboard package.
 func formatAge(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
+	return dashboard.FormatAge(d)
 }
 
-// renderStatus returns a styled status string, using red for Stopped.
+// renderStatus delegates to the dashboard package.
 func renderStatus(s string) string {
-	if s == "Stopped" {
-		return lipgloss.NewStyle().Foreground(red).Render(s)
-	}
-	return valueStyle.Render(s)
+	return dashboard.RenderStatus(s)
 }
 
-// formatWithCommas adds thousand separators to a numeric string.
+// formatWithCommas delegates to the dashboard package.
 func formatWithCommas(s string) string {
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return s
-	}
-	sign := ""
-	if n < 0 {
-		sign = "-"
-		n = -n
-	}
-	digits := strconv.FormatInt(n, 10)
-	var buf []byte
-	for i, c := range digits {
-		if i > 0 && (len(digits)-i)%3 == 0 {
-			buf = append(buf, ',')
-		}
-		buf = append(buf, byte(c)) // #nosec G115 -- digits are ASCII 0-9
-	}
-	return sign + string(buf)
+	return dashboard.FormatWithCommas(s)
 }
 
-// shortKind abbreviates common Sui transaction kind names.
+// shortKind delegates to the dashboard package.
 func shortKind(kind string) string {
-	switch kind {
-	case "ProgrammableTransaction":
-		return "PrgTx"
-	case "ConsensusCommitPrologue", "ConsensusCommitPrologueV2", "ConsensusCommitPrologueV3":
-		return "Consensus"
-	case "AuthenticatorStateUpdate", "AuthenticatorStateUpdateV2":
-		return "AuthState"
-	case "RandomnessStateUpdate":
-		return "Randomness"
-	case "EndOfEpochTransaction":
-		return "EndEpoch"
-	case "ChangeEpoch":
-		return "Epoch"
-	case "Genesis":
-		return "Genesis"
-	default:
-		if len(kind) > 10 {
-			return kind[:10]
-		}
-		return kind
-	}
+	return dashboard.ShortKind(kind)
 }
 
-// formatGas computes net gas used from Sui gas fields and returns a compact string.
+// formatGas delegates to the dashboard package.
 func formatGas(computation, storage, rebate string) string {
-	comp, _ := strconv.ParseInt(computation, 10, 64)
-	stor, _ := strconv.ParseInt(storage, 10, 64)
-	reb, _ := strconv.ParseInt(rebate, 10, 64)
-	total := comp + stor - reb
-	if total <= 0 {
-		return "-"
-	}
-	return formatWithCommas(strconv.FormatInt(total, 10))
+	return dashboard.FormatGas(computation, storage, rebate)
 }
 
-// colorizeLogLine applies colour to log line prefixes.
+// colorizeLogLine delegates to the dashboard package.
 func colorizeLogLine(line string) string {
-	if strings.HasPrefix(line, "[docker]") {
-		return lipgloss.NewStyle().Foreground(cyan).Render("[docker]") + line[8:]
-	}
-	if strings.HasPrefix(line, "[db]") {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#CC88FF")).Render("[db]") + line[4:]
-	}
-	if strings.HasPrefix(line, "[deploy]") {
-		return lipgloss.NewStyle().Foreground(green).Render("[deploy]") + line[8:]
-	}
-	if strings.HasPrefix(line, "[frontend]") {
-		return lipgloss.NewStyle().Foreground(yellow).Render("[frontend]") + line[10:]
-	}
-	return line
+	return dashboard.ColorizeLogLine(line)
 }
 
 func fetchChainInfo(client *http.Client) chainStat {
@@ -464,24 +395,7 @@ func extractWorldObjects(workspace string) (objs map[string]string, pkgID string
 
 // buildAddresses assembles the role→address map from env vars and derived keys.
 func buildAddresses(admin string, envVars map[string]string) map[string]string {
-	addrs := make(map[string]string)
-	if admin != "" && admin != "Unknown" && admin != "Not Found" {
-		addrs["Admin"] = admin
-	}
-	if v, ok := envVars["SPONSOR_ADDRESS"]; ok {
-		addrs["Sponsor"] = v
-	}
-	if pk, ok := envVars["PLAYER_A_PRIVATE_KEY"]; ok {
-		if addr := deriveAddress(pk); addr != "" {
-			addrs["Player A"] = addr
-		}
-	}
-	if pk, ok := envVars["PLAYER_B_PRIVATE_KEY"]; ok {
-		if addr := deriveAddress(pk); addr != "" {
-			addrs["Player B"] = addr
-		}
-	}
-	return addrs
+	return dashboard.BuildAddresses(admin, envVars, deriveAddress)
 }
 
 func fetchStats(engine string, workspace string) StatsMsg {
@@ -918,24 +832,12 @@ func fileExists(path string) bool {
 
 // borderStr renders s in the border (cyan) colour.
 func borderStr(s string) string {
-	return lipgloss.NewStyle().Foreground(cyan).Render(s)
+	return dashboard.BorderStr(s)
 }
 
 // logViewportRows returns the number of log lines visible in the log panel
-// given the current terminal height and number of world events.
 func logViewportRows(height, numEvents int) int {
-	headerH := 1
-	available := height - headerH
-	topRows := (available * 30) / 100
-	if topRows < 8 {
-		topRows = 8
-	}
-	// Events are now side-by-side with logs, so they don't consume vertical space
-	botRows := available - topRows - 3 // 3 = top/mid/bottom borders
-	if botRows < 3 {
-		botRows = 3
-	}
-	return botRows
+	return dashboard.LogViewportRows(height, numEvents)
 }
 
 // maxLogScroll returns the maximum logScroll value so the viewport
@@ -949,225 +851,64 @@ func (m model) maxLogScroll() int {
 	return max
 }
 
-// efctlLogoLines holds the raw (uncolored) pterm BigText for "> EFCTL".
-var efctlLogoLines []string
-
-func init() {
-	raw, _ := pterm.DefaultBigText.WithLetters(putils.LettersFromString("> EFCTL")).Srender()
-	for _, line := range strings.Split(raw, "\n") {
-		clean := pterm.RemoveColorFromString(line)
-		if strings.TrimSpace(clean) != "" {
-			efctlLogoLines = append(efctlLogoLines, clean)
-		}
-	}
-}
-
+// renderLogo delegates to the dashboard package.
 func renderLogo() []string {
-	result := make([]string, len(efctlLogoLines))
-	for i, line := range efctlLogoLines {
-		runes := []rune(line)
-		numCols := float64(max(len(runes)-1, 1))
-		var out strings.Builder
-		for j, r := range runes {
-			// Linear horizontal gradient from cyan (#00FFFF) to orange (#FF7400)
-			t := float64(j) / numCols
-			rd := int(t * 255)
-			gn := int(255 - t*(255-116))
-			bl := int(255 - t*255)
-			c := lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", rd, gn, bl))
-			out.WriteString(lipgloss.NewStyle().Foreground(c).Render(string(r)))
-		}
-		result[i] = out.String()
-	}
-	return result
+	return dashboard.RenderLogo()
 }
 
-// overlayLogo places the gradient logo on the bottom-right of the log lines.
+// overlayLogo delegates to the dashboard package.
 func overlayLogo(logLines []string, innerW int) []string {
-	logo := renderLogo()
-	logoW := lipgloss.Width(efctlLogoLines[0])
-	logoH := len(logo)
-	if len(logLines) < logoH || innerW < logoW+4 {
-		return logLines // not enough space
-	}
-	for i := 0; i < logoH; i++ {
-		row := len(logLines) - logoH + i
-		line := logLines[row]
-		// Place logo with 2-char right margin
-		padLeft := innerW - logoW - 2
-		if padLeft < 0 {
-			padLeft = 0
-		}
-		// Take existing content up to padLeft, then logo, then fill
-		var runes []rune
-		for _, r := range line {
-			runes = append(runes, r)
-		}
-		leftPart := strings.Repeat(" ", padLeft)
-		if lipgloss.Width(line) >= padLeft {
-			// truncate visible content to padLeft width
-			leftPart = truncateToWidth(line, padLeft)
-		}
-		combined := leftPart + logo[i]
-		cw := lipgloss.Width(combined)
-		if cw < innerW {
-			combined += strings.Repeat(" ", innerW-cw)
-		}
-		logLines[row] = combined
-	}
-	return logLines
+	return dashboard.OverlayLogo(logLines, innerW)
 }
 
-// truncateToWidth truncates a styled string to at most maxW visible characters.
+// truncateToWidth delegates to the dashboard package.
 func truncateToWidth(s string, maxW int) string {
-	if lipgloss.Width(s) <= maxW {
-		return s
-	}
-	// Byte-by-byte approach: take characters until width reached
-	var out strings.Builder
-	for _, r := range s {
-		out.WriteRune(r)
-		if lipgloss.Width(out.String()) >= maxW {
-			break
-		}
-	}
-	// Pad if needed
-	result := out.String()
-	w := lipgloss.Width(result)
-	if w < maxW {
-		result += strings.Repeat(" ", maxW-w)
-	}
-	return result
+	return dashboard.TruncateToWidth(s, maxW)
 }
 
-// renderToLines renders content with 1-char horizontal padding into a
-// slice of lines, each exactly innerW visual characters wide.
+// renderToLines delegates to the dashboard package.
 func renderToLines(content string, innerW int) []string {
-	rendered := lipgloss.NewStyle().Padding(0, 1).Width(innerW).Render(content)
-	return strings.Split(rendered, "\n")
+	return dashboard.RenderToLines(content, innerW)
 }
 
-// padLines ensures exactly targetRows lines, each innerW visual chars wide.
+// padLines delegates to the dashboard package.
 func padLines(lines []string, targetRows, innerW int) []string {
-	if len(lines) > targetRows {
-		lines = lines[:targetRows]
-	}
-	emptyLine := strings.Repeat(" ", innerW)
-	for len(lines) < targetRows {
-		lines = append(lines, emptyLine)
-	}
-	for i, line := range lines {
-		w := lipgloss.Width(line)
-		if w < innerW {
-			lines[i] = line + strings.Repeat(" ", innerW-w)
-		}
-	}
-	return lines
+	return dashboard.PadLines(lines, targetRows, innerW)
 }
 
-// buildTopBorder builds: ╭─ LeftTitle ──┬─ RightTitle ──╮
+// buildTopBorder delegates to the dashboard package.
 func buildTopBorder(leftW, rightW int, leftTitle, rightTitle string) string {
-	ltw := lipgloss.Width(leftTitle)
-	rtw := lipgloss.Width(rightTitle)
-	ld := leftW - 3 - ltw
-	if ld < 0 {
-		ld = 0
-	}
-	rd := rightW - 3 - rtw
-	if rd < 0 {
-		rd = 0
-	}
-
-	return borderStr("╭─") + " " + labelStyle.Render(leftTitle) + " " +
-		borderStr(strings.Repeat("─", ld)+"┬─") + " " + labelStyle.Render(rightTitle) + " " +
-		borderStr(strings.Repeat("─", rd)+"╮")
+	return dashboard.BuildTopBorder(leftW, rightW, leftTitle, rightTitle)
 }
 
-// buildLeftMidBorder builds: ├─ Title ──────────┤ (left-side only, with ┤ connecting to │)
+// buildLeftMidBorder delegates to the dashboard package.
 func buildLeftMidBorder(leftW int, title string) string {
-	tw := lipgloss.Width(title)
-	d := leftW - 3 - tw
-	if d < 0 {
-		d = 0
-	}
-	return borderStr("├─") + " " + labelStyle.Render(title) + " " +
-		borderStr(strings.Repeat("─", d)+"┤")
+	return dashboard.BuildLeftMidBorder(leftW, title)
 }
 
-// buildMiddleBorder builds: ├─ Title ──┴────────┤
-// The ┴ character is placed where the top-section vertical divider was.
+// buildMiddleBorder delegates to the dashboard package.
 func buildMiddleBorder(totalW, leftW int, title string) string {
-	tw := lipgloss.Width(title)
-	totalDashes := totalW - 5 - tw
-	if totalDashes < 0 {
-		totalDashes = 0
-	}
-
-	junction := leftW - 3 - tw
-	if junction >= 0 && junction < totalDashes {
-		return borderStr("├─") + " " + labelStyle.Render(title) + " " +
-			borderStr(strings.Repeat("─", junction)+"┴"+strings.Repeat("─", totalDashes-junction-1)+"┤")
-	}
-	return borderStr("├─") + " " + labelStyle.Render(title) + " " +
-		borderStr(strings.Repeat("─", totalDashes)+"┤")
+	return dashboard.BuildMiddleBorder(totalW, leftW, title)
 }
 
-// buildBottomBorder builds: ╰─ footer ──────╯
+// buildBottomBorder delegates to the dashboard package.
 func buildBottomBorder(totalW int, footer string) string {
-	fw := lipgloss.Width(footer)
-	d := totalW - 5 - fw
-	if d < 0 {
-		d = 0
-	}
-	return borderStr("╰─") + " " + grayStyle.Render(footer) + " " +
-		borderStr(strings.Repeat("─", d)+"╯")
+	return dashboard.BuildBottomBorder(totalW, footer)
 }
 
-// buildFullBorder builds: ├─ Title ──────────────┤ (full width, no junction)
+// buildFullBorder delegates to the dashboard package.
 func buildFullBorder(totalW int, title string) string {
-	tw := lipgloss.Width(title)
-	d := totalW - 5 - tw
-	if d < 0 {
-		d = 0
-	}
-	return borderStr("├─") + " " + labelStyle.Render(title) + " " +
-		borderStr(strings.Repeat("─", d)+"┤")
+	return dashboard.BuildFullBorder(totalW, title)
 }
 
-// buildSplitMiddleBorder builds: ├─ LeftTitle ──┼─ RightTitle ──┤
-// Used when a vertical divider continues through top and bottom sections.
+// buildSplitMiddleBorder delegates to the dashboard package.
 func buildSplitMiddleBorder(leftW, rightW int, leftTitle, rightTitle string) string {
-	ltw := lipgloss.Width(leftTitle)
-	rtw := lipgloss.Width(rightTitle)
-	ld := leftW - 3 - ltw
-	if ld < 0 {
-		ld = 0
-	}
-	rd := rightW - 3 - rtw
-	if rd < 0 {
-		rd = 0
-	}
-	return borderStr("├─") + " " + labelStyle.Render(leftTitle) + " " +
-		borderStr(strings.Repeat("─", ld)+"┼─") + " " + labelStyle.Render(rightTitle) + " " +
-		borderStr(strings.Repeat("─", rd)+"┤")
+	return dashboard.BuildSplitMiddleBorder(leftW, rightW, leftTitle, rightTitle)
 }
 
-// buildBottomBorderWithJunction builds: ╰─ footer ──┴──────╯
-// Places a ┴ junction at the vertical divider position.
+// buildBottomBorderWithJunction delegates to the dashboard package.
 func buildBottomBorderWithJunction(totalW, leftW int, footer string) string {
-	fw := lipgloss.Width(footer)
-	totalDashes := totalW - 5 - fw
-	if totalDashes < 0 {
-		totalDashes = 0
-	}
-	junction := leftW - 3 - fw
-	if junction >= 0 && junction < totalDashes {
-		return borderStr("╰─") + " " + grayStyle.Render(footer) + " " +
-			borderStr(strings.Repeat("─", junction)+"┴"+strings.Repeat("─", totalDashes-junction-1)+"╯")
-	}
-	// Junction falls outside dashes — skip it
-	return borderStr("╰─") + " " + grayStyle.Render(footer) + " " +
-		borderStr(strings.Repeat("─", totalDashes)+"╯")
+	return dashboard.BuildBottomBorderWithJunction(totalW, leftW, footer)
 }
 
 func (m model) View() string {
@@ -1447,23 +1188,9 @@ func (m model) writeEnvObjects(b *bytes.Buffer, shorten func(string) string) {
 	}
 }
 
-// humanizeCamelCase converts "governorCap" to "Governor Cap", etc.
+// humanizeCamelCase delegates to the dashboard package.
 func humanizeCamelCase(s string) string {
-	var words []string
-	start := 0
-	for i := 1; i < len(s); i++ {
-		if s[i] >= 'A' && s[i] <= 'Z' {
-			words = append(words, s[start:i])
-			start = i
-		}
-	}
-	words = append(words, s[start:])
-	for i, w := range words {
-		if len(w) > 0 {
-			words[i] = strings.ToUpper(w[:1]) + w[1:]
-		}
-	}
-	return strings.Join(words, " ")
+	return dashboard.HumanizeCamelCase(s)
 }
 
 func (m model) renderRightContent(topRows int) string {

@@ -6,13 +6,8 @@ import (
 )
 
 // CleanEnvironment stops containers, removes them, cleans up images, and volumes
-func CleanEnvironment() error {
+func CleanEnvironment(c container.ContainerClient) error {
 	ui.Info.Println("Cleaning up environment...")
-
-	c, err := container.NewClient()
-	if err != nil {
-		return err
-	}
 
 	if err := c.Cleanup(); err != nil {
 		return err

@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidate_ValidConfig(t *testing.T) {
@@ -125,4 +128,105 @@ func TestLoad_DefaultConfigMissing(t *testing.T) {
 		// Expected: file not found for non-default path
 		return
 	}
+}
+
+// ── Additional: Load ───────────────────────────────────────────────
+
+func TestLoad_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "efctl.yaml")
+	content := `world-contracts-url: https://github.com/test/wc.git
+builder-scaffold-url: https://github.com/test/bs.git
+world-contracts-branch: develop
+builder-scaffold-branch: feature/x
+with-frontend: true
+with-graphql: false
+`
+	require.NoError(t, os.WriteFile(p, []byte(content), 0600))
+
+	cfg, err := Load(p)
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/test/wc.git", cfg.WorldContractsURL)
+	assert.Equal(t, "https://github.com/test/bs.git", cfg.BuilderScaffoldURL)
+	assert.Equal(t, "develop", cfg.WorldContractsBranch)
+	assert.Equal(t, "feature/x", cfg.BuilderScaffoldBranch)
+	assert.True(t, *cfg.WithFrontend)
+	assert.False(t, *cfg.WithGraphql)
+	// Loaded global should be set
+	assert.Equal(t, cfg, Loaded)
+}
+
+func TestLoad_MalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bad.yaml")
+	require.NoError(t, os.WriteFile(p, []byte(":\t\t\nbad: [yaml: {"), 0600))
+
+	_, err := Load(p)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse config file")
+}
+
+func TestLoad_DefaultFileMissing_ReturnsEmpty(t *testing.T) {
+	// When loading the default file and it doesn't exist, should return empty config
+	old := Loaded
+	defer func() { Loaded = old }()
+
+	// Change to temp dir so DefaultConfigFile won't be found
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(t.TempDir())
+
+	cfg, err := Load(DefaultConfigFile)
+	require.NoError(t, err)
+	assert.NotNil(t, cfg)
+}
+
+// ── Getter defaults ────────────────────────────────────────────────
+
+func TestGetWorldContractsURL_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, DefaultWorldContractsURL, cfg.GetWorldContractsURL())
+}
+
+func TestGetWorldContractsURL_Custom(t *testing.T) {
+	cfg := &Config{WorldContractsURL: "https://example.com/wc.git"}
+	assert.Equal(t, "https://example.com/wc.git", cfg.GetWorldContractsURL())
+}
+
+func TestGetBuilderScaffoldURL_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
+}
+
+func TestGetBuilderScaffoldURL_Custom(t *testing.T) {
+	cfg := &Config{BuilderScaffoldURL: "https://example.com/bs.git"}
+	assert.Equal(t, "https://example.com/bs.git", cfg.GetBuilderScaffoldURL())
+}
+
+func TestGetWorldContractsBranch_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsBranch())
+}
+
+func TestGetWorldContractsBranch_Custom(t *testing.T) {
+	cfg := &Config{WorldContractsBranch: "develop"}
+	assert.Equal(t, "develop", cfg.GetWorldContractsBranch())
+}
+
+func TestGetBuilderScaffoldBranch_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldBranch())
+}
+
+func TestGetBuilderScaffoldBranch_Custom(t *testing.T) {
+	cfg := &Config{BuilderScaffoldBranch: "release/v2"}
+	assert.Equal(t, "release/v2", cfg.GetBuilderScaffoldBranch())
+}
+
+func TestGetters_NilConfig(t *testing.T) {
+	var cfg *Config
+	assert.Equal(t, DefaultWorldContractsURL, cfg.GetWorldContractsURL())
+	assert.Equal(t, DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
+	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsBranch())
+	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldBranch())
 }

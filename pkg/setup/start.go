@@ -13,15 +13,10 @@ import (
 )
 
 // StartEnvironment builds and starts the docker-compose environment
-func StartEnvironment(workspace string, withGraphql bool, withFrontend bool) error {
+func StartEnvironment(c container.ContainerClient, workspace string, withGraphql bool, withFrontend bool) error {
 	ui.Info.Println("Starting container environment...")
 
 	if err := checkRequiredPorts(withGraphql, withFrontend); err != nil {
-		return err
-	}
-
-	c, err := container.NewClient()
-	if err != nil {
 		return err
 	}
 
@@ -75,7 +70,7 @@ func checkRequiredPorts(withGraphql bool, withFrontend bool) error {
 	return nil
 }
 
-func startFrontend(c *container.Client, dockerDir string) error {
+func startFrontend(c container.ContainerClient, dockerDir string) error {
 	ui.Info.Println("Starting frontend dApp...")
 	if err := c.ComposeUp(dockerDir, "frontend"); err != nil {
 		return err

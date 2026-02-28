@@ -1,8 +1,11 @@
 package env
 
 import (
+	"net"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEngineSelectionWithEnvVar(t *testing.T) {
@@ -87,4 +90,39 @@ func TestEngineSelectionWithEnvVar(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ── IsPortAvailable ────────────────────────────────────────────────
+
+func TestIsPortAvailable_FreePort(t *testing.T) {
+	// Port 0 picks a random free port; close it immediately to test availability
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Skip("cannot allocate a random port")
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	assert.True(t, IsPortAvailable(port), "port should be available after closing listener")
+}
+
+func TestIsPortAvailable_OccupiedPort(t *testing.T) {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Skip("cannot allocate a random port")
+	}
+	defer ln.Close()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	assert.False(t, IsPortAvailable(port), "port should not be available while listener is active")
+}
+
+// ── CheckPrerequisites ─────────────────────────────────────────────
+
+func TestCheckPrerequisites_Runs(t *testing.T) {
+	// Basic smoke test: should return a non-nil result without panicking
+	res := CheckPrerequisites()
+	assert.NotNil(t, res)
+	// At a minimum, git should be available in most CI environments
+	// (but we don't assert it — the function should just not panic)
 }

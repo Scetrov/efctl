@@ -213,5 +213,6 @@ func updateEnvFile(path string, updates map[string]string) error {
 		}
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(newLines, "\n")), 0600) // #nosec G306
+	cleanPath := filepath.Clean(path)
+	return os.WriteFile(cleanPath, []byte(strings.Join(newLines, "\n")), 0600) // #nosec G306 G703 -- path is constructed from workspace-local filepath.Join in caller
 }

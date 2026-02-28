@@ -8,6 +8,29 @@ import (
 	"strings"
 )
 
+// safePath constructs and validates a file path under the given base directory,
+// returning an error if the resolved path would escape the base via directory traversal.
+func safePath(base string, elem ...string) (string, error) {
+	parts := append([]string{base}, elem...)
+	p := filepath.Join(parts...)
+
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("resolve base: %w", err)
+	}
+	absP, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+
+	// Ensure the path is within the base directory.
+	if absP != absBase && !strings.HasPrefix(absP, absBase+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes base directory %q", p, base)
+	}
+
+	return absP, nil
+}
+
 func prepareDockerEnvironment(dockerDir string, withGraphql bool, withFrontend bool) error {
 	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
 
@@ -115,38 +138,50 @@ func overrideVolumesYaml(withGraphql bool, withFrontend bool) string {
 }
 
 func patchComposeYml(dockerDir string) {
-	composePath := filepath.Join(dockerDir, "compose.yml")
-	compose, err := os.ReadFile(composePath) // #nosec G304
+	composePath, err := safePath(dockerDir, "compose.yml")
+	if err != nil {
+		log.Printf("patch: invalid compose path: %v", err)
+		return
+	}
+	compose, err := os.ReadFile(composePath) // #nosec G304 -- path validated by safePath
 	if err != nil {
 		return
 	}
 	content := string(compose)
 	if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
 		content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
-		if err := os.WriteFile(composePath, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(composePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
 			log.Printf("patch: failed to write compose.yml: %v", err)
 		}
 	}
 }
 
 func patchDockerfile(dockerDir string) {
-	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
-	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304
+	dockerfilePath, err := safePath(dockerDir, "Dockerfile")
+	if err != nil {
+		log.Printf("patch: invalid Dockerfile path: %v", err)
+		return
+	}
+	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304 -- path validated by safePath
 	if err != nil {
 		return
 	}
 	content := string(dockerfile)
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
-		if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
 			log.Printf("patch: failed to write Dockerfile: %v", err)
 		}
 	}
 }
 
 func patchEntrypoint(dockerDir string) {
-	entrypointPath := filepath.Join(dockerDir, "scripts", "entrypoint.sh")
-	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304
+	entrypointPath, err := safePath(dockerDir, "scripts", "entrypoint.sh")
+	if err != nil {
+		log.Printf("patch: invalid entrypoint path: %v", err)
+		return
+	}
+	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 -- path validated by safePath
 	if err != nil {
 		return
 	}
@@ -156,7 +191,7 @@ func patchEntrypoint(dockerDir string) {
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
 
-	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G306
+	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath
 		log.Printf("patch: failed to write entrypoint.sh: %v", err)
 	}
 }

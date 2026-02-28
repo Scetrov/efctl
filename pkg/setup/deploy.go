@@ -10,13 +10,8 @@ import (
 )
 
 // DeployWorld deploys the world contracts, configures the state, and spawns the Smart Gate infrastructure
-func DeployWorld(workspace string) error {
+func DeployWorld(c container.ContainerClient, workspace string) error {
 	ui.Info.Println("Deploying world contracts...")
-
-	c, err := container.NewClient()
-	if err != nil {
-		return err
-	}
 
 	// 1. Generate environment
 	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {

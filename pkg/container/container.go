@@ -12,10 +12,28 @@ import (
 	"efctl/pkg/ui"
 )
 
-// Client wraps the container engine execution
+// ContainerClient defines the interface for container operations.
+// All consumers should accept this interface to enable testing with mocks.
+type ContainerClient interface {
+	ComposeBuild(dir string) error
+	ComposeRun(dir string) error
+	ComposeUp(dir string, services ...string) error
+	ContainerRunning(name string) bool
+	ContainerLogs(name string, tail int) string
+	WaitForLogs(ctx context.Context, containerName string, searchString string) error
+	InteractiveShell(containerName string) error
+	Exec(containerName string, command []string) error
+	ExecCapture(containerName string, command []string) (string, error)
+	Cleanup() error
+}
+
+// Client wraps the container engine execution and implements ContainerClient.
 type Client struct {
 	Engine string
 }
+
+// Compile-time check that Client implements ContainerClient.
+var _ ContainerClient = (*Client)(nil)
 
 // NewClient returns a new container client
 func NewClient() (*Client, error) {

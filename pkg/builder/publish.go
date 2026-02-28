@@ -25,11 +25,7 @@ type objectChange struct {
 
 // PublishExtension publishes the custom extension to the smart assembly testnet
 // and updates the builder-scaffold/.env with the extracted package IDs.
-func PublishExtension(workspace string, network string, contractPath string) error {
-	c, err := container.NewClient()
-	if err != nil {
-		return err
-	}
+func PublishExtension(c container.ContainerClient, workspace string, network string, contractPath string) error {
 
 	// Ensure no leading slashes — treat it as relative to move-contracts
 	cleanContractPath := filepath.Clean(contractPath)

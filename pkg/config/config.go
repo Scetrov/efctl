@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -42,7 +43,8 @@ var Loaded *Config
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) // #nosec G304 -- config file path is intentionally user-specified via CLI flag
 	if err != nil {
 		if os.IsNotExist(err) && path == DefaultConfigFile {
 			// Default config file is optional
