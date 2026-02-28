@@ -62,6 +62,12 @@ var envUpCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}
+		if withFrontend {
+			if !env.IsPortAvailable(5173) {
+				ui.Error.Println("Port 5173 (Frontend) is already in use by another process. Please free it up.")
+				os.Exit(1)
+			}
+		}
 
 		ui.Info.Println("Setting up workspace...")
 		if err := setup.CloneRepositories(workspacePath); err != nil {
@@ -72,7 +78,7 @@ var envUpCmd = &cobra.Command{
 
 		ui.Info.Println("Starting environment...")
 
-		if err := setup.StartEnvironment(workspacePath, withGraphql); err != nil {
+		if err := setup.StartEnvironment(workspacePath, withGraphql, withFrontend); err != nil {
 			ui.Error.Println("Start failed: " + err.Error())
 			ui.Warn.Println("The environment may be partially initialized. It is recommended to run `efctl down` before trying again.")
 			os.Exit(1)
@@ -99,13 +105,19 @@ var envUpCmd = &cobra.Command{
 
 		setup.PrintDeploymentSummary(workspacePath)
 
+		if withFrontend {
+			fmt.Println("\n" + ui.GlobeEmoji + " Frontend dApp: http://localhost:5173")
+		}
+
 		ui.Success.Println(fmt.Sprintf("%s Environment is up! The Sui playground is running and gates are spawned.", ui.GlobeEmoji))
 	},
 }
 
 var withGraphql bool
+var withFrontend bool
 
 func init() {
 	envUpCmd.Flags().BoolVar(&withGraphql, "with-graphql", false, "Enable the SQL Indexer and GraphQL API")
+	envUpCmd.Flags().BoolVar(&withFrontend, "with-frontend", false, "Enable the builder-scaffold web frontend (Vite dev server on port 5173)")
 	envCmd.AddCommand(envUpCmd)
 }

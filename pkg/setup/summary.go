@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"efctl/pkg/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -78,6 +79,15 @@ func PrintDeploymentSummary(workspace string) {
 	fmt.Println()
 	ui.Success.Println("Explore the generated World:")
 	fmt.Println("🔗 https://custom.suiscan.xyz/custom/home/?network=http%3A%2F%2Flocalhost%3A9000")
+
+	// Check if frontend is enabled by looking at the override file
+	overridePath := filepath.Join(workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
+	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304
+		if strings.Contains(string(data), "frontend:") {
+			fmt.Println("💻 Frontend dApp: http://localhost:5173")
+		}
+	}
+
 	fmt.Println()
 }
 

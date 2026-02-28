@@ -61,6 +61,45 @@ func (c *Client) ComposeRun(dir string) error {
 	return nil
 }
 
+// ComposeUp starts one or more compose services in detached mode
+func (c *Client) ComposeUp(dir string, services ...string) error {
+	args := []string{"compose", "up", "-d"}
+	args = append(args, services...)
+
+	label := strings.Join(services, ", ")
+	spinner, _ := ui.Spin(fmt.Sprintf("Starting %s...", label))
+
+	cmd := exec.Command(c.Engine, args...) // #nosec G204
+	cmd.Dir = dir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to start %s", label))
+		return fmt.Errorf("compose up error: %v\n%s", err, string(output))
+	}
+
+	spinner.Success(fmt.Sprintf("%s started", label))
+	return nil
+}
+
+// ContainerRunning checks if a container is currently running.
+func (c *Client) ContainerRunning(name string) bool {
+	out, err := exec.Command(c.Engine, "inspect", "--format", "{{.State.Running}}", name).Output() // #nosec G204
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
+// ContainerLogs returns the last N lines of a container's logs.
+func (c *Client) ContainerLogs(name string, tail int) string {
+	out, err := exec.Command(c.Engine, "logs", "--tail", fmt.Sprintf("%d", tail), name).CombinedOutput() // #nosec G204
+	if err != nil {
+		return fmt.Sprintf("(could not retrieve logs: %v)", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // WaitForLogs waits for a specific string in the container logs
 func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to initialize...", containerName))
@@ -170,55 +209,59 @@ func (c *Client) ExecCapture(containerName string, command []string) (string, er
 // Cleanup stops/removes the container, removes images, volumes
 func (c *Client) Cleanup() error {
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")
-	if c.containerExists(ContainerSuiPlayground) {
-		if err := exec.Command(c.Engine, "stop", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
-			ui.Warn.Println(fmt.Sprintf("Failed to stop %s: %v", ContainerSuiPlayground, err))
-		}
-		if err := exec.Command(c.Engine, "rm", ContainerSuiPlayground).Run(); err != nil { // #nosec G204
-			ui.Warn.Println(fmt.Sprintf("Failed to remove %s: %v", ContainerSuiPlayground, err))
-		}
-	}
+	c.stopAndRemoveContainers([]string{ContainerSuiPlayground})
 	spinner.Success(fmt.Sprintf("Container %s removal attempted", ContainerSuiPlayground))
 
 	spinnerPg, _ := ui.Spin("Stopping and removing postgres container...")
-	pgContainers := []string{ContainerPostgres, ContainerPostgresOld}
-	for _, pg := range pgContainers {
-		if c.containerExists(pg) {
-			if err := exec.Command(c.Engine, "stop", pg).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to stop %s: %v", pg, err))
-			}
-			if err := exec.Command(c.Engine, "rm", pg).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to remove %s: %v", pg, err))
-			}
-		}
-	}
+	c.stopAndRemoveContainers([]string{ContainerPostgres, ContainerPostgresOld})
 	spinnerPg.Success("Postgres container removal attempted")
 
+	spinnerFe, _ := ui.Spin("Stopping and removing frontend container...")
+	c.stopAndRemoveContainers([]string{ContainerFrontend, ContainerFrontendOld})
+	spinnerFe.Success("Frontend container removal attempted")
+
 	spinner2, _ := ui.Spin("Removing sui-dev images...")
-	if c.imageExists(ImageDockerSuiDev) {
-		if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDev).Run(); err != nil { // #nosec G204
-			ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", ImageDockerSuiDev, err))
-		}
-	}
-	if c.imageExists(ImageDockerSuiDevOld) {
-		if err := exec.Command(c.Engine, "rmi", ImageDockerSuiDevOld).Run(); err != nil { // #nosec G204
-			ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", ImageDockerSuiDevOld, err))
-		}
-	}
+	c.removeImages([]string{ImageDockerSuiDev, ImageDockerSuiDevOld})
 	spinner2.Success("Images removal attempted")
 
 	spinner3, _ := ui.Spin("Removing config and data volumes...")
-	volumes := []string{VolumeDockerSuiConfig, VolumeDockerSuiConfigOld, VolumeDockerPgData, VolumeDockerPgDataOld}
-	for _, vol := range volumes {
+	c.removeVolumes([]string{VolumeDockerSuiConfig, VolumeDockerSuiConfigOld, VolumeDockerPgData, VolumeDockerPgDataOld, VolumeDockerFeModules, VolumeDockerFeModulesOld})
+	spinner3.Success("Volumes removal attempted")
+
+	return nil
+}
+
+func (c *Client) stopAndRemoveContainers(names []string) {
+	for _, name := range names {
+		if c.containerExists(name) {
+			if err := exec.Command(c.Engine, "stop", name).Run(); err != nil { // #nosec G204
+				ui.Warn.Println(fmt.Sprintf("Failed to stop %s: %v", name, err))
+			}
+			if err := exec.Command(c.Engine, "rm", name).Run(); err != nil { // #nosec G204
+				ui.Warn.Println(fmt.Sprintf("Failed to remove %s: %v", name, err))
+			}
+		}
+	}
+}
+
+func (c *Client) removeImages(names []string) {
+	for _, name := range names {
+		if c.imageExists(name) {
+			if err := exec.Command(c.Engine, "rmi", name).Run(); err != nil { // #nosec G204
+				ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", name, err))
+			}
+		}
+	}
+}
+
+func (c *Client) removeVolumes(names []string) {
+	for _, vol := range names {
 		if c.volumeExists(vol) {
 			if err := exec.Command(c.Engine, "volume", "rm", vol).Run(); err != nil { // #nosec G204
 				ui.Warn.Println(fmt.Sprintf("Failed to remove %s volume: %v", vol, err))
 			}
 		}
 	}
-	spinner3.Success("Volumes removal attempted")
-
-	return nil
 }
 
 func (c *Client) containerExists(name string) bool {

@@ -7,13 +7,49 @@ import (
 	"strings"
 )
 
-func prepareDockerEnvironment(dockerDir string, withGraphql bool) error {
+func prepareDockerEnvironment(dockerDir string, withGraphql bool, withFrontend bool) error {
 	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
 
 	// 1. Manage docker-compose.override.yml
+	if withGraphql || withFrontend {
+		overrideYaml := buildOverrideYaml(withGraphql, withFrontend)
+		if err := os.WriteFile(overridePath, []byte(overrideYaml), 0600); err != nil {
+			return fmt.Errorf("failed to write override yaml: %v", err)
+		}
+	} else {
+		_ = os.Remove(overridePath)
+	}
+
+	// 1.5 Patch compose.yml
+	patchComposeYml(dockerDir)
+
+	// 2. Patch Dockerfile
+	patchDockerfile(dockerDir)
+
+	// 3. Patch entrypoint.sh
+	patchEntrypoint(dockerDir)
+
+	return nil
+}
+
+func buildOverrideYaml(withGraphql bool, withFrontend bool) string {
+	overrideYaml := "services:\n"
+
 	if withGraphql {
-		overrideYaml := "services:\n"
-		overrideYaml += `  postgres:
+		overrideYaml += graphqlServicesYaml()
+	}
+
+	if withFrontend {
+		overrideYaml += frontendServiceYaml()
+	}
+
+	overrideYaml += overrideVolumesYaml(withGraphql, withFrontend)
+
+	return overrideYaml
+}
+
+func graphqlServicesYaml() string {
+	return `  postgres:
     image: docker.io/library/postgres:16
     environment:
       POSTGRES_USER: sui
@@ -27,63 +63,97 @@ func prepareDockerEnvironment(dockerDir string, withGraphql bool) error {
       timeout: 3s
       retries: 30
 
-`
-
-		overrideYaml += "  sui-dev:\n    environment:\n"
-		overrideYaml += `      SUI_INDEXER_DB_URL: postgres://sui:sui@postgres:5432/sui_indexer
-`
-		overrideYaml += `      SUI_GRAPHQL_ENABLED: "true"
-`
-
-		overrideYaml += `    depends_on:
+` + "  sui-dev:\n    environment:\n" +
+		`      SUI_INDEXER_DB_URL: postgres://sui:sui@postgres:5432/sui_indexer
+` + `      SUI_GRAPHQL_ENABLED: "true"
+` + `    depends_on:
       postgres:
         condition: service_healthy
-`
-
-		overrideYaml += `    ports:
+` + `    ports:
       - "9125:9125"
 `
+}
 
-		overrideYaml += "\nvolumes:\n  sui-pgdata:\n"
+func frontendServiceYaml() string {
+	return `
+  frontend:
+    image: docker.io/library/node:24-slim
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../../:/workspace
+      - frontend-node-modules:/workspace/builder-scaffold/dapps/node_modules
+    working_dir: /workspace/builder-scaffold/dapps
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        npm install -g pnpm
+        pnpm install
+        exec pnpm dev --host 0.0.0.0
+`
+}
 
-		if err := os.WriteFile(overridePath, []byte(overrideYaml), 0600); err != nil {
-			return fmt.Errorf("failed to write override yaml: %v", err)
-		}
-	} else {
-		// Clean up any existing override file
-		_ = os.Remove(overridePath)
+func overrideVolumesYaml(withGraphql bool, withFrontend bool) string {
+	if !withGraphql && !withFrontend {
+		return ""
 	}
+	result := "\nvolumes:\n"
+	if withGraphql {
+		result += "  sui-pgdata:\n"
+	} else {
+		// volumes: header already added above
+	}
+	if withFrontend {
+		result += "  frontend-node-modules:\n"
+	}
+	return result
+}
 
-	// 1.5 Patch compose.yml
+func patchComposeYml(dockerDir string) {
 	composePath := filepath.Join(dockerDir, "compose.yml")
 	compose, err := os.ReadFile(composePath) // #nosec G304
-	if err == nil {
-		content := string(compose)
-		if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
-			content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
-			_ = os.WriteFile(composePath, []byte(content), 0600)
-		}
+	if err != nil {
+		return
 	}
+	content := string(compose)
+	if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
+		content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
+		_ = os.WriteFile(composePath, []byte(content), 0600)
+	}
+}
 
-	// 2. Patch Dockerfile
+func patchDockerfile(dockerDir string) {
 	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
 	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304
-	if err == nil {
-		content := string(dockerfile)
-		if !strings.Contains(content, "postgresql-client") {
-			content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
-			_ = os.WriteFile(dockerfilePath, []byte(content), 0600)
-		}
+	if err != nil {
+		return
 	}
+	content := string(dockerfile)
+	if !strings.Contains(content, "postgresql-client") {
+		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
+		_ = os.WriteFile(dockerfilePath, []byte(content), 0600)
+	}
+}
 
-	// 3. Patch entrypoint.sh
+func patchEntrypoint(dockerDir string) {
 	entrypointPath := filepath.Join(dockerDir, "scripts", "entrypoint.sh")
 	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304
-	if err == nil {
-		content := string(entrypoint)
+	if err != nil {
+		return
+	}
+	content := string(entrypoint)
 
-		// Add postgres wait right before starting sui node
-		postgresWaitScript := `
+	content = patchEntrypointPostgresWait(content)
+	content = patchEntrypointSuiStart(content)
+	content = patchEntrypointLoopTimings(content)
+
+	_ = os.WriteFile(entrypointPath, []byte(content), 0700) // #nosec G306
+}
+
+func patchEntrypointPostgresWait(content string) string {
+	postgresWaitScript := `
 # ---------- wait for postgres ----------
 if [ -n "${SUI_INDEXER_DB_URL:-}" ]; then
   echo "[sui-dev] Waiting for Postgres to be ready..."
@@ -114,12 +184,14 @@ fi
 
 # ---------- start local node ----------`
 
-		if !strings.Contains(content, "wait for postgres") {
-			content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
-		}
+	if !strings.Contains(content, "wait for postgres") {
+		content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
+	}
+	return content
+}
 
-		// Patch sui start command
-		suiStartScript := `SUI_START_ARGS="--with-faucet --force-regenesis"
+func patchEntrypointSuiStart(content string) string {
+	suiStartScript := `SUI_START_ARGS="--with-faucet --force-regenesis"
 if [ -n "${SUI_INDEXER_DB_URL:-}" ]; then
   SUI_START_ARGS="$SUI_START_ARGS --with-indexer=$SUI_INDEXER_DB_URL"
 fi
@@ -127,23 +199,21 @@ if [ "${SUI_GRAPHQL_ENABLED:-}" = "true" ]; then
   SUI_START_ARGS="$SUI_START_ARGS --with-graphql=0.0.0.0:9125"
 fi
 sui start $SUI_START_ARGS &`
-		if !strings.Contains(content, "SUI_START_ARGS") {
-			content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
-		}
+	if !strings.Contains(content, "SUI_START_ARGS") {
+		content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
+	}
+	return content
+}
 
-		// Patch loop wait 30 -> 60 and sleep 2 -> sleep 5
-		content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
-		content = strings.ReplaceAll(content, "if [ \"$i\" -eq 30 ]; then", "if [ \"$i\" -eq 60 ]; then")
+func patchEntrypointLoopTimings(content string) string {
+	content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
+	content = strings.ReplaceAll(content, "if [ \"$i\" -eq 30 ]; then", "if [ \"$i\" -eq 60 ]; then")
 
-		if !strings.Contains(content, "RPC responding, waiting for full initialization") {
-			rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+	if !strings.Contains(content, "RPC responding, waiting for full initialization") {
+		rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
 sleep 5
 echo "[sui-dev] Node ready."`
-			content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
-		}
-
-		_ = os.WriteFile(entrypointPath, []byte(content), 0700) // #nosec G306
+		content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
 	}
-
-	return nil
+	return content
 }

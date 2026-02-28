@@ -36,7 +36,7 @@ echo "[sui-dev] RPC ready."
 	os.WriteFile(entrypointPath, []byte(entrypointContent), 0755)
 
 	// 1. Run patch
-	err := prepareDockerEnvironment(dockerDir, true)
+	err := prepareDockerEnvironment(dockerDir, true, false)
 	if err != nil {
 		t.Fatalf("prepareDockerEnvironment failed: %v", err)
 	}
@@ -48,7 +48,7 @@ echo "[sui-dev] RPC ready."
 	}
 
 	// Test case 2: withGraphql = false (no sql indexer or graphql)
-	err = prepareDockerEnvironment(dockerDir, false)
+	err = prepareDockerEnvironment(dockerDir, false, false)
 	if err != nil {
 		t.Fatalf("prepareDockerEnvironment failed: %v", err)
 	}
@@ -81,7 +81,7 @@ echo "[sui-dev] RPC ready."
 	}
 
 	// 5. Test idempotency
-	err = prepareDockerEnvironment(dockerDir, true)
+	err = prepareDockerEnvironment(dockerDir, true, false)
 	if err != nil {
 		t.Fatalf("prepareDockerEnvironment second pass failed: %v", err)
 	}

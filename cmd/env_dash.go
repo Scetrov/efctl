@@ -121,6 +121,7 @@ type restartUpMsg struct {
 type StatsMsg struct {
 	Sui        containerStat
 	Pg         containerStat
+	Fe         containerStat
 	Chain      chainStat
 	Objects    []string
 	Admin      string
@@ -265,6 +266,9 @@ func colorizeLogLine(line string) string {
 	if strings.HasPrefix(line, "[deploy]") {
 		return lipgloss.NewStyle().Foreground(green).Render("[deploy]") + line[8:]
 	}
+	if strings.HasPrefix(line, "[frontend]") {
+		return lipgloss.NewStyle().Foreground(yellow).Render("[frontend]") + line[10:]
+	}
 	return line
 }
 
@@ -385,10 +389,11 @@ func fetchChainInfo(client *http.Client) chainStat {
 	return info
 }
 
-// parseContainerStats parses docker stats output into sui and postgres container stats.
-func parseContainerStats(engine string) (sui, pg containerStat) {
+// parseContainerStats parses docker stats output into sui, postgres, and frontend container stats.
+func parseContainerStats(engine string) (sui, pg, fe containerStat) {
 	sui = containerStat{Status: "Stopped", CPU: "-", Mem: "-"}
 	pg = containerStat{Status: "Stopped", CPU: "-", Mem: "-"}
+	fe = containerStat{Status: "Stopped", CPU: "-", Mem: "-"}
 	out, err := exec.Command(engine, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output() // #nosec G204
 	if err != nil {
 		return
@@ -404,6 +409,9 @@ func parseContainerStats(engine string) (sui, pg containerStat) {
 		}
 		if name == container.ContainerPostgres || name == container.ContainerPostgresOld {
 			pg = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+		}
+		if name == container.ContainerFrontend || name == container.ContainerFrontendOld {
+			fe = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
 		}
 	}
 	return
@@ -461,7 +469,7 @@ func buildAddresses(admin string, envVars map[string]string) map[string]string {
 
 func fetchStats(engine string, workspace string) StatsMsg {
 	msg := StatsMsg{}
-	msg.Sui, msg.Pg = parseContainerStats(engine)
+	msg.Sui, msg.Pg, msg.Fe = parseContainerStats(engine)
 
 	client := &http.Client{Timeout: 1 * time.Second}
 	msg.Chain = fetchChainInfo(client)
@@ -589,7 +597,17 @@ func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) 
 	}
 	streamContainerLogs(ctx, p, engine, dbContainer, "[db]")
 
-	// 2. Deploy logs
+	// 3. Frontend container logs (try both naming conventions)
+	feContainer := container.ContainerFrontend
+	if out, err := exec.Command(engine, "ps", "--format", "{{.Names}}").Output(); err == nil { // #nosec G204
+		names := string(out)
+		if strings.Contains(names, container.ContainerFrontendOld) {
+			feContainer = container.ContainerFrontendOld
+		}
+	}
+	streamContainerLogs(ctx, p, engine, feContainer, "[frontend]")
+
+	// 4. Deploy logs
 	deployLogPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")
 	// Try to start immediately or retry if missing (during env up)
 	go func() {
@@ -638,6 +656,7 @@ type model struct {
 	startTime      time.Time
 	suiStat        containerStat
 	pgStat         containerStat
+	feStat         containerStat
 	chainInfo      chainStat
 	recentTxs      []recentTx
 	objectTrackers []string
@@ -649,24 +668,34 @@ type model struct {
 	logs           []string
 	logScroll      int          // lines scrolled up from the bottom (0 = tailing)
 	graphqlOn      bool         // whether GraphQL/Indexer is currently enabled
+	frontendOn     bool         // whether the frontend dApp container is enabled
 	worldEvents    []worldEvent // recent events from the world package
 }
 
 func initialModel(engine string, workspace string) model {
 	// Detect whether GraphQL is currently enabled by checking the override file
 	gqlOn := false
+	feOn := false
 	overridePath := filepath.Join(workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
-	if _, err := os.Stat(overridePath); err == nil {
-		gqlOn = true
+	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304 -- path constructed from known workspace prefix
+		content := string(data)
+		if strings.Contains(content, "postgres:") || strings.Contains(content, "SUI_GRAPHQL_ENABLED") {
+			gqlOn = true
+		}
+		if strings.Contains(content, "frontend:") {
+			feOn = true
+		}
 	}
 	return model{
-		engine:    engine,
-		workspace: workspace,
-		startTime: time.Now(),
-		suiStat:   containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
-		pgStat:    containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
-		adminAddr: "Checking...",
-		graphqlOn: gqlOn,
+		engine:     engine,
+		workspace:  workspace,
+		startTime:  time.Now(),
+		suiStat:    containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
+		pgStat:     containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
+		feStat:     containerStat{Status: "Checking...", CPU: "-", Mem: "-"},
+		adminAddr:  "Checking...",
+		graphqlOn:  gqlOn,
+		frontendOn: feOn,
 	}
 }
 
@@ -763,15 +792,20 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleEnvDown()
 	case "g":
 		return m.handleEnableGraphQL()
+	case "f":
+		return m.handleEnableFrontend()
 	}
 	return m, nil
 }
 
-// handleRestart runs env down then env up, preserving --with-graphql if enabled.
+// handleRestart runs env down then env up, preserving --with-graphql and --with-frontend if enabled.
 func (m model) handleRestart() (tea.Model, tea.Cmd) {
 	args := []string{"env", "up", "-w", m.workspace}
 	if m.graphqlOn {
 		args = append(args, "--with-graphql")
+	}
+	if m.frontendOn {
+		args = append(args, "--with-frontend")
 	}
 	downCmd := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204
 	upArgs := args
@@ -798,7 +832,11 @@ func (m model) handleEnvDown() (tea.Model, tea.Cmd) {
 // handleEnableGraphQL enables GraphQL if not already on.
 func (m model) handleEnableGraphQL() (tea.Model, tea.Cmd) {
 	if !m.graphqlOn {
-		c := exec.Command("efctl", "env", "up", "-w", m.workspace, "--with-graphql") // #nosec G204
+		args := []string{"env", "up", "-w", m.workspace, "--with-graphql"}
+		if m.frontendOn {
+			args = append(args, "--with-frontend")
+		}
+		c := exec.Command("efctl", args...) // #nosec G204
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			if err != nil {
 				return LogMsg("Error enabling GraphQL: " + err.Error())
@@ -809,10 +847,29 @@ func (m model) handleEnableGraphQL() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleEnableFrontend enables the frontend dApp if not already on.
+func (m model) handleEnableFrontend() (tea.Model, tea.Cmd) {
+	if !m.frontendOn {
+		args := []string{"env", "up", "-w", m.workspace, "--with-frontend"}
+		if m.graphqlOn {
+			args = append(args, "--with-graphql")
+		}
+		c := exec.Command("efctl", args...) // #nosec G204
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			if err != nil {
+				return LogMsg("Error enabling frontend: " + err.Error())
+			}
+			return LogMsg("Frontend enabled successfully.")
+		})
+	}
+	return m, nil
+}
+
 // applyStats updates the model with fresh stats data.
 func (m *model) applyStats(msg StatsMsg) {
 	m.suiStat = msg.Sui
 	m.pgStat = msg.Pg
+	m.feStat = msg.Fe
 	m.chainInfo = msg.Chain
 	m.recentTxs = msg.Chain.RecentTxs
 	m.objectTrackers = msg.Objects
@@ -823,7 +880,14 @@ func (m *model) applyStats(msg StatsMsg) {
 	m.worldPkgID = msg.WorldPkgID
 	m.worldEvents = msg.Events
 	overridePath := filepath.Join(m.workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
-	m.graphqlOn = fileExists(overridePath)
+	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304
+		content := string(data)
+		m.graphqlOn = strings.Contains(content, "postgres:") || strings.Contains(content, "SUI_GRAPHQL_ENABLED")
+		m.frontendOn = strings.Contains(content, "frontend:")
+	} else {
+		m.graphqlOn = false
+		m.frontendOn = false
+	}
 }
 
 // fileExists returns true if the path exists.
@@ -1138,7 +1202,11 @@ func (m model) renderHeader() string {
 	if m.graphqlOn {
 		gqlStatus = "gql:ON"
 	}
-	headerTitle := fmt.Sprintf(" efctl dashboard │ sui:%s  db:%s  %s │ Uptime: %v ", suiUp, dbUp, gqlStatus, uptime)
+	feStatus := "fe:OFF"
+	if m.frontendOn {
+		feStatus = "fe:ON"
+	}
+	headerTitle := fmt.Sprintf(" efctl dashboard │ sui:%s  db:%s  %s  %s │ Uptime: %v ", suiUp, dbUp, gqlStatus, feStatus, uptime)
 	padLen := m.width - lipgloss.Width(headerTitle)
 	if padLen < 0 {
 		padLen = 0
@@ -1232,8 +1300,15 @@ func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows,
 	}
 
 	footerKeys := "[r] restart  [d] env down  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
-	if !m.graphqlOn {
-		footerKeys = "[r] restart  [d] env down  [g] enable graphql  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
+	if !m.graphqlOn || !m.frontendOn {
+		extras := ""
+		if !m.graphqlOn {
+			extras += "  [g] enable graphql"
+		}
+		if !m.frontendOn {
+			extras += "  [f] enable frontend"
+		}
+		footerKeys = "[r] restart  [d] env down" + extras + "  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
 	}
 	if hasEvents {
 		out.WriteString(buildBottomBorderWithJunction(m.width, leftInner, footerKeys))
@@ -1259,6 +1334,9 @@ func (m model) renderContainerContent() string {
 	b.WriteString("\n")
 	renderRow("sui-playground", m.suiStat)
 	renderRow("database", m.pgStat)
+	if m.frontendOn {
+		renderRow("frontend", m.feStat)
+	}
 	b.WriteString("\n")
 	return b.String()
 }
@@ -1306,6 +1384,9 @@ func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 	b.WriteString("\n")
 	if m.worldPkgID != "" {
 		b.WriteString(labelStyle.Render(" World Pkg:") + " " + valueStyle.Render(shorten(m.worldPkgID)) + "\n")
+	}
+	if m.frontendOn {
+		b.WriteString(labelStyle.Render(" Frontend:") + " " + valueStyle.Render("http://localhost:5173") + "\n")
 	}
 }
 
