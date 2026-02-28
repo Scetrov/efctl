@@ -66,6 +66,9 @@ func IsPortAvailable(port int) bool {
 	if err != nil {
 		return false
 	}
-	_ = ln.Close()
+	if err := ln.Close(); err != nil {
+		// Non-critical: listener close failure during availability check
+		_ = err
+	}
 	return true
 }

@@ -31,3 +31,44 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        run: gosec -severity medium -confidence medium -fmt json -out gosec-ci-results.json ./... || true
+
+      - name: Check gosec results
+        run: |
+          if [ -f gosec-ci-results.json ]; then
+            ISSUES=$(cat gosec-ci-results.json | go run -mod=mod github.com/itchyny/gojq/cmd/gojq@latest '[.Issues[] | select(.nosec == false and (.severity == "HIGH" or .severity == "MEDIUM"))] | length' 2>/dev/null || echo "0")
+            echo "Unresolved HIGH/MEDIUM gosec findings: $ISSUES"
+            if [ "$ISSUES" -gt 0 ]; then
+              echo "::error::gosec found $ISSUES unresolved HIGH/MEDIUM findings"
+              cat gosec-ci-results.json | go run -mod=mod github.com/itchyny/gojq/cmd/gojq@latest '.Issues[] | select(.nosec == false and (.severity == "HIGH" or .severity == "MEDIUM")) | "\(.severity) \(.rule_id) \(.file):\(.line) \(.details)"'
+              exit 1
+            fi
+          fi
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Upload gosec results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: gosec-results
+          path: gosec-ci-results.json

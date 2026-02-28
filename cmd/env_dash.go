@@ -37,8 +37,24 @@ var envDashCmd = &cobra.Command{
 		}
 
 		m := initialModel(engine, workspacePath)
-		f, _ := tea.LogToFile("/tmp/tea.log", "debug")
-		defer f.Close()
+
+		// Only enable debug logging when explicitly requested;
+		// log to a user-owned directory with restrictive permissions.
+		if debugMode, _ := cmd.Flags().GetBool("debug"); debugMode {
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				logDir := filepath.Join(homeDir, ".efctl")
+				_ = os.MkdirAll(logDir, 0700)
+				logPath := filepath.Join(logDir, "dash-debug.log")
+				f, fErr := tea.LogToFile(logPath, "debug")
+				if fErr == nil {
+					defer f.Close()
+					// Restrict file permissions to owner-only
+					_ = os.Chmod(logPath, 0600)
+				}
+			}
+		}
+
 		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 		// Start log collection
@@ -54,6 +70,7 @@ var envDashCmd = &cobra.Command{
 }
 
 func init() {
+	envDashCmd.Flags().Bool("debug", false, "Enable debug logging to ~/.efctl/dash-debug.log")
 	envCmd.AddCommand(envDashCmd)
 }
 
@@ -550,8 +567,11 @@ func fetchWorldEvents(client *http.Client, pkgID string, admin string) []worldEv
 }
 
 // deriveAddress uses sui keytool to derive an address from a bech32 private key.
+// The private key is passed via stdin to avoid exposure in process arguments.
 func deriveAddress(privkey string) string {
-	out, err := exec.Command("sui", "keytool", "import", privkey, "ed25519", "--json").Output() // #nosec G204 -- privkey from trusted .env file
+	cmd := exec.Command("sui", "keytool", "import", "ed25519", "--json") // #nosec G204
+	cmd.Stdin = strings.NewReader(privkey + "\n")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

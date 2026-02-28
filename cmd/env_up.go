@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"efctl/pkg/config"
 	"efctl/pkg/env"
 	"efctl/pkg/setup"
 	"efctl/pkg/sui"
@@ -18,6 +19,17 @@ var envUpCmd = &cobra.Command{
 	Short: "Bring up the local environment",
 	Long:  `Runs check, setup, start, and deploy sequentially to bring up a fully working EVE Frontier Smart Assembly testing environment.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Merge config file values: config provides defaults, CLI flags override
+		cfg := config.Loaded
+		if cfg != nil {
+			if cfg.WithGraphql != nil && !cmd.Flags().Changed("with-graphql") {
+				withGraphql = *cfg.WithGraphql
+			}
+			if cfg.WithFrontend != nil && !cmd.Flags().Changed("with-frontend") {
+				withFrontend = *cfg.WithFrontend
+			}
+		}
+
 		ui.Info.Println("Checking prerequisites...")
 		res := env.CheckPrerequisites()
 

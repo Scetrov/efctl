@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"os"
+
 	"efctl/pkg/builder"
 	"efctl/pkg/ui"
+	"efctl/pkg/validate"
 	"github.com/spf13/cobra"
-	"os"
 )
 
 var extensionPublishCmd = &cobra.Command{
@@ -14,6 +16,16 @@ var extensionPublishCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		contractPath := args[0]
+
+		if err := validate.Network(envNetwork); err != nil {
+			ui.Error.Println(err.Error())
+			os.Exit(1)
+		}
+		if err := validate.ContractPath(contractPath); err != nil {
+			ui.Error.Println(err.Error())
+			os.Exit(1)
+		}
+
 		ui.Info.Printf("Publishing extension contract from %s...\n", contractPath)
 
 		if err := builder.PublishExtension(workspacePath, envNetwork, contractPath); err != nil {

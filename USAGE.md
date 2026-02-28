@@ -2,11 +2,38 @@
 
 `efctl` provides several commands to interact with and manage the EVE Frontier local world contracts and smart gates.
 
-## Global Commands
+## Global Options
 
-### `efctl [command] --help`
+- `--config-file string`: Path to the `efctl.yaml` configuration file. (default: `efctl.yaml`)
+- `--help`: Use the `--help` flag with any command to see the available options and subcommands.
 
-Use the `--help` flag with any command to see the available options and subcommands.
+---
+
+## Configuration File
+
+`efctl` supports an optional `efctl.yaml` configuration file. By default it looks for `efctl.yaml` in the current directory. Use `--config-file` to specify a different path.
+
+All properties are optional. CLI flags override values from the config file.
+
+```yaml
+# Enable the builder-scaffold web frontend (Vite dev server on port 5173)
+with-frontend: false
+
+# Enable the SQL Indexer and GraphQL API
+with-graphql: false
+
+# Git clone URL for the world-contracts repository
+world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
+
+# Branch to checkout for world-contracts (default: main)
+world-contracts-branch: "main"
+
+# Git clone URL for the builder-scaffold repository
+builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
+
+# Branch to checkout for builder-scaffold (default: main)
+builder-scaffold-branch: "main"
+```
 
 ---
 
@@ -20,8 +47,11 @@ Brings up the local environment. It sequentially runs checks, setup, start, and 
 
 **Options:**
 
+- `--with-frontend`: Enable the builder-scaffold web frontend (Vite dev server on port 5173).
 - `--with-graphql`: Enable the SQL Indexer and GraphQL API.
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+These flags can also be set via `efctl.yaml` (`with-frontend`, `with-graphql`). CLI flags take precedence over config file values.
 
 ### `efctl env down`
 

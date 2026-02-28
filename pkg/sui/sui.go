@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"efctl/pkg/ui"
 )
@@ -67,10 +68,11 @@ func ConfigureSui(workspace string) error {
 	}
 
 	for _, cfg := range configs {
-		// sui keytool import <key> ed25519 --alias <alias>
+		// Import key via stdin to avoid exposing it in process arguments (ps aux / /proc/pid/cmdline)
 		ui.Info.Println(fmt.Sprintf("Importing key for %s as alias: %s", cfg.Role, cfg.Alias))
-		// #nosec G204 -- Key and Alias are securely extracted via regex
-		if err := exec.Command("sui", "keytool", "import", cfg.Key, "ed25519", "--alias", cfg.Alias).Run(); err != nil {
+		importCmd := exec.Command("sui", "keytool", "import", "--alias", cfg.Alias, "ed25519", "--json") // #nosec G204
+		importCmd.Stdin = strings.NewReader(cfg.Key + "\n")
+		if err := importCmd.Run(); err != nil {
 			// If already exists, we might want to update or ignore. For now, ignore but log
 			ui.Warn.Println(fmt.Sprintf("Failed to import key for %s (possibly already exists): %v", cfg.Role, err))
 		}

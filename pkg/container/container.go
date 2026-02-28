@@ -145,7 +145,10 @@ func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchSt
 		}
 	}
 
-	_ = cmd.Wait() // Reclaim process
+	if err := cmd.Wait(); err != nil {
+		// Non-critical: log follow process exit after search string found
+		_ = err
+	}
 
 	spinner.Success(fmt.Sprintf("%s is ready", containerName))
 	return nil

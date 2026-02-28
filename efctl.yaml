@@ -1,0 +1,20 @@
+# efctl.yaml — Configuration file for efctl CLI
+# All properties are optional. CLI flags (e.g. --with-frontend) override these values.
+
+# Enable the builder-scaffold web frontend (Vite dev server on port 5173)
+with-frontend: true
+
+# Enable the SQL Indexer and GraphQL API
+with-graphql: true
+
+# Git clone URL for the world-contracts repository
+world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
+
+# Branch to checkout for world-contracts (default: main)
+world-contracts-branch: "main"
+
+# Git clone URL for the builder-scaffold repository
+builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
+
+# Branch to checkout for builder-scaffold (default: main)
+builder-scaffold-branch: "main"

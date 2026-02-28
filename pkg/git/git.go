@@ -28,6 +28,21 @@ func CloneRepository(url string, dest string) error {
 	return nil
 }
 
+// CheckoutBranch checks out the specified branch in the given repository path.
+func CheckoutBranch(repoPath string, branch string) error {
+	spinner, _ := ui.Spin(fmt.Sprintf("%s Checking out branch '%s' in %s...", ui.GitEmoji, branch, repoPath))
+
+	cmd := exec.Command("git", "-C", repoPath, "checkout", branch) // #nosec G204
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to checkout branch '%s'", branch))
+		return fmt.Errorf("git checkout error: %v\n%s", err, string(output))
+	}
+
+	spinner.Success(fmt.Sprintf("Checked out branch '%s' in %s", branch, repoPath))
+	return nil
+}
+
 // SetupWorkDir creates the workspace directory if it doesn't exist
 func SetupWorkDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {

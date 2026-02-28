@@ -9,7 +9,8 @@ A fast and flexible CLI to automate the setup, deployment, and teardown of the E
 ## Options
 
 ```text
-  -h, --help   help for efctl
+      --config-file string   Path to the efctl.yaml configuration file (default "efctl.yaml")
+  -h, --help                 help for efctl
 ```
 
 ## SEE ALSO

@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"efctl/pkg/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
 )
+
+// maxResponseBodySize is the maximum allowed size for a GraphQL response (10 MB).
+const maxResponseBodySize int64 = 10 * 1024 * 1024
 
 type GraphQLRequest struct {
 	Query     string                 `json:"query"`
@@ -27,6 +30,8 @@ type GraphQLResponse struct {
 }
 
 // RunQuery executes a GraphQL query against the specified endpoint.
+// The endpoint must use http:// or https:// scheme. Non-loopback endpoints
+// trigger a security warning (SSRF defense-in-depth).
 func RunQuery(endpoint, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
 	reqBody := GraphQLRequest{
 		Query:     query,
@@ -38,8 +43,19 @@ func RunQuery(endpoint, query string, variables map[string]interface{}) (*GraphQ
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		return nil, fmt.Errorf("invalid endpoint URL scheme")
+	// Validate URL scheme
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid endpoint URL: %w", err)
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return nil, fmt.Errorf("invalid endpoint URL scheme: only http:// and https:// are allowed")
+	}
+
+	// SSRF defense-in-depth: warn when connecting to non-loopback endpoints
+	hostname := parsedURL.Hostname()
+	if hostname != "localhost" && hostname != "127.0.0.1" && hostname != "::1" {
+		fmt.Fprintf(os.Stderr, "Warning: connecting to remote GraphQL endpoint %s\n", endpoint)
 	}
 
 	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
@@ -52,20 +68,26 @@ func RunQuery(endpoint, query string, variables map[string]interface{}) (*GraphQ
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 	}
-	resp, err := client.Do(req) // #nosec G107 G704
+	resp, err := client.Do(req) // #nosec G107 -- endpoint validated above; user-supplied by design for dev tool
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response body to prevent memory exhaustion from malicious endpoints
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var gqlResp GraphQLResponse
 	if err := json.Unmarshal(body, &gqlResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response JSON: %w (raw body: %s)", err, string(body))
+		// Truncate raw body in error message to avoid leaking excessive server internals
+		preview := string(body)
+		if len(preview) > 256 {
+			preview = preview[:256] + "... (truncated)"
+		}
+		return nil, fmt.Errorf("failed to parse response JSON: %w (raw body: %s)", err, preview)
 	}
 
 	if len(gqlResp.Errors) > 0 {

@@ -62,6 +62,13 @@ jobs:
           pattern: binary-*
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd binaries
+          sha256sum efctl-* > checksums.txt
+          echo "Generated checksums:"
+          cat checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')

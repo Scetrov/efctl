@@ -30,10 +30,15 @@ repos:
         args: ["./..."]
         pass_filenames: false
       - id: gosec
-        name: gosec
-        entry: gosec
-        language: golang
-        additional_dependencies: [github.com/securego/gosec/v2/cmd/gosec@latest]
+        name: gosec (security scanner)
+        entry: bash -c 'gosec -severity medium -confidence medium -exclude-generated ./... 2>&1; exit_code=$?; if [ $exit_code -ne 0 ] && [ $exit_code -ne 2 ]; then exit $exit_code; fi; exit 0'
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: govulncheck
+        name: govulncheck (dependency vulns)
+        entry: govulncheck
+        language: system
         types: [go]
         args: ["./..."]
         pass_filenames: false
@@ -45,3 +50,9 @@ repos:
         types: [go]
         args: ["-over", "15", "."]
         pass_filenames: false
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secret detection)

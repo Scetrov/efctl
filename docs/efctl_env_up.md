@@ -14,13 +14,15 @@ efctl env up [flags]
 
 ```text
   -h, --help           help for up
-      --with-graphql   Enable the SQL Indexer and GraphQL API
+      --with-frontend   Enable the builder-scaffold web frontend (Vite dev server on port 5173)
+      --with-graphql    Enable the SQL Indexer and GraphQL API
 ```
 
 ## Options inherited from parent commands
 
 ```text
-  -w, --workspace string   Path to the workspace directory (default ".")
+      --config-file string   Path to the efctl.yaml configuration file (default "efctl.yaml")
+  -w, --workspace string     Path to the workspace directory (default ".")
 ```
 
 ## SEE ALSO

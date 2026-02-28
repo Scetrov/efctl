@@ -2,6 +2,7 @@ package setup
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,9 @@ func prepareDockerEnvironment(dockerDir string, withGraphql bool, withFrontend b
 			return fmt.Errorf("failed to write override yaml: %v", err)
 		}
 	} else {
-		_ = os.Remove(overridePath)
+		if err := os.Remove(overridePath); err != nil && !os.IsNotExist(err) {
+			log.Printf("cleanup: failed to remove override file: %v", err)
+		}
 	}
 
 	// 1.5 Patch compose.yml
@@ -120,7 +123,9 @@ func patchComposeYml(dockerDir string) {
 	content := string(compose)
 	if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
 		content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
-		_ = os.WriteFile(composePath, []byte(content), 0600)
+		if err := os.WriteFile(composePath, []byte(content), 0600); err != nil {
+			log.Printf("patch: failed to write compose.yml: %v", err)
+		}
 	}
 }
 
@@ -133,7 +138,9 @@ func patchDockerfile(dockerDir string) {
 	content := string(dockerfile)
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
-		_ = os.WriteFile(dockerfilePath, []byte(content), 0600)
+		if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil {
+			log.Printf("patch: failed to write Dockerfile: %v", err)
+		}
 	}
 }
 
@@ -149,7 +156,9 @@ func patchEntrypoint(dockerDir string) {
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
 
-	_ = os.WriteFile(entrypointPath, []byte(content), 0700) // #nosec G306
+	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G306
+		log.Printf("patch: failed to write entrypoint.sh: %v", err)
+	}
 }
 
 func patchEntrypointPostgresWait(content string) string {

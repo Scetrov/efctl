@@ -3,6 +3,7 @@ package setup
 import (
 	"path/filepath"
 
+	"efctl/pkg/config"
 	"efctl/pkg/git"
 	"efctl/pkg/ui"
 )
@@ -16,15 +17,24 @@ func CloneRepositories(workspace string) error {
 		return err
 	}
 
-	worldContractsUrl := "https://github.com/evefrontier/world-contracts.git"
+	cfg := config.Loaded
+	worldContractsUrl := cfg.GetWorldContractsURL()
+	worldContractsBranch := cfg.GetWorldContractsBranch()
 	worldContractsPath := filepath.Join(workspace, "world-contracts")
 	if err := git.CloneRepository(worldContractsUrl, worldContractsPath); err != nil {
 		return err
 	}
+	if err := git.CheckoutBranch(worldContractsPath, worldContractsBranch); err != nil {
+		return err
+	}
 
-	builderScaffoldUrl := "https://github.com/evefrontier/builder-scaffold.git"
+	builderScaffoldUrl := cfg.GetBuilderScaffoldURL()
+	builderScaffoldBranch := cfg.GetBuilderScaffoldBranch()
 	builderScaffoldPath := filepath.Join(workspace, "builder-scaffold")
 	if err := git.CloneRepository(builderScaffoldUrl, builderScaffoldPath); err != nil {
+		return err
+	}
+	if err := git.CheckoutBranch(builderScaffoldPath, builderScaffoldBranch); err != nil {
 		return err
 	}
 
