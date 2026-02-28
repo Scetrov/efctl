@@ -15,6 +15,7 @@ A fast and flexible CLI to automate the setup, deployment, and teardown of the E
 
 ## SEE ALSO
 
+- [efctl completion](efctl_completion.md) - Generate shell completion scripts
 - [efctl env](efctl_env.md) - Manage the local Sui development environment
 - [efctl graphql](efctl_graphql.md) - Interact with the Sui GraphQL RPC
 - [efctl sui](efctl_sui.md) - Manage the local Sui client and environment
