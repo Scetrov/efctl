@@ -34,7 +34,7 @@ func TestEngineSelectionWithEnvVar(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Falls back to default (podman) if env says podman but podman isn't installed",
+			name:        "Falls back to default (docker) if env says podman but podman isn't installed",
 			envVar:      "podman",
 			hasDocker:   true,
 			hasPodman:   false,
@@ -42,11 +42,11 @@ func TestEngineSelectionWithEnvVar(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Default precedence prefers podman if both installed and no env var set",
+			name:        "Default precedence prefers docker if both installed and no env var set",
 			envVar:      "",
 			hasDocker:   true,
 			hasPodman:   true,
-			expected:    "podman",
+			expected:    "docker",
 			expectError: false,
 		},
 		{

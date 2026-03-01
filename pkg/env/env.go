@@ -29,12 +29,13 @@ func (c *CheckResult) Engine() (string, error) {
 		}
 	}
 
-	// Default precedence: Podman, then Docker
-	if c.HasPodman {
-		return "podman", nil
-	}
+	// Default precedence: Docker, then Podman.
+	// This aligns with CI and common local setups where docker compose behavior is expected.
 	if c.HasDocker {
 		return "docker", nil
+	}
+	if c.HasPodman {
+		return "podman", nil
 	}
 	return "", fmt.Errorf("no container engine found")
 }
