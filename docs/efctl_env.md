@@ -20,4 +20,5 @@ The env command groups operations to bring up and tear down the EVE Frontier loc
 - [efctl env extension](efctl_env_extension.md) - Manage the builder-scaffold extension flow
 - [efctl env run](efctl_env_run.md) - Run a script in the builder-scaffold container
 - [efctl env shell](efctl_env_shell.md) - Open a shell inside the running container
+- [efctl env status](efctl_env_status.md) - Show environment status without launching the dashboard
 - [efctl env up](efctl_env_up.md) - Bring up the local environment
