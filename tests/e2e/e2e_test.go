@@ -6,9 +6,11 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +65,43 @@ func runEfctl(t *testing.T, bin, workDir string, args ...string) (string, error)
 	return string(out), err
 }
 
+func preferredContainerEngine() string {
+	if _, err := exec.LookPath("docker"); err == nil {
+		return "docker"
+	}
+	if _, err := exec.LookPath("podman"); err == nil {
+		return "podman"
+	}
+	return ""
+}
+
+// normalizeWorkspacePermissions best-effort fixes ownership/permissions on
+// bind-mounted workspace files that may be created by root inside containers.
+func normalizeWorkspacePermissions(t *testing.T) {
+	t.Helper()
+
+	engine := preferredContainerEngine()
+	if engine == "" {
+		return
+	}
+
+	uid := strconv.Itoa(os.Getuid())
+	gid := strconv.Itoa(os.Getgid())
+
+	cmdStr := fmt.Sprintf(
+		"chown -R %s:%s /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true; "+
+			"chmod -R u+rwX /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true",
+		uid,
+		gid,
+	)
+
+	cmd := exec.Command(engine, "exec", "sui-playground", "/bin/bash", "-lc", cmdStr)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("best-effort permission normalization skipped: %v\n%s", err, string(out))
+	}
+}
+
 // TestE2E_FullLifecycle runs the complete efctl smoke test:
 // build → version → env up → extension init → extension publish → env run → env down
 //
@@ -79,7 +118,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	bin := efctlBin(t)
 
 	// Create an isolated workspace
-	workspace := filepath.Join(t.TempDir(), "e2e-workspace")
+	workspaceRoot, err := os.MkdirTemp("", "efctl-e2e-*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(workspaceRoot)
+	})
+
+	workspace := filepath.Join(workspaceRoot, "e2e-workspace")
 	require.NoError(t, os.MkdirAll(workspace, 0750))
 
 	// ── Step 1: version ────────────────────────────────────────
@@ -149,6 +194,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 
 	// ── Step 7: env down ───────────────────────────────────────
 	t.Run("env_down", func(t *testing.T) {
+		normalizeWorkspacePermissions(t)
+
 		out, err := runEfctl(t, bin, workspace, "env", "down")
 		require.NoError(t, err, "efctl env down failed:\n%s", out)
 
