@@ -26,6 +26,7 @@ type ContainerClient interface {
 	InteractiveShell(containerName string) error
 	Exec(containerName string, command []string) error
 	ExecCapture(containerName string, command []string) (string, error)
+	RemoveImages(names []string)
 	Cleanup() error
 }
 
@@ -271,7 +272,7 @@ func (c *Client) Cleanup() error {
 	spinnerFe.Success("Frontend container removal attempted")
 
 	spinner2, _ := ui.Spin("Removing sui-dev images...")
-	c.removeImages([]string{ImageDockerSuiDev, ImageDockerSuiDevOld})
+	c.RemoveImages([]string{ImageDockerSuiDev, ImageDockerSuiDevOld})
 	spinner2.Success("Images removal attempted")
 
 	spinner3, _ := ui.Spin("Removing config and data volumes...")
@@ -294,10 +295,13 @@ func (c *Client) stopAndRemoveContainers(names []string) {
 	}
 }
 
-func (c *Client) removeImages(names []string) {
+// RemoveImages removes container images by name, ignoring errors for
+// images that do not exist.  This is called before ComposeBuild to
+// ensure Podman does not reuse a stale cached image.
+func (c *Client) RemoveImages(names []string) {
 	for _, name := range names {
 		if c.imageExists(name) {
-			if err := exec.Command(c.Engine, "rmi", name).Run(); err != nil { // #nosec G204
+			if err := exec.Command(c.Engine, "rmi", "-f", name).Run(); err != nil { // #nosec G204
 				ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", name, err))
 			}
 		}

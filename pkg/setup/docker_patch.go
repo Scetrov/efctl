@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -159,12 +160,69 @@ func patchComposeYml(dockerDir string) {
 		return
 	}
 	content := string(compose)
+	dirty := false
+
 	if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
 		content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
+		dirty = true
+	}
+
+	// Bind-mount the patched entrypoint.sh into the container so it always
+	// overrides whatever is baked into the image.  This is the primary defence
+	// against Podman (and Docker) build-cache issues that silently preserve an
+	// unpatched entrypoint in the image layer.
+	const entrypointMount = "./scripts/entrypoint.sh:/workspace/scripts/entrypoint.sh"
+	if !strings.Contains(content, entrypointMount) {
+		// Insert after the builder-scaffold bind mount line.
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			if strings.Contains(line, "../:/workspace/builder-scaffold") {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+				newLine := indent + "- " + entrypointMount
+				// Insert after this line
+				lines = append(lines[:i+1], append([]string{newLine}, lines[i+1:]...)...)
+				dirty = true
+				break
+			}
+		}
+		content = strings.Join(lines, "\n")
+	}
+
+	// Add :z SELinux labels to bind mounts so rootless Podman can relabel them.
+	// The :z suffix is a no-op on non-SELinux systems (e.g. Docker on Ubuntu).
+	content, changed := patchComposeBindMountLabels(content)
+	if changed {
+		dirty = true
+	}
+
+	if dirty {
 		if err := os.WriteFile(composePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
 			log.Printf("patch: failed to write compose.yml: %v", err)
 		}
 	}
+}
+
+// patchComposeBindMountLabels appends :z to bind-mount volumes that reference
+// relative host paths (../ or ./) mapped into /workspace. Named volumes are
+// left untouched. The function is idempotent — mounts that already carry a
+// suffix (:z, :Z, :ro, :rw, etc.) are skipped.
+func patchComposeBindMountLabels(content string) (string, bool) {
+	// Match lines like "      - ../:/workspace/builder-scaffold"
+	// Captures: (indent + "- " + host-relative-path ":" + container-path)(newline)
+	// Skips lines where the container-path is already followed by ":something".
+	re := regexp.MustCompile(`(?m)(- \.\.?/[^:\s]*:/workspace/[^:\s]+)\n`)
+	changed := false
+	content = re.ReplaceAllStringFunc(content, func(match string) string {
+		trimmed := strings.TrimRight(match, "\n")
+		// Already has a mount option suffix (e.g. :z, :ro)
+		parts := strings.Split(trimmed, ":")
+		if len(parts) > 2 {
+			return match
+		}
+		changed = true
+		return trimmed + ":z\n"
+	})
+	return content, changed
 }
 
 func patchDockerfile(dockerDir string) {
@@ -181,11 +239,18 @@ func patchDockerfile(dockerDir string) {
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
 	}
-	// Note: we do NOT inject a sed -i into the Dockerfile RUN step.
-	// patchEntrypoint already rewrites entrypoint.sh on the host before the image is built,
-	// so the COPY step picks up the patched file. A sed -i in the RUN step is both
-	// redundant and harmful: shell escaping converts ${SUI_CFG} to \${SUI_CFG},
-	// which prevents the variable expanding at container runtime.
+	// Safety net: inject a sed command into the Dockerfile that replaces the
+	// bind-mount .env.sui path with the internal config-dir path at build time.
+	// This uses a literal target path (/root/.sui) rather than ${SUI_CFG} to
+	// avoid shell-escaping issues in the RUN layer. It is idempotent — the sed
+	// is a no-op when patchEntrypoint has already rewritten the host file.
+	const sedSafetyNet = `RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh`
+	if !strings.Contains(content, sedSafetyNet) {
+		content = strings.Replace(content,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
+			1)
+	}
 	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
 		log.Printf("patch: failed to write Dockerfile: %v", err)
 	}
@@ -208,20 +273,45 @@ func patchEntrypoint(dockerDir string) {
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
 
+	// Post-patch validation: ensure the bind-mount .env.sui path was fully
+	// eliminated. If any patch above silently failed (e.g. upstream changed
+	// quoting), force-replace the literal path as a last resort.
+	const bindMountEnvPath = "/workspace/builder-scaffold/docker/.env.sui"
+	if strings.Contains(content, bindMountEnvPath) {
+		log.Printf("patch: entrypoint.sh still references bind-mount path for .env.sui — applying forced replacement")
+		content = strings.ReplaceAll(content, bindMountEnvPath, "/root/.sui/.env.sui")
+	}
+
 	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath
 		log.Printf("patch: failed to write entrypoint.sh: %v", err)
 	}
 }
 
+// envFileBindMountRe matches ENV_FILE assignments pointing at the bind-mount
+// path, regardless of quoting style (double-quoted, single-quoted, unquoted)
+// and optional leading "export ".
+var envFileBindMountRe = regexp.MustCompile(
+	`(?m)^(\s*(?:export\s+)?)ENV_FILE=['"]?/workspace/builder-scaffold/docker/\.env\.sui['"]?`,
+)
+
 func patchEntrypointEnvPath(content string) string {
-	original := `ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"`
 	replacement := `ENV_FILE="${SUI_CFG}/.env.sui"`
 
-	if !strings.Contains(content, replacement) {
-		content = strings.Replace(content, original, replacement, 1)
+	// Already patched — nothing to do.
+	if strings.Contains(content, replacement) {
+		return content
 	}
 
-	// Also make sure to output the internal copy to stdout if desired, though efctl extracts it
+	// Try regex-based replacement (handles quoting/export variants).
+	// We use ReplaceAllStringFunc to avoid $ in the replacement being
+	// interpreted as a group backreference by the regexp engine.
+	if envFileBindMountRe.MatchString(content) {
+		content = envFileBindMountRe.ReplaceAllStringFunc(content, func(match string) string {
+			prefix := envFileBindMountRe.FindStringSubmatch(match)[1]
+			return prefix + replacement
+		})
+	}
+
 	return content
 }
 

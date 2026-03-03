@@ -41,6 +41,11 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 		return err
 	}
 
+	// Remove stale images so Podman (and Docker) are forced to rebuild from
+	// the patched Dockerfile and entrypoint.  Without this, Podman may reuse
+	// a cached image that contains the unpatched entrypoint.
+	c.RemoveImages([]string{container.ImageDockerSuiDev, container.ImageDockerSuiDevOld})
+
 	if err := c.ComposeBuild(dockerDir); err != nil {
 		return err
 	}

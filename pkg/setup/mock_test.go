@@ -58,6 +58,10 @@ func (m *mockContainerClient) ExecCapture(containerName string, command []string
 	return args.String(0), args.Error(1)
 }
 
+func (m *mockContainerClient) RemoveImages(names []string) {
+	m.Called(names)
+}
+
 func (m *mockContainerClient) Cleanup() error {
 	return m.Called().Error(0)
 }
