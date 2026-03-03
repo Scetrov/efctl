@@ -158,3 +158,36 @@ func LogViewportRows(height, numEvents int) int {
 	}
 	return botRows
 }
+
+// FormatCPU rounds CPU percentage representation to the nearest integer. E.g "12.4%" -> "12%"
+func FormatCPU(cpu string) string {
+	if strings.HasSuffix(cpu, "%") {
+		valStr := strings.TrimSuffix(cpu, "%")
+		if val, err := strconv.ParseFloat(valStr, 64); err == nil {
+			return fmt.Sprintf("%.0f%%", val)
+		}
+	}
+	return cpu
+}
+
+// FormatMem rounds memory representation to the nearest integer. E.g "128.7MiB / 1.938GiB" -> "129MiB / 2GiB"
+func FormatMem(mem string) string {
+	parts := strings.Split(mem, " / ")
+	for i, part := range parts {
+		idx := -1
+		for j, c := range part {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+				idx = j
+				break
+			}
+		}
+		if idx != -1 {
+			valStr := strings.TrimSpace(part[:idx])
+			unit := part[idx:]
+			if val, err := strconv.ParseFloat(valStr, 64); err == nil {
+				parts[i] = fmt.Sprintf("%.0f%s", val, unit)
+			}
+		}
+	}
+	return strings.Join(parts, " / ")
+}

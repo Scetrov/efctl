@@ -101,6 +101,26 @@ efctl env up
 
 For more detailed usage instructions, check out the [USAGE.md](USAGE.md) file.
 
+## Developer Quickstart
+
+Add the output directory to your PATH:
+
+```bash
+export PATH=$PWD/output:$PATH
+```
+
+Build the project:
+
+```bash
+make build
+```
+
+Run tests:
+
+```bash
+make test
+```
+
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for more details.

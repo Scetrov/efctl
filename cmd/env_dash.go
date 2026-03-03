@@ -220,6 +220,16 @@ func colorizeLogLine(line string) string {
 	return dashboard.ColorizeLogLine(line)
 }
 
+// formatCPU delegates to the dashboard package.
+func formatCPU(cpu string) string {
+	return dashboard.FormatCPU(cpu)
+}
+
+// formatMem delegates to the dashboard package.
+func formatMem(mem string) string {
+	return dashboard.FormatMem(mem)
+}
+
 func fetchChainInfo(client *http.Client) chainStat {
 	info := chainStat{Checkpoint: "Offline", TxCount: "-", Epoch: "-"}
 
@@ -352,14 +362,16 @@ func parseContainerStats(engine string) (sui, pg, fe containerStat) {
 			continue
 		}
 		name := strings.TrimSpace(parts[0])
+		cpu := formatCPU(parts[1])
+		mem := formatMem(parts[2])
 		if name == container.ContainerSuiPlayground {
-			sui = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+			sui = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
 		if name == container.ContainerPostgres || name == container.ContainerPostgresOld {
-			pg = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+			pg = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
 		if name == container.ContainerFrontend || name == container.ContainerFrontendOld {
-			fe = containerStat{Status: "Running", CPU: parts[1], Mem: parts[2]}
+			fe = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
 	}
 	return
@@ -500,20 +512,28 @@ func deriveAddress(privkey string) string {
 
 // streamContainerLogs starts tailing a container's logs and sends lines with the given prefix.
 func streamContainerLogs(ctx context.Context, p *tea.Program, engine, containerName, prefix string) {
-	cmd := exec.CommandContext(ctx, engine, "logs", "-f", "--tail", "20", containerName) // #nosec G204
-	stdout, err := cmd.StdoutPipe()
-	cmd.Stderr = cmd.Stdout
-	if err == nil {
-		if err := cmd.Start(); err == nil {
-			go func() {
-				scanner := bufio.NewScanner(stdout)
-				for scanner.Scan() {
-					p.Send(LogMsg(fmt.Sprintf("%s %s", prefix, scanner.Text())))
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				cmd := exec.CommandContext(ctx, engine, "logs", "-f", "--tail", "20", containerName) // #nosec G204
+				stdout, err := cmd.StdoutPipe()
+				cmd.Stderr = cmd.Stdout
+				if err == nil {
+					if err := cmd.Start(); err == nil {
+						scanner := bufio.NewScanner(stdout)
+						for scanner.Scan() {
+							p.Send(LogMsg(fmt.Sprintf("%s %s", prefix, scanner.Text())))
+						}
+						_ = cmd.Wait() // Reclaim process
+					}
 				}
-				_ = cmd.Wait() // Reclaim process
-			}()
+				time.Sleep(2 * time.Second)
+			}
 		}
-	}
+	}()
 }
 
 func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) {
@@ -604,6 +624,7 @@ type model struct {
 	graphqlOn      bool         // whether GraphQL/Indexer is currently enabled
 	frontendOn     bool         // whether the frontend dApp container is enabled
 	worldEvents    []worldEvent // recent events from the world package
+	restarting     bool         // whether we are in the interactive restart menu
 }
 
 func initialModel(engine string, workspace string) model {
@@ -701,6 +722,31 @@ func (m *model) clampScroll() {
 
 // handleKeyMsg processes keyboard input and returns the updated model and command.
 func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.restarting {
+		return m.handleRestartKeyMsg(msg)
+	}
+	return m.handleMainKeyMsg(msg)
+}
+
+func (m model) handleRestartKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		m.restarting = false
+		return m, nil
+	case "f":
+		m.restarting = false
+		return m.handleRestartFrontend()
+	case "b":
+		m.restarting = false
+		return m.handleRestartBackend(false)
+	case "a":
+		m.restarting = false
+		return m.handleRestartBackend(true)
+	}
+	return m, nil
+}
+
+func (m model) handleMainKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -721,7 +767,8 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.logScroll -= 20
 		m.clampScroll()
 	case "r":
-		return m.handleRestart()
+		m.restarting = true
+		return m, nil
 	case "d":
 		return m.handleEnvDown()
 	case "g":
@@ -732,13 +779,14 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleRestart runs env down then env up, preserving --with-graphql and --with-frontend if enabled.
-func (m model) handleRestart() (tea.Model, tea.Cmd) {
+// handleRestartBackend runs env down then env up, preserving --with-graphql and --with-frontend if enabled.
+// If restartAll is true, --with-frontend is explicitly added.
+func (m model) handleRestartBackend(restartAll bool) (tea.Model, tea.Cmd) {
 	args := []string{"env", "up", "-w", m.workspace}
 	if m.graphqlOn {
 		args = append(args, "--with-graphql")
 	}
-	if m.frontendOn {
+	if m.frontendOn || restartAll {
 		args = append(args, "--with-frontend")
 	}
 	downCmd := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204
@@ -750,6 +798,17 @@ func (m model) handleRestart() (tea.Model, tea.Cmd) {
 		upCmd := exec.Command("efctl", upArgs...) // #nosec G204
 		return restartUpMsg{upCmd: upCmd}
 	})
+}
+
+// handleRestartFrontend restarts only the frontend container asynchronously.
+func (m model) handleRestartFrontend() (tea.Model, tea.Cmd) {
+	c := exec.Command(m.engine, "restart", container.ContainerFrontend) // #nosec G204
+	go func() {
+		_ = c.Run()
+	}()
+	return m, func() tea.Msg {
+		return LogMsg("Restarting frontend container...")
+	}
 }
 
 // handleEnvDown runs efctl env down.
@@ -1061,7 +1120,9 @@ func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows,
 	}
 
 	footerKeys := "[r] restart  [d] env down  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
-	if !m.graphqlOn || !m.frontendOn {
+	if m.restarting {
+		footerKeys = "[f] frontend  [b] backend  [a] all  [q/esc] cancel"
+	} else if !m.graphqlOn || !m.frontendOn {
 		extras := ""
 		if !m.graphqlOn {
 			extras += "  [g] enable graphql"
@@ -1080,23 +1141,34 @@ func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows,
 
 func (m model) renderContainerContent() string {
 	var b bytes.Buffer
-	renderRow := func(name string, stat containerStat) {
+	renderRow := func(name string, stat containerStat, shortcut string) {
 		dot := lipgloss.NewStyle().Foreground(green).Bold(true).Render("●")
 		if stat.Status == "Stopped" {
 			dot = lipgloss.NewStyle().Foreground(red).Bold(true).Render("●")
 		} else if stat.Status != "Running" {
 			dot = lipgloss.NewStyle().Foreground(yellow).Bold(true).Render("●")
 		}
-		b.WriteString(fmt.Sprintf(" %s %-18s %s %-7s  %s %s\n",
-			dot, name,
+
+		nameDisplay := name
+		if m.restarting && shortcut != "" {
+			hint := lipgloss.NewStyle().Foreground(orange).Bold(true).Render(shortcut)
+			nameDisplay = name + " " + hint
+		}
+		visibleLen := lipgloss.Width(nameDisplay)
+		if visibleLen < 18 {
+			nameDisplay += strings.Repeat(" ", 18-visibleLen)
+		}
+
+		b.WriteString(fmt.Sprintf(" %s %s %s %-7s  %s %s\n",
+			dot, nameDisplay,
 			grayStyle.Render("CPU"), valueStyle.Render(stat.CPU),
 			grayStyle.Render("Mem"), valueStyle.Render(stat.Mem)))
 	}
 	b.WriteString("\n")
-	renderRow("sui-playground", m.suiStat)
-	renderRow("database", m.pgStat)
+	renderRow("sui-playground", m.suiStat, "[b]")
+	renderRow("database", m.pgStat, "")
 	if m.frontendOn {
-		renderRow("frontend", m.feStat)
+		renderRow("frontend", m.feStat, "[f]")
 	}
 	b.WriteString("\n")
 	return b.String()

@@ -67,6 +67,17 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 		return err
 	}
 
+	// The container generates its internal .env.sui. We must extract it manually so host scripts can use it, avoiding rootless bind mount permission issues.
+	output, err := c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/root/.sui/.env.sui"})
+	if err != nil {
+		ui.Warn.Println("Failed to extract .env.sui from container. Tests may fail to run locally.")
+	} else if len(output) > 0 {
+		envPath := filepath.Join(dockerDir, ".env.sui")
+		if writeErr := os.WriteFile(envPath, []byte(output), 0600); writeErr != nil {
+			ui.Warn.Println(fmt.Sprintf("Failed to write extracted .env.sui to host: %v", writeErr))
+		}
+	}
+
 	if withFrontend {
 		if err := startFrontend(c, dockerDir); err != nil {
 			return err

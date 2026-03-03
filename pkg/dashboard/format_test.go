@@ -250,3 +250,46 @@ func TestBuildAddresses(t *testing.T) {
 		assert.NotContains(t, result, "Player A")
 	})
 }
+
+func TestFormatCPU(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"with decimal", "12.4%", "12%"},
+		{"with high decimal", "45.9%", "46%"},
+		{"whole number", "100%", "100%"},
+		{"zero", "0.0%", "0%"},
+		{"invalid string", "invalid%", "invalid%"},
+		{"missing percent", "12.4", "12.4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatCPU(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatMem(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"standard docker stats", "128.7MiB / 1.938GiB", "129MiB / 2GiB"},
+		{"single value no division", "500.2KiB", "500KiB"},
+		{"spaced units", "45.2 MB / 1.1 GB", "45MB / 1GB"},
+		{"no units", "1024 / 2048", "1024 / 2048"},
+		{"invalid string", "invalid / format", "invalid / format"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatMem(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

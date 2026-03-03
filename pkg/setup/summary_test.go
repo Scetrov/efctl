@@ -118,7 +118,7 @@ func TestBuildOverrideYaml_NoneEnabled(t *testing.T) {
 // ── graphqlServicesYaml / frontendServiceYaml ──────────────────────
 
 func TestGraphqlServicesYaml(t *testing.T) {
-	yaml := graphqlServicesYaml()
+	yaml := postgresServiceYaml() + suiDevGraphqlOverridesYaml()
 	assert.Contains(t, yaml, "postgres:")
 	assert.Contains(t, yaml, "SUI_INDEXER_DB_URL")
 	assert.Contains(t, yaml, "SUI_GRAPHQL_ENABLED")

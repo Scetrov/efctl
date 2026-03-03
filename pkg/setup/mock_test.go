@@ -24,6 +24,10 @@ func (m *mockContainerClient) ComposeUp(dir string, services ...string) error {
 	return m.Called(dir, services).Error(0)
 }
 
+func (m *mockContainerClient) GetEngine() string {
+	return m.Called().String(0)
+}
+
 func (m *mockContainerClient) ContainerRunning(name string) bool {
 	return m.Called(name).Bool(0)
 }

@@ -62,7 +62,8 @@ func buildOverrideYaml(withGraphql bool, withFrontend bool) string {
 	overrideYaml := "services:\n"
 
 	if withGraphql {
-		overrideYaml += graphqlServicesYaml()
+		overrideYaml += postgresServiceYaml()
+		overrideYaml += suiDevGraphqlOverridesYaml()
 	}
 
 	if withFrontend {
@@ -74,7 +75,12 @@ func buildOverrideYaml(withGraphql bool, withFrontend bool) string {
 	return overrideYaml
 }
 
-func graphqlServicesYaml() string {
+func suiDevServiceYaml() string {
+	yaml := "  sui-dev:\n"
+	return yaml
+}
+
+func postgresServiceYaml() string {
 	return `  postgres:
     image: docker.io/library/postgres:16
     environment:
@@ -84,18 +90,23 @@ func graphqlServicesYaml() string {
     volumes:
       - sui-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sui -d sui_indexer"]
+      test: "pg_isready -U sui -d sui_indexer"
       interval: 2s
       timeout: 3s
       retries: 30
 
-` + "  sui-dev:\n    environment:\n" +
-		`      SUI_INDEXER_DB_URL: postgres://sui:sui@postgres:5432/sui_indexer
-` + `      SUI_GRAPHQL_ENABLED: "true"
-` + `    depends_on:
+`
+}
+
+func suiDevGraphqlOverridesYaml() string {
+	return `  sui-dev:
+    environment:
+      SUI_INDEXER_DB_URL: postgres://sui:sui@postgres:5432/sui_indexer
+      SUI_GRAPHQL_ENABLED: "true"
+    depends_on:
       postgres:
         condition: service_healthy
-` + `    ports:
+    ports:
       - "9125:9125"
 `
 }
@@ -169,9 +180,14 @@ func patchDockerfile(dockerDir string) {
 	content := string(dockerfile)
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
-		if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
-			log.Printf("patch: failed to write Dockerfile: %v", err)
-		}
+	}
+	// Note: we do NOT inject a sed -i into the Dockerfile RUN step.
+	// patchEntrypoint already rewrites entrypoint.sh on the host before the image is built,
+	// so the COPY step picks up the patched file. A sed -i in the RUN step is both
+	// redundant and harmful: shell escaping converts ${SUI_CFG} to \${SUI_CFG},
+	// which prevents the variable expanding at container runtime.
+	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
+		log.Printf("patch: failed to write Dockerfile: %v", err)
 	}
 }
 
@@ -187,6 +203,7 @@ func patchEntrypoint(dockerDir string) {
 	}
 	content := string(entrypoint)
 
+	content = patchEntrypointEnvPath(content)
 	content = patchEntrypointPostgresWait(content)
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
@@ -194,6 +211,18 @@ func patchEntrypoint(dockerDir string) {
 	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath
 		log.Printf("patch: failed to write entrypoint.sh: %v", err)
 	}
+}
+
+func patchEntrypointEnvPath(content string) string {
+	original := `ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"`
+	replacement := `ENV_FILE="${SUI_CFG}/.env.sui"`
+
+	if !strings.Contains(content, replacement) {
+		content = strings.Replace(content, original, replacement, 1)
+	}
+
+	// Also make sure to output the internal copy to stdout if desired, though efctl extracts it
+	return content
 }
 
 func patchEntrypointPostgresWait(content string) string {

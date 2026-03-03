@@ -18,6 +18,7 @@ type ContainerClient interface {
 	ComposeBuild(dir string) error
 	ComposeRun(dir string) error
 	ComposeUp(dir string, services ...string) error
+	GetEngine() string
 	ContainerRunning(name string) bool
 	ContainerLogs(name string, tail int) string
 	ContainerExitCode(name string) (int, error)
@@ -46,11 +47,16 @@ func NewClient() (*Client, error) {
 	return &Client{Engine: engine}, nil
 }
 
+// GetEngine returns the underlying container engine ("docker" or "podman")
+func (c *Client) GetEngine() string {
+	return c.Engine
+}
+
 // ComposeBuild runs docker/podman compose build
 func (c *Client) ComposeBuild(dir string) error {
 	spinner, _ := ui.Spin("Building containers...")
 
-	cmd := exec.Command(c.Engine, "compose", "build") // #nosec G204
+	cmd := exec.Command(c.Engine, "compose", "build", "--no-cache") // #nosec G204
 	cmd.Dir = dir
 
 	output, err := cmd.CombinedOutput()

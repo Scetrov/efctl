@@ -23,6 +23,8 @@ func TestPrepareDockerEnvironment(t *testing.T) {
 	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
 	entrypointContent := `
 # ---------- start local node ----------
+ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
+
 sui start --with-faucet --force-regenesis &
 
 for i in $(seq 1 30); do
@@ -78,6 +80,9 @@ echo "[sui-dev] RPC ready."
 	}
 	if strings.Contains(bodyStr, "sleep 2\necho \"[sui-dev] RPC ready.\"") {
 		t.Errorf("entrypoint.sh should have replaced sleep 2 block")
+	}
+	if !strings.Contains(bodyStr, "ENV_FILE=\"${SUI_CFG}/.env.sui\"") {
+		t.Errorf("entrypoint.sh should patch ENV_FILE to internal SUI_CFG directory")
 	}
 
 	// 5. Test idempotency
