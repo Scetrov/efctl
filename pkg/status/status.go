@@ -79,10 +79,10 @@ func GatherContainerStats(engine string) []ContainerStat {
 	if sui.Status == "Stopped" && containerRunning(engine, container.ContainerSuiPlayground) {
 		sui.Status = "Running"
 	}
-	if pg.Status == "Stopped" && (containerRunning(engine, container.ContainerPostgres) || containerRunning(engine, container.ContainerPostgresOld)) {
+	if pg.Status == "Stopped" && containerRunning(engine, container.ContainerPostgres) {
 		pg.Status = "Running"
 	}
-	if fe.Status == "Stopped" && (containerRunning(engine, container.ContainerFrontend) || containerRunning(engine, container.ContainerFrontendOld)) {
+	if fe.Status == "Stopped" && containerRunning(engine, container.ContainerFrontend) {
 		fe.Status = "Running"
 	}
 
@@ -104,11 +104,11 @@ func parseStatsOutput(out string, sui, pg, fe ContainerStat) (ContainerStat, Con
 			sui.Status = "Running"
 			sui.CPU = cpu
 			sui.Mem = mem
-		case container.ContainerPostgres, container.ContainerPostgresOld:
+		case container.ContainerPostgres:
 			pg.Status = "Running"
 			pg.CPU = cpu
 			pg.Mem = mem
-		case container.ContainerFrontend, container.ContainerFrontendOld:
+		case container.ContainerFrontend:
 			fe.Status = "Running"
 			fe.CPU = cpu
 			fe.Mem = mem

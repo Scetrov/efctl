@@ -11,12 +11,12 @@ import (
 
 func TestParseStatsOutput(t *testing.T) {
 	sui := ContainerStat{Name: "sui-playground", Status: "Stopped", CPU: "-", Mem: "-"}
-	pg := ContainerStat{Name: "docker-postgres-1", Status: "Stopped", CPU: "-", Mem: "-"}
-	fe := ContainerStat{Name: "docker-frontend-1", Status: "Stopped", CPU: "-", Mem: "-"}
+	pg := ContainerStat{Name: "efctl-postgres", Status: "Stopped", CPU: "-", Mem: "-"}
+	fe := ContainerStat{Name: "efctl-frontend", Status: "Stopped", CPU: "-", Mem: "-"}
 
 	out := "sui-playground\t25.3%\t500MiB / 2GiB\n" +
-		"docker-postgres-1\t3.2%\t120MiB / 2GiB\n" +
-		"docker_frontend_1\t7.1%\t200MiB / 2GiB\n"
+		"efctl-postgres\t3.2%\t120MiB / 2GiB\n" +
+		"efctl-frontend\t7.1%\t200MiB / 2GiB\n"
 
 	sui, pg, fe = parseStatsOutput(out, sui, pg, fe)
 

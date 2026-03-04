@@ -2,6 +2,9 @@ package setup
 
 import (
 	"context"
+	"time"
+
+	"efctl/pkg/container"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -12,19 +15,47 @@ type mockContainerClient struct {
 	mock.Mock
 }
 
-func (m *mockContainerClient) ComposeBuild(dir string) error {
-	return m.Called(dir).Error(0)
+func (m *mockContainerClient) BuildImage(ctx context.Context, contextDir string, dockerfilePath string, tag string) error {
+	return m.Called(ctx, contextDir, dockerfilePath, tag).Error(0)
 }
 
-func (m *mockContainerClient) ComposeRun(dir string) error {
-	return m.Called(dir).Error(0)
+func (m *mockContainerClient) CreateNetwork(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
 }
 
-func (m *mockContainerClient) ComposeUp(dir string, services ...string) error {
-	return m.Called(dir, services).Error(0)
+func (m *mockContainerClient) RemoveNetwork(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
+}
+
+func (m *mockContainerClient) CreateVolume(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
+}
+
+func (m *mockContainerClient) CreateContainer(ctx context.Context, cfg container.ContainerConfig) error {
+	return m.Called(ctx, cfg).Error(0)
+}
+
+func (m *mockContainerClient) StartContainer(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
+}
+
+func (m *mockContainerClient) StopContainer(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
+}
+
+func (m *mockContainerClient) RemoveContainer(ctx context.Context, name string) error {
+	return m.Called(ctx, name).Error(0)
+}
+
+func (m *mockContainerClient) WaitHealthy(ctx context.Context, name string, timeout time.Duration) error {
+	return m.Called(ctx, name, timeout).Error(0)
 }
 
 func (m *mockContainerClient) GetEngine() string {
+	return m.Called().String(0)
+}
+
+func (m *mockContainerClient) NetworkName() string {
 	return m.Called().String(0)
 }
 

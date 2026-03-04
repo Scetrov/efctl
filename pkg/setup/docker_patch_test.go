@@ -19,20 +19,6 @@ func TestPrepareDockerEnvironment(t *testing.T) {
 	scriptsDir := filepath.Join(dockerDir, "scripts")
 	os.MkdirAll(scriptsDir, 0755)
 
-	// Create dummy compose.yml with bind mounts
-	composePath := filepath.Join(dockerDir, "compose.yml")
-	composeContent := `services:
-  sui-dev:
-    build: .
-    volumes:
-      - sui-config:/root/.sui
-      - ../:/workspace/builder-scaffold
-      - ../../world-contracts:/workspace/world-contracts
-volumes:
-  sui-config:
-`
-	os.WriteFile(composePath, []byte(composeContent), 0644)
-
 	// Create dummy Dockerfile
 	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
 	dockerfileContent := `FROM ubuntu:24.04
@@ -66,19 +52,13 @@ echo "[sui-dev] RPC ready."
 	os.WriteFile(entrypointPath, []byte(entrypointContent), 0755)
 
 	// 1. Run patch
-	err := prepareDockerEnvironment(dockerDir, true, false)
+	err := prepareDockerEnvironment(dockerDir, "docker", true, false)
 	require.NoError(t, err)
 
-	// 2. Assert docker-compose.override.yml
+	// 2. Assert docker-compose.override.yml is cleaned up (not created)
 	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
 	_, err = os.Stat(overridePath)
-	assert.NoError(t, err, "docker-compose.override.yml should have been created")
-
-	// Test case 2: withGraphql = false (no sql indexer or graphql)
-	err = prepareDockerEnvironment(dockerDir, false, false)
-	require.NoError(t, err)
-	_, err = os.Stat(overridePath)
-	assert.True(t, os.IsNotExist(err), "docker-compose.override.yml should have been deleted")
+	assert.True(t, os.IsNotExist(err), "docker-compose.override.yml should not exist (compose removed)")
 
 	// 3. Assert Dockerfile patches
 	dockerfileBody, _ := os.ReadFile(dockerfilePath)
@@ -96,25 +76,34 @@ echo "[sui-dev] RPC ready."
 	assert.NotContains(t, epStr, `/workspace/builder-scaffold/docker/.env.sui`,
 		"bind-mount .env.sui path must be fully eliminated")
 
-	// 5. Assert compose.yml bind mount labels and entrypoint mount
-	composeBody, _ := os.ReadFile(composePath)
-	cStr := string(composeBody)
-	assert.Contains(t, cStr, "../:/workspace/builder-scaffold:z")
-	assert.Contains(t, cStr, "../../world-contracts:/workspace/world-contracts:z")
-	assert.Contains(t, cStr, "sui-config:/root/.sui", "named volumes must NOT get :z")
-	assert.NotContains(t, cStr, "sui-config:/root/.sui:z")
-
-	// Entrypoint bind mount must be present to override cached image entrypoint
-	assert.Contains(t, cStr, "./scripts/entrypoint.sh:/workspace/scripts/entrypoint.sh",
-		"compose.yml must bind-mount the patched entrypoint into the container")
-
-	// 6. Test idempotency
-	err = prepareDockerEnvironment(dockerDir, true, false)
+	// 5. Test idempotency
+	err = prepareDockerEnvironment(dockerDir, "docker", true, false)
 	require.NoError(t, err)
 	entrypointBody2, _ := os.ReadFile(entrypointPath)
 	assert.Equal(t, string(entrypointBody), string(entrypointBody2), "entrypoint patch must be idempotent")
-	composeBody2, _ := os.ReadFile(composePath)
-	assert.Equal(t, string(composeBody), string(composeBody2), "compose patch must be idempotent")
+}
+
+// ── Stale override cleanup ─────────────────────────────────────────
+
+func TestPrepareDockerEnvironment_CleansUpStaleOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := filepath.Join(tmpDir, "docker")
+	scriptsDir := filepath.Join(dockerDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+
+	// Create a stale override file from a previous compose-based version
+	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
+	os.WriteFile(overridePath, []byte("services:\n  postgres:\n"), 0644)
+
+	// Minimal files for prepareDockerEnvironment to not fail
+	os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM ubuntu:24.04\n"), 0644)
+	os.WriteFile(filepath.Join(scriptsDir, "entrypoint.sh"), []byte("#!/bin/bash\n"), 0755)
+
+	err := prepareDockerEnvironment(dockerDir, "docker", false, false)
+	require.NoError(t, err)
+
+	_, err = os.Stat(overridePath)
+	assert.True(t, os.IsNotExist(err), "stale override file should be removed")
 }
 
 // ── patchEntrypointEnvPath ─────────────────────────────────────────
@@ -192,93 +181,6 @@ sui start --with-faucet --force-regenesis &
 	assert.Contains(t, string(body), `/root/.sui/.env.sui`)
 }
 
-// ── patchComposeYml entrypoint bind mount ──────────────────────────
-
-func TestPatchComposeYml_InjectsEntrypointBindMount(t *testing.T) {
-	tmpDir := t.TempDir()
-	composePath := filepath.Join(tmpDir, "compose.yml")
-	content := `services:
-  sui-dev:
-    build: .
-    volumes:
-      - sui-config:/root/.sui
-      - ../:/workspace/builder-scaffold
-      - ../../world-contracts:/workspace/world-contracts
-volumes:
-  sui-config:
-`
-	os.WriteFile(composePath, []byte(content), 0644)
-
-	patchComposeYml(tmpDir)
-
-	body, _ := os.ReadFile(composePath)
-	bodyStr := string(body)
-	assert.Contains(t, bodyStr, "./scripts/entrypoint.sh:/workspace/scripts/entrypoint.sh",
-		"entrypoint bind mount must be injected into compose.yml")
-	// Must come after the builder-scaffold mount
-	bsIdx := strings.Index(bodyStr, "../:/workspace/builder-scaffold")
-	epIdx := strings.Index(bodyStr, "./scripts/entrypoint.sh:/workspace/scripts/entrypoint.sh")
-	assert.Greater(t, epIdx, bsIdx, "entrypoint mount must appear after builder-scaffold mount")
-}
-
-func TestPatchComposeYml_EntrypointMountIdempotent(t *testing.T) {
-	tmpDir := t.TempDir()
-	composePath := filepath.Join(tmpDir, "compose.yml")
-	content := `services:
-  sui-dev:
-    build: .
-    volumes:
-      - sui-config:/root/.sui
-      - ../:/workspace/builder-scaffold
-      - ../../world-contracts:/workspace/world-contracts
-volumes:
-  sui-config:
-`
-	os.WriteFile(composePath, []byte(content), 0644)
-
-	patchComposeYml(tmpDir)
-	first, _ := os.ReadFile(composePath)
-
-	patchComposeYml(tmpDir)
-	second, _ := os.ReadFile(composePath)
-
-	assert.Equal(t, string(first), string(second), "entrypoint mount patch must be idempotent")
-}
-
-// ── patchComposeBindMountLabels ────────────────────────────────────
-
-func TestPatchComposeBindMountLabels_AddsZ(t *testing.T) {
-	content := `    volumes:
-      - sui-config:/root/.sui
-      - ../:/workspace/builder-scaffold
-      - ../../world-contracts:/workspace/world-contracts
-`
-	result, changed := patchComposeBindMountLabels(content)
-	assert.True(t, changed)
-	assert.Contains(t, result, "../:/workspace/builder-scaffold:z")
-	assert.Contains(t, result, "../../world-contracts:/workspace/world-contracts:z")
-	// Named volume must not be touched
-	assert.Contains(t, result, "sui-config:/root/.sui")
-	assert.NotContains(t, result, "sui-config:/root/.sui:z")
-}
-
-func TestPatchComposeBindMountLabels_Idempotent(t *testing.T) {
-	content := `      - ../:/workspace/builder-scaffold:z
-      - ../../world-contracts:/workspace/world-contracts:z
-`
-	result, changed := patchComposeBindMountLabels(content)
-	assert.False(t, changed)
-	assert.Equal(t, content, result)
-}
-
-func TestPatchComposeBindMountLabels_SkipsExistingSuffix(t *testing.T) {
-	content := `      - ../:/workspace/builder-scaffold:ro
-`
-	result, changed := patchComposeBindMountLabels(content)
-	assert.False(t, changed)
-	assert.Equal(t, content, result)
-}
-
 // ── patchDockerfile safety-net ──────────────────────────────────────
 
 func TestPatchDockerfile_InjectsSedSafetyNet(t *testing.T) {
@@ -297,10 +199,38 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	bodyStr := string(body)
 	assert.Contains(t, bodyStr, `RUN sed -i`)
 	assert.Contains(t, bodyStr, `/root/.sui/.env.sui`)
+	// The sed must use global replacement (trailing |g') to catch all occurrences
+	assert.Contains(t, bodyStr, `|g'`, "sed must use global replacement flag")
 	// sed line must come after the COPY + dos2unix line
 	sedIdx := strings.Index(bodyStr, "RUN sed -i")
 	dosIdx := strings.Index(bodyStr, "dos2unix /workspace/scripts/*.sh")
 	assert.Greater(t, sedIdx, dosIdx, "sed safety-net must come after dos2unix line")
+}
+
+func TestPatchDockerfile_ReplacesOldNarrowSed(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// Simulate a Dockerfile that already has the OLD narrow sed from a previous efctl version
+	content := `FROM ubuntu:24.04
+COPY scripts/ /workspace/scripts/
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
+ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	patchDockerfile(tmpDir)
+
+	body, _ := os.ReadFile(dockerfilePath)
+	bodyStr := string(body)
+	// Old narrow sed must be removed
+	assert.NotContains(t, bodyStr, `ENV_FILE="/workspace/builder-scaffold`,
+		"old narrow sed pattern must be removed")
+	// New global sed must be injected
+	assert.Contains(t, bodyStr, `|g'`, "new global sed must be present")
+	// Only one RUN sed line should exist
+	assert.Equal(t, 1, strings.Count(bodyStr, "RUN sed -i"),
+		"exactly one sed safety-net line should exist")
 }
 
 func TestPatchDockerfile_SedIdempotent(t *testing.T) {

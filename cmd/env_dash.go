@@ -367,10 +367,10 @@ func parseContainerStats(engine string) (sui, pg, fe containerStat) {
 		if name == container.ContainerSuiPlayground {
 			sui = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
-		if name == container.ContainerPostgres || name == container.ContainerPostgresOld {
+		if name == container.ContainerPostgres {
 			pg = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
-		if name == container.ContainerFrontend || name == container.ContainerFrontendOld {
+		if name == container.ContainerFrontend {
 			fe = containerStat{Status: "Running", CPU: cpu, Mem: mem}
 		}
 	}
@@ -540,26 +540,11 @@ func collectLogs(ctx context.Context, p *tea.Program, engine, workspace string) 
 	// 1. Sui container logs
 	streamContainerLogs(ctx, p, engine, container.ContainerSuiPlayground, "[docker]")
 
-	// 2. Database container logs (try both naming conventions)
-	dbContainer := container.ContainerPostgres
-	// Check which name is running
-	if out, err := exec.Command(engine, "ps", "--format", "{{.Names}}").Output(); err == nil { // #nosec G204
-		names := string(out)
-		if strings.Contains(names, container.ContainerPostgresOld) {
-			dbContainer = container.ContainerPostgresOld
-		}
-	}
-	streamContainerLogs(ctx, p, engine, dbContainer, "[db]")
+	// 2. Database container logs
+	streamContainerLogs(ctx, p, engine, container.ContainerPostgres, "[db]")
 
-	// 3. Frontend container logs (try both naming conventions)
-	feContainer := container.ContainerFrontend
-	if out, err := exec.Command(engine, "ps", "--format", "{{.Names}}").Output(); err == nil { // #nosec G204
-		names := string(out)
-		if strings.Contains(names, container.ContainerFrontendOld) {
-			feContainer = container.ContainerFrontendOld
-		}
-	}
-	streamContainerLogs(ctx, p, engine, feContainer, "[frontend]")
+	// 3. Frontend container logs
+	streamContainerLogs(ctx, p, engine, container.ContainerFrontend, "[frontend]")
 
 	// 4. Deploy logs
 	deployLogPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")

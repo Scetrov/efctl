@@ -3,22 +3,86 @@ package container
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
+
+	dockertypes "github.com/docker/docker/api/types"
+	dockercontainer "github.com/docker/docker/api/types/container"
+	dockerfilters "github.com/docker/docker/api/types/filters"
+	dockerimage "github.com/docker/docker/api/types/image"
+	dockermount "github.com/docker/docker/api/types/mount"
+	dockernetwork "github.com/docker/docker/api/types/network"
+	dockervolume "github.com/docker/docker/api/types/volume"
+	dockerclient "github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/archive"
+	"github.com/docker/go-connections/nat"
 
 	"efctl/pkg/env"
 	"efctl/pkg/ui"
 )
 
+// ── Container configuration ────────────────────────────────────────
+
+// MountDef describes a volume or bind mount for a container.
+type MountDef struct {
+	Type    string // "bind" or "volume"
+	Source  string // host path (bind) or volume name (volume)
+	Target  string // container path
+	SELinux bool   // append :z for SELinux relabelling
+}
+
+// HealthcheckDef describes a container healthcheck.
+type HealthcheckDef struct {
+	Test        []string
+	Interval    time.Duration
+	Timeout     time.Duration
+	Retries     int
+	StartPeriod time.Duration
+}
+
+// ContainerConfig holds everything needed to create & start a container.
+type ContainerConfig struct {
+	Name        string
+	Image       string
+	Ports       map[int]int // host → container
+	Mounts      []MountDef
+	Env         []string // KEY=VALUE
+	NetworkName string
+	Aliases     []string // DNS aliases in the network
+	WorkingDir  string
+	Cmd         []string
+	Entrypoint  []string
+	Tty         bool
+	OpenStdin   bool
+	Healthcheck *HealthcheckDef
+	UsernsMode  string // e.g. "keep-id" for Podman
+}
+
+// ── Interface ──────────────────────────────────────────────────────
+
 // ContainerClient defines the interface for container operations.
 // All consumers should accept this interface to enable testing with mocks.
 type ContainerClient interface {
-	ComposeBuild(dir string) error
-	ComposeRun(dir string) error
-	ComposeUp(dir string, services ...string) error
+	// Lifecycle primitives
+	BuildImage(ctx context.Context, contextDir string, dockerfilePath string, tag string) error
+	CreateNetwork(ctx context.Context, name string) error
+	RemoveNetwork(ctx context.Context, name string) error
+	CreateVolume(ctx context.Context, name string) error
+	CreateContainer(ctx context.Context, cfg ContainerConfig) error
+	StartContainer(ctx context.Context, name string) error
+	StopContainer(ctx context.Context, name string) error
+	RemoveContainer(ctx context.Context, name string) error
+	WaitHealthy(ctx context.Context, name string, timeout time.Duration) error
+
+	// Inspection / interaction (carried over from previous interface)
 	GetEngine() string
+	NetworkName() string
 	ContainerRunning(name string) bool
 	ContainerLogs(name string, tail int) string
 	ContainerExitCode(name string) (int, error)
@@ -30,22 +94,71 @@ type ContainerClient interface {
 	Cleanup() error
 }
 
-// Client wraps the container engine execution and implements ContainerClient.
+// ── Client ─────────────────────────────────────────────────────────
+
+// Client wraps the Docker/Podman SDK and implements ContainerClient.
 type Client struct {
-	Engine string
+	Engine      string // "docker" or "podman"
+	docker      *dockerclient.Client
+	network     string              // dynamic network name
+	healthTests map[string][]string // container name → healthcheck Test (for exec fallback)
 }
 
 // Compile-time check that Client implements ContainerClient.
 var _ ContainerClient = (*Client)(nil)
 
-// NewClient returns a new container client
+// NewClient returns a new container client backed by the Docker SDK.
+// It auto-detects the engine (Docker or Podman) and connects to the
+// appropriate socket.
 func NewClient() (*Client, error) {
 	res := env.CheckPrerequisites()
 	engine, err := res.Engine()
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Engine: engine}, nil
+
+	opts := []dockerclient.Opt{
+		dockerclient.FromEnv,
+		dockerclient.WithAPIVersionNegotiation(),
+	}
+
+	// For Podman, ensure DOCKER_HOST points at the Podman socket when it
+	// is not already set.
+	if engine == "podman" && os.Getenv("DOCKER_HOST") == "" {
+		uid := os.Getuid()
+		sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
+		opts = append(opts, dockerclient.WithHost(sock))
+	}
+
+	dc, err := dockerclient.NewClientWithOpts(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Docker SDK client: %w", err)
+	}
+
+	return &Client{Engine: engine, docker: dc}, nil
+}
+
+// NewClientWithNetwork creates a client and derives a deterministic network
+// name from the workspace path.  Callers that need network isolation (env up)
+// should use this constructor.
+func NewClientWithNetwork(workspace string) (*Client, error) {
+	c, err := NewClient()
+	if err != nil {
+		return nil, err
+	}
+	c.network = NetworkNameForWorkspace(workspace)
+	return c, nil
+}
+
+// NetworkNameForWorkspace returns a deterministic network name for a workspace
+// path.  Format: efctl-<first 8 hex chars of SHA-256>.
+func NetworkNameForWorkspace(workspace string) string {
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		abs = workspace
+	}
+	h := sha256.Sum256([]byte(abs))
+	return fmt.Sprintf("%s%x", NetworkPrefix, h[:4])
 }
 
 // GetEngine returns the underlying container engine ("docker" or "podman")
@@ -53,116 +166,453 @@ func (c *Client) GetEngine() string {
 	return c.Engine
 }
 
-// ComposeBuild runs docker/podman compose build
-func (c *Client) ComposeBuild(dir string) error {
-	spinner, _ := ui.Spin("Building containers...")
+// NetworkName returns the dynamic network name for this client.
+func (c *Client) NetworkName() string {
+	return c.network
+}
 
-	cmd := exec.Command(c.Engine, "compose", "build", "--no-cache") // #nosec G204
-	cmd.Dir = dir
+// ── Lifecycle primitives ───────────────────────────────────────────
 
-	output, err := cmd.CombinedOutput()
+// BuildImage builds a Docker image from a Dockerfile in the given context
+// directory.
+func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileName string, tag string) error {
+	spinner, _ := ui.Spin(fmt.Sprintf("Building image %s...", tag))
+
+	tarReader, err := archive.TarWithOptions(contextDir, &archive.TarOptions{})
 	if err != nil {
-		spinner.Fail("Failed to build containers")
-		return fmt.Errorf("compose build error: %v\n%s", err, string(output))
+		spinner.Fail("Failed to create build context")
+		return fmt.Errorf("tar build context: %w", err)
 	}
 
-	spinner.Success("Containers built successfully")
+	resp, err := c.docker.ImageBuild(ctx, tarReader, dockertypes.ImageBuildOptions{
+		Tags:       []string{tag},
+		Dockerfile: dockerfileName,
+		NoCache:    true,
+		Remove:     true,
+	})
+	if err != nil {
+		spinner.Fail("Failed to build image")
+		return fmt.Errorf("image build: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Drain build output to completion — detect errors in the stream.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	spinner.Success(fmt.Sprintf("Image %s built successfully", tag))
 	return nil
 }
 
-// ComposeRun runs the default sui-playground
-func (c *Client) ComposeRun(dir string) error {
-	spinner, _ := ui.Spin("Starting sui-playground...")
-
-	cmd := exec.Command(c.Engine, "compose", "run", "-d", "--name", ContainerSuiPlayground, "--service-ports", "sui-dev") // #nosec G204
-	cmd.Dir = dir
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		spinner.Fail("Failed to start sui-playground")
-		return fmt.Errorf("compose run error: %v\n%s", err, string(output))
+// CreateNetwork creates a bridge network with the given name.
+// It is a no-op if the network already exists.
+func (c *Client) CreateNetwork(ctx context.Context, name string) error {
+	// Check if it already exists.
+	list, err := c.docker.NetworkList(ctx, dockernetwork.ListOptions{
+		Filters: dockerfilters.NewArgs(dockerfilters.Arg("name", name)),
+	})
+	if err == nil {
+		for _, n := range list {
+			if n.Name == name {
+				return nil
+			}
+		}
 	}
 
-	spinner.Success("sui-playground started in detached mode")
+	_, err = c.docker.NetworkCreate(ctx, name, dockernetwork.CreateOptions{
+		Driver: "bridge",
+	})
+	if err != nil {
+		return fmt.Errorf("create network %s: %w", name, err)
+	}
 	return nil
 }
 
-// ComposeUp starts one or more compose services in detached mode
-func (c *Client) ComposeUp(dir string, services ...string) error {
-	args := []string{"compose", "up", "-d"}
-	args = append(args, services...)
-
-	label := strings.Join(services, ", ")
-	spinner, _ := ui.Spin(fmt.Sprintf("Starting %s...", label))
-
-	cmd := exec.Command(c.Engine, args...) // #nosec G204
-	cmd.Dir = dir
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to start %s", label))
-		return fmt.Errorf("compose up error: %v\n%s", err, string(output))
+// RemoveNetwork removes a network by name, ignoring "not found" errors.
+func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
+	if err := c.docker.NetworkRemove(ctx, name); err != nil && !dockerclient.IsErrNotFound(err) {
+		return fmt.Errorf("remove network %s: %w", name, err)
 	}
-
-	spinner.Success(fmt.Sprintf("%s started", label))
 	return nil
 }
 
-// ContainerRunning checks if a container is currently running.
-func (c *Client) ContainerRunning(name string) bool {
-	out, err := exec.Command(c.Engine, "inspect", "--format", "{{.State.Running}}", name).Output() // #nosec G204
+// CreateVolume creates a named volume.  It is a no-op if it already exists.
+func (c *Client) CreateVolume(ctx context.Context, name string) error {
+	_, err := c.docker.VolumeCreate(ctx, dockervolume.CreateOptions{Name: name})
+	if err != nil {
+		return fmt.Errorf("create volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// CreateContainer creates (but does not start) a container from the given config.
+// Remote images (containing "/" or ":") are automatically pulled if not present locally.
+func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) error {
+	ui.Debug.Println(fmt.Sprintf("Creating container %s (image=%s)", cfg.Name, cfg.Image))
+	for _, m := range cfg.Mounts {
+		ui.Debug.Println(fmt.Sprintf("  mount: type=%s src=%s → %s", m.Type, m.Source, m.Target))
+	}
+	for _, e := range cfg.Env {
+		ui.Debug.Println(fmt.Sprintf("  env: %s", e))
+	}
+
+	// --- pull remote images if needed ---
+	if strings.Contains(cfg.Image, "/") || strings.Contains(cfg.Image, ":") {
+		if err := c.ensureImage(ctx, cfg.Image); err != nil {
+			return fmt.Errorf("pull image %s: %w", cfg.Image, err)
+		}
+	}
+
+	exposedPorts, portBindings := c.preparePortConfig(cfg.Ports)
+	mounts := c.prepareMountConfig(cfg.Mounts)
+	hc := c.prepareHealthConfig(cfg.Healthcheck)
+	networkConfig, hostNetworkMode := c.prepareNetworkConfig(cfg.NetworkName, cfg.Aliases)
+
+	// --- userns mode (Podman keep-id) ---
+	usernsMode := dockercontainer.UsernsMode("")
+	if cfg.UsernsMode != "" {
+		usernsMode = dockercontainer.UsernsMode(cfg.UsernsMode)
+	}
+
+	containerCfg := &dockercontainer.Config{
+		Image:        cfg.Image,
+		Env:          cfg.Env,
+		Cmd:          cfg.Cmd,
+		Entrypoint:   cfg.Entrypoint,
+		WorkingDir:   cfg.WorkingDir,
+		Tty:          cfg.Tty,
+		OpenStdin:    cfg.OpenStdin,
+		ExposedPorts: exposedPorts,
+		Healthcheck:  hc,
+	}
+
+	hostCfg := &dockercontainer.HostConfig{
+		PortBindings: portBindings,
+		Mounts:       mounts,
+		UsernsMode:   usernsMode,
+		NetworkMode:  hostNetworkMode,
+	}
+
+	_, err := c.docker.ContainerCreate(ctx, containerCfg, hostCfg, networkConfig, nil, cfg.Name)
+	if err != nil {
+		return fmt.Errorf("create container %s: %w", cfg.Name, err)
+	}
+
+	// Store healthcheck test for the exec-based fallback probe (Podman compat).
+	if cfg.Healthcheck != nil && len(cfg.Healthcheck.Test) > 0 {
+		if c.healthTests == nil {
+			c.healthTests = make(map[string][]string)
+		}
+		c.healthTests[cfg.Name] = cfg.Healthcheck.Test
+	}
+
+	return nil
+}
+
+func (c *Client) preparePortConfig(ports map[int]int) (nat.PortSet, nat.PortMap) {
+	exposedPorts := nat.PortSet{}
+	portBindings := nat.PortMap{}
+	for host, ctr := range ports {
+		cp := nat.Port(fmt.Sprintf("%d/tcp", ctr))
+		exposedPorts[cp] = struct{}{}
+		portBindings[cp] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", host)}}
+	}
+	return exposedPorts, portBindings
+}
+
+func (c *Client) prepareMountConfig(mountDefs []MountDef) []dockermount.Mount {
+	mounts := make([]dockermount.Mount, 0, len(mountDefs))
+	for _, m := range mountDefs {
+		mt := dockermount.Mount{
+			Target: m.Target,
+		}
+		switch m.Type {
+		case "bind":
+			mt.Type = dockermount.TypeBind
+			mt.Source = m.Source
+			if m.SELinux {
+				mt.BindOptions = &dockermount.BindOptions{
+					Propagation: dockermount.PropagationShared,
+				}
+			}
+		default: // volume
+			mt.Type = dockermount.TypeVolume
+			mt.Source = m.Source
+		}
+		mounts = append(mounts, mt)
+	}
+	return mounts
+}
+
+func (c *Client) prepareHealthConfig(h *HealthcheckDef) *dockercontainer.HealthConfig {
+	if h == nil {
+		return nil
+	}
+	return &dockercontainer.HealthConfig{
+		Test:        h.Test,
+		Interval:    h.Interval,
+		Timeout:     h.Timeout,
+		Retries:     h.Retries,
+		StartPeriod: h.StartPeriod,
+	}
+}
+
+func (c *Client) prepareNetworkConfig(networkName string, aliases []string) (*dockernetwork.NetworkingConfig, dockercontainer.NetworkMode) {
+	var networkConfig *dockernetwork.NetworkingConfig
+	var hostNetworkMode dockercontainer.NetworkMode
+
+	if networkName != "" {
+		hostNetworkMode = dockercontainer.NetworkMode(networkName)
+		endpointSettings := &dockernetwork.EndpointSettings{}
+		if len(aliases) > 0 {
+			endpointSettings.Aliases = aliases
+		}
+		networkConfig = &dockernetwork.NetworkingConfig{
+			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
+				networkName: endpointSettings,
+			},
+		}
+	}
+	return networkConfig, hostNetworkMode
+}
+
+// ensureImage pulls a remote image if it is not already present locally.
+func (c *Client) ensureImage(ctx context.Context, ref string) error {
+	// Check if the image exists locally first.
+	_, _, err := c.docker.ImageInspectWithRaw(ctx, ref)
+	if err == nil {
+		return nil // already present
+	}
+
+	ui.Info.Println(fmt.Sprintf("Pulling image %s ...", ref))
+	reader, err := c.docker.ImagePull(ctx, ref, dockerimage.PullOptions{})
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	// Drain the reader to complete the pull; discard progress output.
+	_, _ = io.Copy(io.Discard, reader)
+	return nil
+}
+
+// StartContainer starts an existing container by name.
+func (c *Client) StartContainer(ctx context.Context, name string) error {
+	if err := c.docker.ContainerStart(ctx, name, dockercontainer.StartOptions{}); err != nil {
+		return fmt.Errorf("start container %s: %w", name, err)
+	}
+	return nil
+}
+
+// StopContainer stops a running container by name (10s timeout).
+func (c *Client) StopContainer(ctx context.Context, name string) error {
+	timeout := 10
+	if err := c.docker.ContainerStop(ctx, name, dockercontainer.StopOptions{Timeout: &timeout}); err != nil && !dockerclient.IsErrNotFound(err) {
+		return fmt.Errorf("stop container %s: %w", name, err)
+	}
+	return nil
+}
+
+// RemoveContainer removes a container by name, ignoring "not found" errors.
+func (c *Client) RemoveContainer(ctx context.Context, name string) error {
+	if err := c.docker.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true}); err != nil && !dockerclient.IsErrNotFound(err) {
+		return fmt.Errorf("remove container %s: %w", name, err)
+	}
+	return nil
+}
+
+// WaitHealthy polls a container's health status until it reports "healthy"
+// or the timeout expires. If the engine's native healthcheck never succeeds
+// (common with Podman), it falls back to executing the healthcheck command
+// inside the container via exec.
+func (c *Client) WaitHealthy(ctx context.Context, name string, timeout time.Duration) error {
+	ui.Debug.Println(fmt.Sprintf("WaitHealthy: container=%s timeout=%s engine=%s", name, timeout, c.Engine))
+	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to become healthy...", name))
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// After a few ticks without a "healthy" status, switch to exec-based probing.
+	unhealthyTicks := 0
+	const execFallbackThreshold = 3
+
+	for {
+		select {
+		case <-deadline:
+			spinner.Fail(fmt.Sprintf("%s did not become healthy in %s", name, timeout))
+			return fmt.Errorf("timeout waiting for %s healthcheck", name)
+		case <-ctx.Done():
+			spinner.Fail(fmt.Sprintf("%s healthcheck cancelled", name))
+			return ctx.Err()
+		case <-ticker.C:
+			info, err := c.docker.ContainerInspect(ctx, name)
+			if err != nil {
+				continue
+			}
+			if info.State == nil {
+				continue
+			}
+			// If the container exited, there is no point waiting.
+			if !info.State.Running {
+				spinner.Fail(fmt.Sprintf("%s exited before becoming healthy", name))
+				return fmt.Errorf("container %s is not running (exit code %d)", name, info.State.ExitCode)
+			}
+
+			// Check native healthcheck status.
+			healthStatus := "none"
+			if info.State.Health != nil {
+				healthStatus = info.State.Health.Status
+			}
+			ui.Debug.Println(fmt.Sprintf("WaitHealthy: %s tick=%d health=%s running=%v", name, unhealthyTicks, healthStatus, info.State.Running))
+
+			if healthStatus == "healthy" {
+				spinner.Success(fmt.Sprintf("%s is healthy", name))
+				return nil
+			}
+
+			// Native healthcheck absent or stuck (e.g. Podman "starting") —
+			// fall back to running the probe command via exec.
+			unhealthyTicks++
+			if unhealthyTicks >= execFallbackThreshold {
+				ok := c.execHealthProbe(ctx, name)
+				ui.Debug.Println(fmt.Sprintf("WaitHealthy: %s exec fallback result=%v", name, ok))
+				if ok {
+					spinner.Success(fmt.Sprintf("%s is healthy", name))
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// execHealthProbe runs the container's healthcheck command via exec.
+// Returns true if the command exits 0.
+func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
+	if c.docker == nil {
+		return false
+	}
+	// Look up the healthcheck test stored during CreateContainer.
+	test := c.healthTests[name]
+	if len(test) == 0 {
+		return false
+	}
+
+	var cmd []string
+	switch test[0] {
+	case "CMD-SHELL":
+		cmd = []string{"sh", "-c", strings.Join(test[1:], " ")}
+	case "CMD":
+		cmd = test[1:]
+	default:
+		cmd = test
+	}
+	if len(cmd) == 0 {
+		return false
+	}
+
+	execCfg, err := c.docker.ContainerExecCreate(ctx, name, dockercontainer.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: false,
+		AttachStderr: false,
+	})
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == "true"
+
+	// Use Detach: true so the exec runs asynchronously without requiring
+	// an attached stream. Podman's compat API rejects ExecStart when no
+	// streams are attached and Detach is false ("must provide at least one
+	// stream to attach to").
+	if err := c.docker.ContainerExecStart(ctx, execCfg.ID, dockercontainer.ExecStartOptions{
+		Detach: true,
+	}); err != nil {
+		return false
+	}
+	// Poll for exec completion.
+	for i := 0; i < 10; i++ {
+		inspect, err := c.docker.ContainerExecInspect(ctx, execCfg.ID)
+		if err != nil {
+			return false
+		}
+		if !inspect.Running {
+			return inspect.ExitCode == 0
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
+}
+
+// ── Inspection / interaction ────────────────────────────────────────
+
+// ContainerRunning checks if a container is currently running.
+func (c *Client) ContainerRunning(name string) bool {
+	ctx := context.Background()
+	info, err := c.docker.ContainerInspect(ctx, name)
+	if err != nil {
+		return false
+	}
+	return info.State != nil && info.State.Running
 }
 
 // ContainerLogs returns the last N lines of a container's logs.
 func (c *Client) ContainerLogs(name string, tail int) string {
-	out, err := exec.Command(c.Engine, "logs", "--tail", fmt.Sprintf("%d", tail), name).CombinedOutput() // #nosec G204
+	ctx := context.Background()
+	reader, err := c.docker.ContainerLogs(ctx, name, dockercontainer.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       fmt.Sprintf("%d", tail),
+	})
 	if err != nil {
 		return fmt.Sprintf("(could not retrieve logs: %v)", err)
 	}
-	return strings.TrimSpace(string(out))
+	defer reader.Close()
+
+	var sb strings.Builder
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Docker multiplexes logs with an 8-byte header; strip it when present.
+		if len(line) > 8 {
+			sb.Write(line[8:])
+		} else {
+			sb.Write(line)
+		}
+		sb.WriteByte('\n')
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // ContainerExitCode returns the exit code of a stopped container.
 func (c *Client) ContainerExitCode(name string) (int, error) {
-	out, err := exec.Command(c.Engine, "inspect", "--format", "{{.State.ExitCode}}", name).Output() // #nosec G204
+	ctx := context.Background()
+	info, err := c.docker.ContainerInspect(ctx, name)
 	if err != nil {
 		return -1, fmt.Errorf("failed to inspect container %s: %w", name, err)
 	}
-	var code int
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &code); err != nil {
-		return -1, fmt.Errorf("failed to parse exit code for %s: %w", name, err)
+	if info.State == nil {
+		return -1, fmt.Errorf("no state for container %s", name)
 	}
-	return code, nil
+	return info.State.ExitCode, nil
 }
 
 // WaitForLogs waits for a specific string in the container logs
 func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to initialize...", containerName))
 
-	cmd := exec.CommandContext(ctx, c.Engine, "logs", "-f", containerName) // #nosec G204
-	// We need both stdout and stderr since logs can go to either
-	stdout, err := cmd.StdoutPipe()
+	reader, err := c.docker.ContainerLogs(ctx, containerName, dockercontainer.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
 	if err != nil {
-		spinner.Fail("Failed to get logs pipe")
+		spinner.Fail("Failed to get logs stream")
 		return err
 	}
-
-	cmd.Stderr = cmd.Stdout
-
-	if err := cmd.Start(); err != nil {
-		spinner.Fail("Failed to start logs command")
-		return err
-	}
+	defer reader.Close()
 
 	// Channel to signal when search string is found
-	done := make(chan bool)
+	done := make(chan bool, 1)
 
 	go func() {
-		scanner := bufio.NewScanner(stdout)
+		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.Contains(line, searchString) {
@@ -193,16 +643,13 @@ func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchSt
 		}
 	}
 
-	if err := cmd.Wait(); err != nil {
-		// Non-critical: log follow process exit after search string found
-		_ = err
-	}
-
 	spinner.Success(fmt.Sprintf("%s is ready", containerName))
 	return nil
 }
 
-// InteractiveShell opens an interactive shell in the container
+// InteractiveShell opens an interactive shell in the container.
+// This uses the CLI directly because the SDK exec-attach-hijack flow
+// is non-trivial for raw TTY handling, and the CLI handles it perfectly.
 func (c *Client) InteractiveShell(containerName string) error {
 	cmd := exec.Command(c.Engine, "exec", "-it", containerName, "/bin/bash") // #nosec G204
 	cmd.Stdin = os.Stdin
@@ -220,7 +667,8 @@ func (c *Client) InteractiveShell(containerName string) error {
 func (c *Client) Exec(containerName string, command []string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Executing in %s...", containerName))
 
-	// We do not use -it because we don't have a tty
+	// We use the CLI for exec because it handles TTY allocation and stream
+	// multiplexing transparently.
 	args := make([]string, 0, 2+len(command))
 	args = append(args, "exec", containerName)
 	args = append(args, command...)
@@ -257,75 +705,66 @@ func (c *Client) ExecCapture(containerName string, command []string) (string, er
 	return string(output), nil
 }
 
-// Cleanup stops/removes the container, removes images, volumes
+// ── Cleanup ────────────────────────────────────────────────────────
+
+// Cleanup stops/removes all efctl containers, images, networks, and volumes.
+// It also cleans up legacy compose-generated resources from older efctl versions.
 func (c *Client) Cleanup() error {
+	ctx := context.Background()
+
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")
-	c.stopAndRemoveContainers([]string{ContainerSuiPlayground})
+	c.forceRemoveContainers(ctx, []string{ContainerSuiPlayground})
 	spinner.Success(fmt.Sprintf("Container %s removal attempted", ContainerSuiPlayground))
 
 	spinnerPg, _ := ui.Spin("Stopping and removing postgres container...")
-	c.stopAndRemoveContainers([]string{ContainerPostgres, ContainerPostgresOld})
+	c.forceRemoveContainers(ctx, []string{ContainerPostgres, ContainerPostgresOld, ContainerPostgresOld2})
 	spinnerPg.Success("Postgres container removal attempted")
 
 	spinnerFe, _ := ui.Spin("Stopping and removing frontend container...")
-	c.stopAndRemoveContainers([]string{ContainerFrontend, ContainerFrontendOld})
+	c.forceRemoveContainers(ctx, []string{ContainerFrontend, ContainerFrontendOld, ContainerFrontendOld2})
 	spinnerFe.Success("Frontend container removal attempted")
 
 	spinner2, _ := ui.Spin("Removing sui-dev images...")
-	c.RemoveImages([]string{ImageDockerSuiDev, ImageDockerSuiDevOld})
+	c.RemoveImages([]string{ImageSuiDev, ImageSuiDevOld, ImageSuiDevOld2})
 	spinner2.Success("Images removal attempted")
 
 	spinner3, _ := ui.Spin("Removing config and data volumes...")
-	c.removeVolumes([]string{VolumeDockerSuiConfig, VolumeDockerSuiConfigOld, VolumeDockerPgData, VolumeDockerPgDataOld, VolumeDockerFeModules, VolumeDockerFeModulesOld})
+	c.removeVolumes(ctx, []string{
+		VolumeSuiConfig, VolumeSuiConfigOld, VolumeSuiConfigOld2,
+		VolumePgData, VolumePgDataOld, VolumePgDataOld2,
+		VolumeFrontendMods, VolumeFrontendModsOld, VolumeFrontendModsOld2,
+	})
 	spinner3.Success("Volumes removal attempted")
+
+	// Remove any efctl networks
+	if c.network != "" {
+		spinnerNet, _ := ui.Spin("Removing network...")
+		_ = c.RemoveNetwork(ctx, c.network)
+		spinnerNet.Success("Network removal attempted")
+	}
 
 	return nil
 }
 
-func (c *Client) stopAndRemoveContainers(names []string) {
+func (c *Client) forceRemoveContainers(ctx context.Context, names []string) {
 	for _, name := range names {
-		if c.containerExists(name) {
-			if err := exec.Command(c.Engine, "stop", name).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to stop %s: %v", name, err))
-			}
-			if err := exec.Command(c.Engine, "rm", name).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to remove %s: %v", name, err))
-			}
-		}
+		_ = c.docker.ContainerStop(ctx, name, dockercontainer.StopOptions{})
+		_ = c.docker.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true})
 	}
 }
 
 // RemoveImages removes container images by name, ignoring errors for
-// images that do not exist.  This is called before ComposeBuild to
+// images that do not exist.  This is called before BuildImage to
 // ensure Podman does not reuse a stale cached image.
 func (c *Client) RemoveImages(names []string) {
+	ctx := context.Background()
 	for _, name := range names {
-		if c.imageExists(name) {
-			if err := exec.Command(c.Engine, "rmi", "-f", name).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to remove %s image: %v", name, err))
-			}
-		}
+		_, _ = c.docker.ImageRemove(ctx, name, dockerimage.RemoveOptions{Force: true})
 	}
 }
 
-func (c *Client) removeVolumes(names []string) {
+func (c *Client) removeVolumes(ctx context.Context, names []string) {
 	for _, vol := range names {
-		if c.volumeExists(vol) {
-			if err := exec.Command(c.Engine, "volume", "rm", vol).Run(); err != nil { // #nosec G204
-				ui.Warn.Println(fmt.Sprintf("Failed to remove %s volume: %v", vol, err))
-			}
-		}
+		_ = c.docker.VolumeRemove(ctx, vol, true)
 	}
-}
-
-func (c *Client) containerExists(name string) bool {
-	return exec.Command(c.Engine, "container", "inspect", name).Run() == nil // #nosec G204
-}
-
-func (c *Client) imageExists(name string) bool {
-	return exec.Command(c.Engine, "image", "inspect", name).Run() == nil // #nosec G204
-}
-
-func (c *Client) volumeExists(name string) bool {
-	return exec.Command(c.Engine, "volume", "inspect", name).Run() == nil // #nosec G204
 }

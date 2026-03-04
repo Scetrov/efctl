@@ -92,7 +92,7 @@ var envUpCmd = &cobra.Command{
 
 		ui.Info.Println("Starting environment...")
 
-		c, err := container.NewClient()
+		c, err := container.NewClientWithNetwork(workspacePath)
 		if err != nil {
 			ui.Error.Println("Failed to create container client: " + err.Error())
 			os.Exit(1)

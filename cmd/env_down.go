@@ -19,7 +19,7 @@ var envDownCmd = &cobra.Command{
 		ui.Info.Println("Starting cleanup...")
 		// Assuming setup.CleanEnvironment doesn't need workspacePath currently,
 		// but if it ever does, workspacePath is accessible from env.go
-		c, err := container.NewClient()
+		c, err := container.NewClientWithNetwork(workspacePath)
 		if err != nil {
 			ui.Error.Println("Failed to create container client: " + err.Error())
 			os.Exit(1)

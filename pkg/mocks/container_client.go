@@ -2,6 +2,9 @@ package mocks
 
 import (
 	"context"
+	"time"
+
+	"efctl/pkg/container"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -11,19 +14,59 @@ type MockContainerClient struct {
 	mock.Mock
 }
 
-func (m *MockContainerClient) ComposeBuild(dir string) error {
-	args := m.Called(dir)
+func (m *MockContainerClient) BuildImage(ctx context.Context, contextDir string, dockerfilePath string, tag string) error {
+	args := m.Called(ctx, contextDir, dockerfilePath, tag)
 	return args.Error(0)
 }
 
-func (m *MockContainerClient) ComposeRun(dir string) error {
-	args := m.Called(dir)
+func (m *MockContainerClient) CreateNetwork(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
 	return args.Error(0)
 }
 
-func (m *MockContainerClient) ComposeUp(dir string, services ...string) error {
-	args := m.Called(dir, services)
+func (m *MockContainerClient) RemoveNetwork(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
 	return args.Error(0)
+}
+
+func (m *MockContainerClient) CreateVolume(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) CreateContainer(ctx context.Context, cfg container.ContainerConfig) error {
+	args := m.Called(ctx, cfg)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) StartContainer(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) StopContainer(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) RemoveContainer(ctx context.Context, name string) error {
+	args := m.Called(ctx, name)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) WaitHealthy(ctx context.Context, name string, timeout time.Duration) error {
+	args := m.Called(ctx, name, timeout)
+	return args.Error(0)
+}
+
+func (m *MockContainerClient) GetEngine() string {
+	args := m.Called()
+	return args.String(0)
+}
+
+func (m *MockContainerClient) NetworkName() string {
+	args := m.Called()
+	return args.String(0)
 }
 
 func (m *MockContainerClient) ContainerRunning(name string) bool {

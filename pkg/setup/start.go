@@ -27,8 +27,9 @@ func startupTimeoutFromEnv() time.Duration {
 	return defaultStartupTimeout
 }
 
-// StartEnvironment builds and starts the docker-compose environment
+// StartEnvironment builds images and starts containers directly (no compose).
 func StartEnvironment(c container.ContainerClient, workspace string, withGraphql bool, withFrontend bool) error {
+	ui.Debug.Println(fmt.Sprintf("StartEnvironment: workspace=%s engine=%s graphql=%v frontend=%v", workspace, c.GetEngine(), withGraphql, withFrontend))
 	ui.Info.Println("Starting container environment...")
 
 	if err := checkRequiredPorts(withGraphql, withFrontend); err != nil {
@@ -36,22 +37,79 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	}
 
 	dockerDir := filepath.Join(workspace, "builder-scaffold", "docker")
+	ctx := context.Background()
 
-	if err := prepareDockerEnvironment(dockerDir, withGraphql, withFrontend); err != nil {
+	// Patch Dockerfile and entrypoint.sh from the upstream clone.
+	if err := prepareDockerEnvironment(dockerDir, c.GetEngine(), withGraphql, withFrontend); err != nil {
 		return err
 	}
 
 	// Remove stale images so Podman (and Docker) are forced to rebuild from
-	// the patched Dockerfile and entrypoint.  Without this, Podman may reuse
-	// a cached image that contains the unpatched entrypoint.
-	c.RemoveImages([]string{container.ImageDockerSuiDev, container.ImageDockerSuiDevOld})
+	// the patched Dockerfile and entrypoint.
+	c.RemoveImages([]string{container.ImageSuiDev, container.ImageSuiDevOld, container.ImageSuiDevOld2})
 
-	if err := c.ComposeBuild(dockerDir); err != nil {
+	// ── Create network & build image ────────────────────────────────
+	if err := c.CreateNetwork(ctx, c.NetworkName()); err != nil {
+		return fmt.Errorf("failed to create network: %w", err)
+	}
+	if err := c.BuildImage(ctx, dockerDir, "Dockerfile", container.ImageSuiDev); err != nil {
+		return err
+	}
+	if err := c.CreateVolume(ctx, container.VolumeSuiConfig); err != nil {
+		return fmt.Errorf("failed to create sui-config volume: %w", err)
+	}
+
+	// ── PostgreSQL (if graphql) ─────────────────────────────────────
+	if withGraphql {
+		if err := startPostgres(c, ctx); err != nil {
+			return err
+		}
+	}
+
+	// ── Sui dev container ───────────────────────────────────────────
+	if err := startSuiDev(c, ctx, workspace, dockerDir, withGraphql); err != nil {
 		return err
 	}
 
-	if err := c.ComposeRun(dockerDir); err != nil {
-		return err
+	// ── Frontend (if requested) ─────────────────────────────────────
+	if withFrontend {
+		if err := startFrontend(c, ctx, workspace); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func startPostgres(c container.ContainerClient, ctx context.Context) error {
+	networkName := c.NetworkName()
+
+	if err := c.CreateVolume(ctx, container.VolumePgData); err != nil {
+		return fmt.Errorf("failed to create pgdata volume: %w", err)
+	}
+
+	pgCfg := container.PostgresConfig(networkName)
+	if err := c.CreateContainer(ctx, pgCfg); err != nil {
+		return fmt.Errorf("failed to create postgres container: %w", err)
+	}
+	if err := c.StartContainer(ctx, container.ContainerPostgres); err != nil {
+		return fmt.Errorf("failed to start postgres container: %w", err)
+	}
+	if err := c.WaitHealthy(ctx, container.ContainerPostgres, 60*time.Second); err != nil {
+		return fmt.Errorf("postgres did not become healthy: %w", err)
+	}
+	return nil
+}
+
+func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, dockerDir string, withGraphql bool) error {
+	networkName := c.NetworkName()
+
+	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql)
+	if err := c.CreateContainer(ctx, suiCfg); err != nil {
+		return fmt.Errorf("failed to create sui-playground container: %w", err)
+	}
+	if err := c.StartContainer(ctx, container.ContainerSuiPlayground); err != nil {
+		return fmt.Errorf("failed to start sui-playground container: %w", err)
 	}
 
 	// Give the container a moment to start, then verify it is still running
@@ -65,14 +123,16 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	}
 
 	startupTimeout := startupTimeoutFromEnv()
-	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	logCtx, cancel := context.WithTimeout(ctx, startupTimeout)
 	defer cancel()
 
-	if err := c.WaitForLogs(ctx, container.ContainerSuiPlayground, container.ContainerLogReadyCtx); err != nil {
+	if err := c.WaitForLogs(logCtx, container.ContainerSuiPlayground, container.ContainerLogReadyCtx); err != nil {
 		return err
 	}
 
-	// The container generates its internal .env.sui. We must extract it manually so host scripts can use it, avoiding rootless bind mount permission issues.
+	// The container generates its internal .env.sui. We must extract it
+	// manually so host scripts can use it, avoiding rootless bind mount
+	// permission issues.
 	output, err := c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/root/.sui/.env.sui"})
 	if err != nil {
 		ui.Warn.Println("Failed to extract .env.sui from container. Tests may fail to run locally.")
@@ -82,13 +142,6 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 			ui.Warn.Println(fmt.Sprintf("Failed to write extracted .env.sui to host: %v", writeErr))
 		}
 	}
-
-	if withFrontend {
-		if err := startFrontend(c, dockerDir); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -112,21 +165,30 @@ func checkRequiredPorts(withGraphql bool, withFrontend bool) error {
 	return nil
 }
 
-func startFrontend(c container.ContainerClient, dockerDir string) error {
+func startFrontend(c container.ContainerClient, ctx context.Context, workspace string) error {
 	ui.Info.Println("Starting frontend dApp...")
-	if err := c.ComposeUp(dockerDir, "frontend"); err != nil {
-		return err
+
+	networkName := c.NetworkName()
+
+	if err := c.CreateVolume(ctx, container.VolumeFrontendMods); err != nil {
+		return fmt.Errorf("failed to create frontend modules volume: %w", err)
+	}
+
+	feCfg := container.FrontendConfig(workspace, networkName, c.GetEngine())
+	if err := c.CreateContainer(ctx, feCfg); err != nil {
+		return fmt.Errorf("failed to create frontend container: %w", err)
+	}
+	if err := c.StartContainer(ctx, container.ContainerFrontend); err != nil {
+		return fmt.Errorf("failed to start frontend container: %w", err)
 	}
 
 	// Give the container a moment to start (or crash)
 	time.Sleep(3 * time.Second)
 
-	// Check both possible container names (docker-frontend-1 / docker_frontend_1)
-	feRunning := c.ContainerRunning(container.ContainerFrontend) || c.ContainerRunning(container.ContainerFrontendOld)
-	if !feRunning {
+	if !c.ContainerRunning(container.ContainerFrontend) {
 		logsOut := c.ContainerLogs(container.ContainerFrontend, 30)
 		if logsOut == "" || strings.Contains(logsOut, "could not retrieve") {
-			logsOut = c.ContainerLogs(container.ContainerFrontendOld, 30)
+			logsOut = "(no logs available)"
 		}
 		ui.Warn.Println("Frontend container exited immediately. Logs:")
 		fmt.Println(logsOut)

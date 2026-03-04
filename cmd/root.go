@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 
 	"efctl/pkg/config"
 	"efctl/pkg/ui"
@@ -9,19 +10,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var configFile string
+var (
+	configFile string
+	debugMode  bool
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "efctl",
 	Short: "efctl manages the local EVE Frontier Sui development environment",
 	Long:  `A fast and flexible CLI to automate the setup, deployment, and teardown of the EVE Frontier local world contracts and smart gates.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Enable debug output before any other work so early messages are visible.
+		if debugMode {
+			ui.DebugEnabled = true
+		}
+
 		cfg, err := config.Load(configFile)
 		if err != nil {
 			ui.Error.Println("Failed to load config: " + err.Error())
 			os.Exit(1)
 		}
 		config.Loaded = cfg
+
+		// Resolve workspacePath to an absolute path so that bind-mount
+		// sources are correct regardless of the container daemon's cwd.
+		if workspacePath != "" {
+			abs, absErr := filepath.Abs(workspacePath)
+			if absErr == nil {
+				ui.Debug.Println("Resolved workspace path: " + abs)
+				workspacePath = abs
+			}
+		}
 
 		// Validate workspace path if a workspace-aware command is being used
 		if workspacePath != "" && workspacePath != "." {
@@ -35,6 +54,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml configuration file")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable verbose debug logging")
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

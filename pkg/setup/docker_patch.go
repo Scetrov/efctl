@@ -32,197 +32,20 @@ func safePath(base string, elem ...string) (string, error) {
 	return absP, nil
 }
 
-func prepareDockerEnvironment(dockerDir string, withGraphql bool, withFrontend bool) error {
+func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool, withFrontend bool) error {
+	// Clean up any stale compose override files from older efctl versions.
 	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
-
-	// 1. Manage docker-compose.override.yml
-	if withGraphql || withFrontend {
-		overrideYaml := buildOverrideYaml(withGraphql, withFrontend)
-		if err := os.WriteFile(overridePath, []byte(overrideYaml), 0600); err != nil {
-			return fmt.Errorf("failed to write override yaml: %v", err)
-		}
-	} else {
-		if err := os.Remove(overridePath); err != nil && !os.IsNotExist(err) {
-			log.Printf("cleanup: failed to remove override file: %v", err)
-		}
+	if err := os.Remove(overridePath); err != nil && !os.IsNotExist(err) {
+		log.Printf("cleanup: failed to remove legacy override file: %v", err)
 	}
 
-	// 1.5 Patch compose.yml
-	patchComposeYml(dockerDir)
-
-	// 2. Patch Dockerfile
+	// Patch Dockerfile (add postgresql-client, sed safety net)
 	patchDockerfile(dockerDir)
 
-	// 3. Patch entrypoint.sh
+	// Patch entrypoint.sh (env path, postgres wait, sui start args, loop timings)
 	patchEntrypoint(dockerDir)
 
 	return nil
-}
-
-func buildOverrideYaml(withGraphql bool, withFrontend bool) string {
-	overrideYaml := "services:\n"
-
-	if withGraphql {
-		overrideYaml += postgresServiceYaml()
-		overrideYaml += suiDevGraphqlOverridesYaml()
-	}
-
-	if withFrontend {
-		overrideYaml += frontendServiceYaml()
-	}
-
-	overrideYaml += overrideVolumesYaml(withGraphql, withFrontend)
-
-	return overrideYaml
-}
-
-func suiDevServiceYaml() string {
-	yaml := "  sui-dev:\n"
-	return yaml
-}
-
-func postgresServiceYaml() string {
-	return `  postgres:
-    image: docker.io/library/postgres:16
-    environment:
-      POSTGRES_USER: sui
-      POSTGRES_PASSWORD: sui
-      POSTGRES_DB: sui_indexer
-    volumes:
-      - sui-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: "pg_isready -U sui -d sui_indexer"
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-`
-}
-
-func suiDevGraphqlOverridesYaml() string {
-	return `  sui-dev:
-    environment:
-      SUI_INDEXER_DB_URL: postgres://sui:sui@postgres:5432/sui_indexer
-      SUI_GRAPHQL_ENABLED: "true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "9125:9125"
-`
-}
-
-func frontendServiceYaml() string {
-	return `
-  frontend:
-    image: docker.io/library/node:24-slim
-    ports:
-      - "5173:5173"
-    volumes:
-      - ../../:/workspace
-      - frontend-node-modules:/workspace/builder-scaffold/dapps/node_modules
-    working_dir: /workspace/builder-scaffold/dapps
-    command:
-      - sh
-      - -c
-      - |
-        set -e
-        npm install -g pnpm
-        pnpm install
-        exec pnpm dev --host 0.0.0.0
-`
-}
-
-func overrideVolumesYaml(withGraphql bool, withFrontend bool) string {
-	if !withGraphql && !withFrontend {
-		return ""
-	}
-	result := "\nvolumes:\n"
-	if withGraphql {
-		result += "  sui-pgdata:\n"
-	} else {
-		// volumes: header already added above
-	}
-	if withFrontend {
-		result += "  frontend-node-modules:\n"
-	}
-	return result
-}
-
-func patchComposeYml(dockerDir string) {
-	composePath, err := safePath(dockerDir, "compose.yml")
-	if err != nil {
-		log.Printf("patch: invalid compose path: %v", err)
-		return
-	}
-	compose, err := os.ReadFile(composePath) // #nosec G304 -- path validated by safePath
-	if err != nil {
-		return
-	}
-	content := string(compose)
-	dirty := false
-
-	if strings.Contains(content, "- ./world-contracts:/workspace/world-contracts") {
-		content = strings.Replace(content, "- ./world-contracts:/workspace/world-contracts", "- ../../world-contracts:/workspace/world-contracts", 1)
-		dirty = true
-	}
-
-	// Bind-mount the patched entrypoint.sh into the container so it always
-	// overrides whatever is baked into the image.  This is the primary defence
-	// against Podman (and Docker) build-cache issues that silently preserve an
-	// unpatched entrypoint in the image layer.
-	const entrypointMount = "./scripts/entrypoint.sh:/workspace/scripts/entrypoint.sh"
-	if !strings.Contains(content, entrypointMount) {
-		// Insert after the builder-scaffold bind mount line.
-		lines := strings.Split(content, "\n")
-		for i, line := range lines {
-			if strings.Contains(line, "../:/workspace/builder-scaffold") {
-				indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
-				newLine := indent + "- " + entrypointMount
-				// Insert after this line
-				lines = append(lines[:i+1], append([]string{newLine}, lines[i+1:]...)...)
-				dirty = true
-				break
-			}
-		}
-		content = strings.Join(lines, "\n")
-	}
-
-	// Add :z SELinux labels to bind mounts so rootless Podman can relabel them.
-	// The :z suffix is a no-op on non-SELinux systems (e.g. Docker on Ubuntu).
-	content, changed := patchComposeBindMountLabels(content)
-	if changed {
-		dirty = true
-	}
-
-	if dirty {
-		if err := os.WriteFile(composePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
-			log.Printf("patch: failed to write compose.yml: %v", err)
-		}
-	}
-}
-
-// patchComposeBindMountLabels appends :z to bind-mount volumes that reference
-// relative host paths (../ or ./) mapped into /workspace. Named volumes are
-// left untouched. The function is idempotent — mounts that already carry a
-// suffix (:z, :Z, :ro, :rw, etc.) are skipped.
-func patchComposeBindMountLabels(content string) (string, bool) {
-	// Match lines like "      - ../:/workspace/builder-scaffold"
-	// Captures: (indent + "- " + host-relative-path ":" + container-path)(newline)
-	// Skips lines where the container-path is already followed by ":something".
-	re := regexp.MustCompile(`(?m)(- \.\.?/[^:\s]*:/workspace/[^:\s]+)\n`)
-	changed := false
-	content = re.ReplaceAllStringFunc(content, func(match string) string {
-		trimmed := strings.TrimRight(match, "\n")
-		// Already has a mount option suffix (e.g. :z, :ro)
-		parts := strings.Split(trimmed, ":")
-		if len(parts) > 2 {
-			return match
-		}
-		changed = true
-		return trimmed + ":z\n"
-	})
-	return content, changed
 }
 
 func patchDockerfile(dockerDir string) {
@@ -239,12 +62,22 @@ func patchDockerfile(dockerDir string) {
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
 	}
-	// Safety net: inject a sed command into the Dockerfile that replaces the
-	// bind-mount .env.sui path with the internal config-dir path at build time.
-	// This uses a literal target path (/root/.sui) rather than ${SUI_CFG} to
-	// avoid shell-escaping issues in the RUN layer. It is idempotent — the sed
-	// is a no-op when patchEntrypoint has already rewritten the host file.
-	const sedSafetyNet = `RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh`
+	// Safety net: inject a sed command into the Dockerfile that globally
+	// replaces the bind-mount .env.sui path with the internal config-dir path
+	// at build time.  This uses a broad global replacement (not just the
+	// ENV_FILE assignment) so it survives even when podman-compose reuses a
+	// cached COPY layer that still contains the unpatched upstream file.
+	// The command is idempotent — a no-op when the path is already correct.
+	const sedSafetyNet = `RUN sed -i 's|/workspace/builder-scaffold/docker/\.env\.sui|/root/.sui/.env.sui|g' /workspace/scripts/entrypoint.sh`
+
+	// Remove a narrower sed variant injected by earlier versions of efctl,
+	// so we don't accumulate duplicate (and less effective) RUN layers.
+	const oldSed = `RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh`
+	if strings.Contains(content, oldSed) {
+		content = strings.Replace(content, oldSed+"\n", "", 1)
+		content = strings.Replace(content, oldSed, "", 1)
+	}
+
 	if !strings.Contains(content, sedSafetyNet) {
 		content = strings.Replace(content,
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,

@@ -4,6 +4,10 @@ import (
 	"github.com/pterm/pterm"
 )
 
+// DebugEnabled controls whether Debug.Println and friends produce output.
+// Set to true via the global --debug flag.
+var DebugEnabled bool
+
 var (
 	// Emojis
 	SuccessEmoji = "✅"
@@ -21,6 +25,9 @@ var (
 	Success = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 	Warn    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 	Error   = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+
+	// Debug uses a distinct prefix; output is suppressed unless DebugEnabled is set.
+	Debug = DebugPrinter{SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " DEBUG ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgMagenta, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgGray)}}}
 )
 
 type SpacedPrinter struct {
@@ -65,6 +72,25 @@ func (s SpacedPrinter) Sprintf(format string, a ...any) string {
 
 func (s SpacedPrinter) Sprintfln(format string, a ...any) string {
 	return s.PrefixPrinter.Sprintfln(format, a...) + "\n"
+}
+
+// DebugPrinter wraps SpacedPrinter and only emits output when DebugEnabled is true.
+type DebugPrinter struct {
+	SpacedPrinter
+}
+
+func (d DebugPrinter) Println(a ...any) {
+	if !DebugEnabled {
+		return
+	}
+	d.SpacedPrinter.Println(a...)
+}
+
+func (d DebugPrinter) Printf(format string, a ...any) {
+	if !DebugEnabled {
+		return
+	}
+	d.SpacedPrinter.Printf(format, a...)
 }
 
 func init() {

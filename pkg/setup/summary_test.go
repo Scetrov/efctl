@@ -84,67 +84,6 @@ func TestParseEnvLog_Partial(t *testing.T) {
 	assert.Empty(t, env.playerAAddress)
 }
 
-// ── buildOverrideYaml ──────────────────────────────────────────────
-
-func TestBuildOverrideYaml_BothEnabled(t *testing.T) {
-	yaml := buildOverrideYaml(true, true)
-	assert.Contains(t, yaml, "postgres:")
-	assert.Contains(t, yaml, "sui-pgdata:")
-	assert.Contains(t, yaml, "frontend:")
-	assert.Contains(t, yaml, "frontend-node-modules:")
-	assert.True(t, strings.HasPrefix(yaml, "services:\n"))
-}
-
-func TestBuildOverrideYaml_GraphqlOnly(t *testing.T) {
-	yaml := buildOverrideYaml(true, false)
-	assert.Contains(t, yaml, "postgres:")
-	assert.Contains(t, yaml, "sui-pgdata:")
-	assert.NotContains(t, yaml, "frontend:")
-	assert.NotContains(t, yaml, "frontend-node-modules:")
-}
-
-func TestBuildOverrideYaml_FrontendOnly(t *testing.T) {
-	yaml := buildOverrideYaml(false, true)
-	assert.NotContains(t, yaml, "postgres:")
-	assert.Contains(t, yaml, "frontend:")
-	assert.Contains(t, yaml, "frontend-node-modules:")
-}
-
-func TestBuildOverrideYaml_NoneEnabled(t *testing.T) {
-	yaml := buildOverrideYaml(false, false)
-	assert.Equal(t, "services:\n", yaml)
-}
-
-// ── graphqlServicesYaml / frontendServiceYaml ──────────────────────
-
-func TestGraphqlServicesYaml(t *testing.T) {
-	yaml := postgresServiceYaml() + suiDevGraphqlOverridesYaml()
-	assert.Contains(t, yaml, "postgres:")
-	assert.Contains(t, yaml, "SUI_INDEXER_DB_URL")
-	assert.Contains(t, yaml, "SUI_GRAPHQL_ENABLED")
-	assert.Contains(t, yaml, "9125:9125")
-}
-
-func TestFrontendServiceYaml(t *testing.T) {
-	yaml := frontendServiceYaml()
-	assert.Contains(t, yaml, "frontend:")
-	assert.Contains(t, yaml, "5173:5173")
-	assert.Contains(t, yaml, "pnpm")
-}
-
-// ── overrideVolumesYaml ────────────────────────────────────────────
-
-func TestOverrideVolumesYaml_Both(t *testing.T) {
-	yaml := overrideVolumesYaml(true, true)
-	assert.Contains(t, yaml, "sui-pgdata:")
-	assert.Contains(t, yaml, "frontend-node-modules:")
-}
-
-func TestOverrideVolumesYaml_None(t *testing.T) {
-	yaml := overrideVolumesYaml(false, false)
-	assert.Empty(t, yaml)
-}
-
 // ── patchEntrypointPostgresWait ────────────────────────────────────
 
 func TestPatchEntrypointPostgresWait_InjectsWaitBlock(t *testing.T) {
