@@ -5,6 +5,9 @@
 build:
 	go build -o output/efctl main.go
 
+build-windows:
+	GOOS=windows GOARCH=amd64 go build -o output/efctl.exe main.go
+
 test:
 	go test -count=1 ./...
 

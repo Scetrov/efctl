@@ -42,8 +42,8 @@ func removeMoveLocksInSubdirs(root string, debugPrefix string) {
 	}
 }
 
-// ensureWorldSponsorAddresses backfills SPONSOR_ADDRESSES from ADMIN_ADDRESS
-// when upstream env-generation scripts fail to populate the sponsor list.
+// ensureWorldSponsorAddresses backfills SPONSOR_ADDRESS and SPONSOR_ADDRESSES
+// from ADMIN_ADDRESS when upstream env-generation scripts fail to populate them.
 //
 // The .env file is created by a script running as root inside the container,
 // so it is owned by root on the host.  To avoid permission-denied errors we
@@ -58,32 +58,54 @@ func ensureWorldSponsorAddresses(c container.ContainerClient, containerName stri
 	lines := strings.Split(data, "\n")
 	admin := ""
 	sponsorVal := ""
+	sponsorsVal := ""
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "ADMIN_ADDRESS=") {
 			admin = strings.TrimSpace(strings.TrimPrefix(line, "ADMIN_ADDRESS="))
 		}
+		if strings.HasPrefix(line, "SPONSOR_ADDRESS=") {
+			sponsorVal = strings.TrimSpace(strings.TrimPrefix(line, "SPONSOR_ADDRESS="))
+		}
 		if strings.HasPrefix(line, "SPONSOR_ADDRESSES=") {
-			sponsorVal = strings.TrimSpace(strings.TrimPrefix(line, "SPONSOR_ADDRESSES="))
+			sponsorsVal = strings.TrimSpace(strings.TrimPrefix(line, "SPONSOR_ADDRESSES="))
 		}
 	}
 
-	if admin == "" || sponsorVal != "" {
+	if admin == "" || (sponsorVal != "" && sponsorsVal != "") {
 		return
 	}
 
-	// Use sed to replace an empty SPONSOR_ADDRESSES line, or append if missing.
-	sedCmd := fmt.Sprintf(
-		`grep -q '^SPONSOR_ADDRESSES=' '%s' && `+
-			`sed -i 's/^SPONSOR_ADDRESSES=.*/SPONSOR_ADDRESSES=%s/' '%s' || `+
-			`echo 'SPONSOR_ADDRESSES=%s' >> '%s'`,
-		containerEnvPath, admin, containerEnvPath, admin, containerEnvPath,
-	)
+	// Use sed to replace empty values or append if missing.
+	sedCmds := []string{}
+	if sponsorVal == "" {
+		ui.Debug.Printfln("move_patch: patching SPONSOR_ADDRESS=%s", admin)
+		sedCmds = append(sedCmds, fmt.Sprintf(
+			`grep -q '^SPONSOR_ADDRESS=' '%s' && `+
+				`sed -i 's/^SPONSOR_ADDRESS=.*/SPONSOR_ADDRESS=%s/' '%s' || `+
+				`echo 'SPONSOR_ADDRESS=%s' >> '%s'`,
+			containerEnvPath, admin, containerEnvPath, admin, containerEnvPath,
+		))
+	}
+	if sponsorsVal == "" {
+		ui.Debug.Printfln("move_patch: patching SPONSOR_ADDRESSES=%s", admin)
+		sedCmds = append(sedCmds, fmt.Sprintf(
+			`grep -q '^SPONSOR_ADDRESSES=' '%s' && `+
+				`sed -i 's/^SPONSOR_ADDRESSES=.*/SPONSOR_ADDRESSES=%s/' '%s' || `+
+				`echo 'SPONSOR_ADDRESSES=%s' >> '%s'`,
+			containerEnvPath, admin, containerEnvPath, admin, containerEnvPath,
+		))
+	}
 
-	if execErr := c.Exec(containerName, []string{"/bin/bash", "-c", sedCmd}); execErr != nil {
+	if len(sedCmds) == 0 {
+		return
+	}
+
+	fullCmd := strings.Join(sedCmds, " && ")
+	if execErr := c.Exec(containerName, []string{"/bin/bash", "-c", fullCmd}); execErr != nil {
 		log.Printf("move_patch: cannot write world env file via container: %v", execErr)
 		return
 	}
 
-	ui.Debug.Println("Backfilled SPONSOR_ADDRESSES from ADMIN_ADDRESS in world-contracts/.env")
+	ui.Debug.Println("Backfilled missing sponsor fields from ADMIN_ADDRESS in world-contracts/.env")
 }

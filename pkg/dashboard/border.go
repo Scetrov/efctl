@@ -233,7 +233,9 @@ func BuildAddresses(admin string, envVars map[string]string, deriveAddr func(str
 	if admin != "" && admin != "Unknown" && admin != "Not Found" {
 		addrs["Admin"] = admin
 	}
-	if v, ok := envVars["SPONSOR_ADDRESS"]; ok {
+	if v, ok := envVars["SPONSOR_ADDRESSES"]; ok && v != "" {
+		addrs["Sponsor"] = v
+	} else if v, ok := envVars["SPONSOR_ADDRESS"]; ok && v != "" {
 		addrs["Sponsor"] = v
 	}
 	if pk, ok := envVars["PLAYER_A_PRIVATE_KEY"]; ok {

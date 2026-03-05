@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -122,9 +123,10 @@ func NewClient() (*Client, error) {
 		dockerclient.WithAPIVersionNegotiation(),
 	}
 
-	// For Podman, ensure DOCKER_HOST points at the Podman socket when it
-	// is not already set.
-	if engine == "podman" && os.Getenv("DOCKER_HOST") == "" {
+	// For Podman on Linux, ensure DOCKER_HOST points at the Podman socket when it
+	// is not already set. On other platforms (e.g. Windows), allow the SDK to
+	// use its default connection logic (e.g. named pipes).
+	if engine == "podman" && os.Getenv("DOCKER_HOST") == "" && runtime.GOOS == "linux" {
 		uid := os.Getuid()
 		sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
 		opts = append(opts, dockerclient.WithHost(sock))

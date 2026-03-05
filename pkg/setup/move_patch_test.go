@@ -89,22 +89,35 @@ func TestCleanStaleMoveLocks_NoopOnMissingLock(t *testing.T) {
 func TestEnsureWorldSponsorAddresses_BackfillsFromAdmin(t *testing.T) {
 	mc := new(mockContainerClient)
 
-	envContent := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=\n"
-	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent, nil)
+	// Case 1: Both missing
+	envContent := "ADMIN_ADDRESS=0xabc123\n"
+	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent, nil).Once()
 	mc.On("Exec", "test-container", mock.MatchedBy(func(cmd []string) bool {
 		return len(cmd) == 3 && cmd[0] == "/bin/bash" && cmd[1] == "-c" &&
+			strings.Contains(cmd[2], "SPONSOR_ADDRESS=0xabc123") &&
 			strings.Contains(cmd[2], "SPONSOR_ADDRESSES=0xabc123")
-	})).Return(nil)
+	})).Return(nil).Once()
+
+	ensureWorldSponsorAddresses(mc, "test-container")
+
+	// Case 2: SPONSOR_ADDRESS exists, SPONSOR_ADDRESSES missing
+	envContent2 := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESS=0xexisting\n"
+	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent2, nil).Once()
+	mc.On("Exec", "test-container", mock.MatchedBy(func(cmd []string) bool {
+		return len(cmd) == 3 && cmd[0] == "/bin/bash" && cmd[1] == "-c" &&
+			!strings.Contains(cmd[2], "SPONSOR_ADDRESS=") &&
+			strings.Contains(cmd[2], "SPONSOR_ADDRESSES=0xabc123")
+	})).Return(nil).Once()
 
 	ensureWorldSponsorAddresses(mc, "test-container")
 
 	mc.AssertExpectations(t)
 }
 
-func TestEnsureWorldSponsorAddresses_NoChangeWhenSponsorSet(t *testing.T) {
+func TestEnsureWorldSponsorAddresses_NoChangeWhenBothSet(t *testing.T) {
 	mc := new(mockContainerClient)
 
-	envContent := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=0xfeedbeef\n"
+	envContent := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESS=0xfoo\nSPONSOR_ADDRESSES=0xbar\n"
 	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent, nil)
 
 	ensureWorldSponsorAddresses(mc, "test-container")
