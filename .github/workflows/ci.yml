@@ -15,7 +15,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Build
         run: go build -trimpath -ldflags="-s -w" -v ./...
@@ -41,7 +41,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Integration Tests
         run: go test -v -count=1 -tags integration ./tests/integration/...
@@ -56,7 +56,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Build efctl
         run: go build -trimpath -ldflags="-s -w" -o output/efctl main.go
@@ -76,7 +76,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
