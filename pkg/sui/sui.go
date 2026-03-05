@@ -9,7 +9,13 @@ import (
 	"regexp"
 	"strings"
 
+	"efctl/pkg/env"
 	"efctl/pkg/ui"
+)
+
+const (
+	suiUpInstallerURL  = "https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh"
+	suiUpInstallerHash = "fa328e7ff0c7219e4fb046580bd5dd44125507480bbce45393a339d52e6b4aab"
 )
 
 // CommandExecutor defines the interface for running system commands.
@@ -54,8 +60,30 @@ func IsSuiUpInstalled() bool {
 
 func InstallSuiUp() error {
 	ui.Info.Println("Installing suiup...")
-	// Official installation command for suiup
-	cmd := exec.Command("bash", "-c", "set -o pipefail; curl -fsSL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | bash")
+
+	tmpDir := "./tmp"
+	if err := os.MkdirAll(tmpDir, 0750); err != nil {
+		return fmt.Errorf("failed to create tmp directory: %w", err)
+	}
+
+	scriptPath := filepath.Join(tmpDir, "suiup-install.sh")
+
+	ui.Info.Println("Downloading suiup installer...")
+	if err := env.DownloadFile(suiUpInstallerURL, scriptPath); err != nil {
+		return err
+	}
+
+	ui.Info.Println("Verifying installer integrity...")
+	ok, err := env.VerifySHA256(scriptPath, suiUpInstallerHash)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("suiup installer integrity check failed: SHA256 mismatch")
+	}
+
+	ui.Info.Println("Executing verified installer...")
+	cmd := exec.Command("bash", scriptPath) // #nosec G204
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

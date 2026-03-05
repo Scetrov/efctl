@@ -59,15 +59,26 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 		return fmt.Errorf("failed to create sui-config volume: %w", err)
 	}
 
+	pgUser := "sui"
+	pgDB := "sui_indexer"
+	pgPass := os.Getenv("EFCTL_PG_PASSWORD")
+	if pgPass == "" {
+		var err error
+		pgPass, err = env.GenerateRandomPassword(16)
+		if err != nil {
+			return fmt.Errorf("failed to generate postgres password: %w", err)
+		}
+	}
+
 	// ── PostgreSQL (if graphql) ─────────────────────────────────────
 	if withGraphql {
-		if err := startPostgres(c, ctx); err != nil {
+		if err := startPostgres(c, ctx, pgUser, pgPass, pgDB); err != nil {
 			return err
 		}
 	}
 
 	// ── Sui dev container ───────────────────────────────────────────
-	if err := startSuiDev(c, ctx, workspace, dockerDir, withGraphql); err != nil {
+	if err := startSuiDev(c, ctx, workspace, dockerDir, withGraphql, pgUser, pgPass, pgDB); err != nil {
 		return err
 	}
 
@@ -81,14 +92,14 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	return nil
 }
 
-func startPostgres(c container.ContainerClient, ctx context.Context) error {
+func startPostgres(c container.ContainerClient, ctx context.Context, user, pass, db string) error {
 	networkName := c.NetworkName()
 
 	if err := c.CreateVolume(ctx, container.VolumePgData); err != nil {
 		return fmt.Errorf("failed to create pgdata volume: %w", err)
 	}
 
-	pgCfg := container.PostgresConfig(networkName)
+	pgCfg := container.PostgresConfig(networkName, user, pass, db)
 	if err := c.CreateContainer(ctx, pgCfg); err != nil {
 		return fmt.Errorf("failed to create postgres container: %w", err)
 	}
@@ -101,10 +112,10 @@ func startPostgres(c container.ContainerClient, ctx context.Context) error {
 	return nil
 }
 
-func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, dockerDir string, withGraphql bool) error {
+func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, dockerDir string, withGraphql bool, pgUser, pgPass, pgDB string) error {
 	networkName := c.NetworkName()
 
-	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql)
+	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB)
 	if err := c.CreateContainer(ctx, suiCfg); err != nil {
 		return fmt.Errorf("failed to create sui-playground container: %w", err)
 	}

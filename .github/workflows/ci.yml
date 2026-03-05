@@ -18,7 +18,7 @@ jobs:
           go-version: "1.25"
 
       - name: Build
-        run: go build -v ./...
+        run: go build -trimpath -ldflags="-s -w" -v ./...
 
       - name: Unit Tests
         run: go test -v -count=1 -coverprofile=coverage.out ./...
@@ -27,7 +27,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.out
+          files: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
@@ -59,7 +59,7 @@ jobs:
           go-version: "1.25"
 
       - name: Build efctl
-        run: go build -o output/efctl main.go
+        run: go build -trimpath -ldflags="-s -w" -o output/efctl main.go
 
       - name: E2E Tests
         run: |
@@ -82,7 +82,13 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Run gosec
-        run: gosec -severity medium -confidence medium -fmt json -out gosec-ci-results.json ./... || true
+        run: |
+          gosec -severity medium -confidence medium -fmt json -out gosec-ci-results.json ./...
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 2 ]; then
+            echo "::error::gosec crashed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
 
       - name: Check gosec results
         run: |

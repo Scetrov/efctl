@@ -1,12 +1,13 @@
 package container
 
 import (
+	"fmt"
 	"path/filepath"
 	"time"
 )
 
 // SuiDevConfig returns the ContainerConfig for the main Sui development node.
-func SuiDevConfig(workspace, networkName, engine string, withGraphql bool) ContainerConfig {
+func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUser, pgPass, pgDB string) ContainerConfig {
 	builderScaffold := filepath.Join(workspace, "builder-scaffold")
 	worldContracts := filepath.Join(workspace, "world-contracts")
 
@@ -18,7 +19,7 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool) Conta
 	envVars := []string{}
 	if withGraphql {
 		envVars = append(envVars,
-			"SUI_INDEXER_DB_URL=postgres://sui:sui@"+ContainerPostgres+":5432/sui_indexer",
+			fmt.Sprintf("SUI_INDEXER_DB_URL=postgres://%s:%s@%s:5432/%s", pgUser, pgPass, ContainerPostgres, pgDB),
 			"SUI_GRAPHQL_ENABLED=true",
 		)
 	}
@@ -50,17 +51,17 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool) Conta
 }
 
 // PostgresConfig returns the ContainerConfig for the PostgreSQL indexer database.
-func PostgresConfig(networkName string) ContainerConfig {
+func PostgresConfig(networkName, user, password, dbName string) ContainerConfig {
 	return ContainerConfig{
 		Name:        ContainerPostgres,
 		Image:       ImagePostgres,
 		Ports:       map[int]int{5432: 5432},
-		Env:         []string{"POSTGRES_USER=sui", "POSTGRES_PASSWORD=sui", "POSTGRES_DB=sui_indexer"},
+		Env:         []string{fmt.Sprintf("POSTGRES_USER=%s", user), fmt.Sprintf("POSTGRES_PASSWORD=%s", password), fmt.Sprintf("POSTGRES_DB=%s", dbName)},
 		Mounts:      []MountDef{{Type: "volume", Source: VolumePgData, Target: "/var/lib/postgresql/data"}},
 		NetworkName: networkName,
 		Aliases:     []string{"postgres"},
 		Healthcheck: &HealthcheckDef{
-			Test:        []string{"CMD-SHELL", "pg_isready -U sui -d sui_indexer"},
+			Test:        []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s", user, dbName)},
 			Interval:    2 * time.Second,
 			Timeout:     3 * time.Second,
 			Retries:     30,

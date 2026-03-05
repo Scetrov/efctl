@@ -314,7 +314,7 @@ func (c *Client) preparePortConfig(ports map[int]int) (nat.PortSet, nat.PortMap)
 	for host, ctr := range ports {
 		cp := nat.Port(fmt.Sprintf("%d/tcp", ctr))
 		exposedPorts[cp] = struct{}{}
-		portBindings[cp] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", host)}}
+		portBindings[cp] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", host)}}
 	}
 	return exposedPorts, portBindings
 }

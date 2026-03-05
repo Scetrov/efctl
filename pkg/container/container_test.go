@@ -49,7 +49,7 @@ func TestNetworkNameForWorkspace_UniquePerPath(t *testing.T) {
 }
 
 func TestSuiDevConfig_Ports(t *testing.T) {
-	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false)
+	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db")
 	if _, ok := cfg.Ports[9000]; !ok {
 		t.Error("Expected port 9000 in SuiDevConfig")
 	}
@@ -57,7 +57,7 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 		t.Error("Port 9125 should not be present without graphql")
 	}
 
-	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true)
+	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db")
 	if _, ok := cfgGql.Ports[9125]; !ok {
 		t.Error("Expected port 9125 with graphql enabled")
 	}
@@ -70,19 +70,19 @@ func TestSuiDevConfig_PodmanUserns(t *testing.T) {
 	// The sui-dev container must NOT use keep-id because the Dockerfile
 	// installs everything under /root.  Podman rootless without keep-id
 	// maps container UID 0 → host UID, preserving /root access.
-	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false)
+	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db")
 	if cfg.UsernsMode != "" {
 		t.Errorf("Expected empty UsernsMode for Podman sui-dev, got %q", cfg.UsernsMode)
 	}
 
-	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false)
+	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db")
 	if cfgDocker.UsernsMode != "" {
 		t.Errorf("Expected empty UsernsMode for Docker, got %q", cfgDocker.UsernsMode)
 	}
 }
 
 func TestPostgresConfig_Healthcheck(t *testing.T) {
-	cfg := PostgresConfig("efctl-test")
+	cfg := PostgresConfig("efctl-test", "sui", "pass", "db")
 	if cfg.Healthcheck == nil {
 		t.Fatal("Expected healthcheck for postgres")
 	}
