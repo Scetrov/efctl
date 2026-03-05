@@ -57,6 +57,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v8
         with:
@@ -75,6 +78,18 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: "binaries/efctl-*"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: "binaries/efctl.sbom.spdx.json"
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v1
+        with:
+          subject-path: "binaries/efctl-*"
+          sbom-path: "binaries/efctl.sbom.spdx.json"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.8.1
