@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"efctl/pkg/ui"
 )
@@ -78,12 +80,31 @@ func CloneRepository(url string, dest string) error {
 			}
 		}
 
-		// Fetch from the updated remote
-		cmd = exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
-		if output, err := cmd.CombinedOutput(); err != nil {
+		// Fetch from the updated remote with retry logic
+		var fetchErr error
+		var fetchOutput []byte
+		for attempt := 1; attempt <= 3; attempt++ {
+			cmd = exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
+			fetchOutput, fetchErr = cmd.CombinedOutput()
+			if fetchErr == nil {
+				break
+			}
+
+			if !isRetriableGitError(string(fetchOutput), fetchErr) {
+				break
+			}
+
+			if attempt < 3 {
+				delay := time.Duration(1<<uint(attempt)) * time.Second
+				ui.Debug.Println(fmt.Sprintf("Git fetch attempt %d failed, retrying in %v...", attempt, delay))
+				time.Sleep(delay)
+			}
+		}
+
+		if fetchErr != nil {
 			spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
-			ui.Debug.Printf("git fetch error: %v\n%s", err, string(output))
-			return fmt.Errorf("failed to fetch remote for %s: %v\n%s", dest, err, string(output))
+			ui.Debug.Printf("git fetch error: %v\n%s", fetchErr, string(fetchOutput))
+			return fmt.Errorf("failed to fetch remote for %s: %v\n%s", dest, fetchErr, string(fetchOutput))
 		}
 
 		spinner.Success(fmt.Sprintf("Updated remote and fetched %s", dest))
@@ -92,15 +113,64 @@ func CloneRepository(url string, dest string) error {
 
 	spinner, _ := ui.Spin(fmt.Sprintf("%s Cloning %s...", ui.GitEmoji, url))
 
-	cmd := exec.Command("git", "clone", url, dest) // #nosec G204
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to clone %s", url))
-		return fmt.Errorf("git clone error: %v\n%s", err, string(output))
+	// Retry clone with exponential backoff for transient network failures
+	var lastErr error
+	var output []byte
+	for attempt := 1; attempt <= 3; attempt++ {
+		cmd := exec.Command("git", "clone", url, dest) // #nosec G204
+		output, lastErr = cmd.CombinedOutput()
+		if lastErr == nil {
+			spinner.Success(fmt.Sprintf("Cloned %s", dest))
+			return nil
+		}
+
+		// Check if it's a network error worth retrying
+		if !isRetriableGitError(string(output), lastErr) {
+			// Not a network error, fail immediately
+			break
+		}
+
+		if attempt < 3 {
+			// Exponential backoff: 2s, 4s
+			delay := time.Duration(1<<uint(attempt)) * time.Second
+			spinner.UpdateText(fmt.Sprintf("Clone attempt %d failed, retrying in %v...", attempt, delay))
+			ui.Debug.Println(fmt.Sprintf("Git clone attempt %d failed: %v", attempt, lastErr))
+			time.Sleep(delay)
+			spinner.UpdateText(fmt.Sprintf("%s Cloning %s (attempt %d/3)...", ui.GitEmoji, url, attempt+1))
+		}
 	}
 
-	spinner.Success(fmt.Sprintf("Cloned %s", dest))
-	return nil
+	spinner.Fail(fmt.Sprintf("Failed to clone %s after 3 attempts", url))
+	return fmt.Errorf("git clone error after %d attempts: %v\n%s", 3, lastErr, string(output))
+}
+
+// isRetriableGitError checks if a git error is worth retrying (transient network issues)
+func isRetriableGitError(output string, err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Network-related error patterns that warrant retry
+	retriablePatterns := []string{
+		"Could not resolve host",
+		"Failed to connect",
+		"Connection timed out",
+		"Connection refused",
+		"Connection reset",
+		"Network is unreachable",
+		"Temporary failure",
+		"502 Bad Gateway",
+		"503 Service Unavailable",
+		"504 Gateway Timeout",
+	}
+
+	outputLower := strings.ToLower(output)
+	for _, pattern := range retriablePatterns {
+		if strings.Contains(outputLower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckoutBranch checks out the specified branch in the given repository path.

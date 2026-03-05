@@ -526,8 +526,10 @@ func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
 	}); err != nil {
 		return false
 	}
-	// Poll for exec completion.
-	for i := 0; i < 10; i++ {
+
+	// Poll for exec completion with 30-second timeout
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
 		inspect, err := c.docker.ContainerExecInspect(ctx, execCfg.ID)
 		if err != nil {
 			return false
@@ -537,6 +539,8 @@ func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	// Timeout reached, treat as unhealthy
+	ui.Debug.Println(fmt.Sprintf("Health check exec for %s timed out after 30s", name))
 	return false
 }
 
@@ -625,19 +629,40 @@ func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchSt
 
 	select {
 	case <-ctx.Done():
+		// Timeout reached — check if container is still running and healthy as fallback.
+		// This handles cases where the log string changed or was never printed but container is actually ready.
+		if c.ContainerRunning(containerName) {
+			ui.Debug.Println(fmt.Sprintf("WaitForLogs timeout reached but %s is still running - checking health", containerName))
+			spinner.UpdateText(fmt.Sprintf("Log string not found, verifying %s health...", containerName))
+
+			// Give the container a moment to stabilize
+			time.Sleep(2 * time.Second)
+
+			// Create a short timeout for the health check
+			healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer healthCancel()
+
+			// Try exec-based health probe as fallback
+			if c.execHealthProbe(healthCtx, containerName) {
+				spinner.Success(fmt.Sprintf("%s is ready (health check passed)", containerName))
+				ui.Warn.Println(fmt.Sprintf("Log string %q not found, but container is healthy", searchString))
+				return nil
+			}
+		}
+
 		spinner.Fail("Timed out waiting for logs")
-		lastLogs := c.ContainerLogs(containerName, 20)
-		return fmt.Errorf("timeout waiting for %q in %s logs.\n\nLast 20 lines of container logs:\n%s", searchString, containerName, lastLogs)
+		lastLogs := c.ContainerLogs(containerName, 50)
+		return fmt.Errorf("timeout waiting for %q in %s logs.\n\nLast 50 lines of container logs:\n%s", searchString, containerName, lastLogs)
 	case found := <-done:
 		if !found {
 			// Container exited before the ready string appeared — provide diagnostics
 			exitCode, exitErr := c.ContainerExitCode(containerName)
-			lastLogs := c.ContainerLogs(containerName, 30)
+			lastLogs := c.ContainerLogs(containerName, 50)
 			diag := fmt.Sprintf("Container %s exited before becoming ready.", containerName)
 			if exitErr == nil {
 				diag += fmt.Sprintf(" Exit code: %d.", exitCode)
 			}
-			diag += fmt.Sprintf("\n\nLast 30 lines of container logs:\n%s", lastLogs)
+			diag += fmt.Sprintf("\n\nLast 50 lines of container logs:\n%s", lastLogs)
 			spinner.Fail(fmt.Sprintf("%s exited unexpectedly (search string %q not found)", containerName, searchString))
 			return fmt.Errorf("%s", diag)
 		}
@@ -713,6 +738,9 @@ func (c *Client) Cleanup() error {
 	ctx := context.Background()
 
 	spinner, _ := ui.Spin("Stopping and removing sui-playground container...")
+	// Before removing the container, try to normalize permissions on bind-mounted volumes
+	// so that the host user can clean up files created by root inside the container.
+	c.normalizeBindMountPermissions(ContainerSuiPlayground)
 	c.forceRemoveContainers(ctx, []string{ContainerSuiPlayground})
 	spinner.Success(fmt.Sprintf("Container %s removal attempted", ContainerSuiPlayground))
 
@@ -766,5 +794,34 @@ func (c *Client) RemoveImages(names []string) {
 func (c *Client) removeVolumes(ctx context.Context, names []string) {
 	for _, vol := range names {
 		_ = c.docker.VolumeRemove(ctx, vol, true)
+	}
+}
+
+// normalizeBindMountPermissions attempts to fix ownership/permissions on
+// bind-mounted directories before the container is removed. This prevents
+// permission errors when the host tries to clean up files created by root
+// inside the container.
+func (c *Client) normalizeBindMountPermissions(containerName string) {
+	if !c.ContainerRunning(containerName) {
+		ui.Debug.Println(fmt.Sprintf("Container %s not running, skipping permission normalization", containerName))
+		return
+	}
+
+	// Get host UID/GID
+	uid := os.Getuid()
+	gid := os.Getgid()
+
+	// Best-effort permission fix for common bind-mounted directories
+	cmdStr := fmt.Sprintf(
+		"chown -R %d:%d /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true; "+
+			"chmod -R u+rwX /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true",
+		uid, gid,
+	)
+
+	_, err := c.ExecCapture(containerName, []string{"/bin/bash", "-c", cmdStr})
+	if err != nil {
+		ui.Debug.Println(fmt.Sprintf("Permission normalization failed (non-critical): %v", err))
+	} else {
+		ui.Debug.Println(fmt.Sprintf("Normalized bind mount permissions for %s", containerName))
 	}
 }

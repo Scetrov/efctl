@@ -14,9 +14,9 @@ import (
 	"efctl/pkg/ui"
 )
 
-const defaultStartupTimeout = 5 * time.Minute
+const defaultStartupTimeout = 10 * time.Minute
 
-// startupTimeoutFromEnv returns the startup timeout, defaulting to 5 minutes.
+// startupTimeoutFromEnv returns the startup timeout, defaulting to 10 minutes.
 // Override with EFCTL_STARTUP_TIMEOUT_SECONDS for CI or slow environments.
 func startupTimeoutFromEnv() time.Duration {
 	if v := os.Getenv("EFCTL_STARTUP_TIMEOUT_SECONDS"); v != "" {
@@ -127,7 +127,9 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 	defer cancel()
 
 	if err := c.WaitForLogs(logCtx, container.ContainerSuiPlayground, container.ContainerLogReadyCtx); err != nil {
-		return err
+		// On timeout or failure, capture container logs for diagnostics
+		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 50)
+		return fmt.Errorf("%w\n\nLast 50 lines of container logs:\n%s", err, lastLogs)
 	}
 
 	// The container generates its internal .env.sui. We must extract it
