@@ -65,7 +65,13 @@ pre-commit: fmt vet build test gosec govulncheck
 	@echo "✅ All pre-commit checks passed."
 
 clean:
+	output/efctl env down
 	rm -f output/efctl output/efctl-*
 	rm -f gosec-results.json gosec-ci-results.json
 	rm -rf builder-scaffold
 	rm -rf world-contracts
+
+destroy-reset:
+	podman stop $(podman ps -qa || true) > /dev/null 2>&1 || docker stop $(docker ps -qa || true) > /dev/null 2>&1 || true
+	podman rm $(podman ps -qa || true) > /dev/null 2>&1 || docker rm $(docker ps -qa || true) > /dev/null 2>&1 || true
+	podman system prune --all --volumes --force || docker system prune --all --volumes --force || true
