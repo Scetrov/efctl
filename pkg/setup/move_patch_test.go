@@ -3,9 +3,11 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,34 +87,29 @@ func TestCleanStaleMoveLocks_NoopOnMissingLock(t *testing.T) {
 }
 
 func TestEnsureWorldSponsorAddresses_BackfillsFromAdmin(t *testing.T) {
-	workspace := t.TempDir()
-	worldDir := filepath.Join(workspace, "world-contracts")
-	require.NoError(t, os.MkdirAll(worldDir, 0755))
-	envPath := filepath.Join(worldDir, ".env")
+	mc := new(mockContainerClient)
 
-	content := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=\n"
-	require.NoError(t, os.WriteFile(envPath, []byte(content), 0644))
+	envContent := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=\n"
+	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent, nil)
+	mc.On("Exec", "test-container", mock.MatchedBy(func(cmd []string) bool {
+		return len(cmd) == 3 && cmd[0] == "/bin/bash" && cmd[1] == "-c" &&
+			strings.Contains(cmd[2], "SPONSOR_ADDRESSES=0xabc123")
+	})).Return(nil)
 
-	ensureWorldSponsorAddresses(workspace)
+	ensureWorldSponsorAddresses(mc, "test-container")
 
-	updated, err := os.ReadFile(envPath)
-	require.NoError(t, err)
-	assert.Contains(t, string(updated), "SPONSOR_ADDRESSES=0xabc123")
+	mc.AssertExpectations(t)
 }
 
 func TestEnsureWorldSponsorAddresses_NoChangeWhenSponsorSet(t *testing.T) {
-	workspace := t.TempDir()
-	worldDir := filepath.Join(workspace, "world-contracts")
-	require.NoError(t, os.MkdirAll(worldDir, 0755))
-	envPath := filepath.Join(worldDir, ".env")
+	mc := new(mockContainerClient)
 
-	content := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=0xfeedbeef\n"
-	require.NoError(t, os.WriteFile(envPath, []byte(content), 0644))
+	envContent := "ADMIN_ADDRESS=0xabc123\nSPONSOR_ADDRESSES=0xfeedbeef\n"
+	mc.On("ExecCapture", "test-container", []string{"cat", containerEnvPath}).Return(envContent, nil)
 
-	ensureWorldSponsorAddresses(workspace)
+	ensureWorldSponsorAddresses(mc, "test-container")
 
-	updated, err := os.ReadFile(envPath)
-	require.NoError(t, err)
-	assert.Contains(t, string(updated), "SPONSOR_ADDRESSES=0xfeedbeef")
-	assert.NotContains(t, string(updated), "SPONSOR_ADDRESSES=0xabc123")
+	mc.AssertExpectations(t)
+	// Exec should NOT have been called — no write needed
+	mc.AssertNotCalled(t, "Exec", mock.Anything, mock.Anything)
 }

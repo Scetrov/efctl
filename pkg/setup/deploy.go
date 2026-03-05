@@ -22,7 +22,7 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
 		return fmt.Errorf("failed to generate world env: %w", err)
 	}
-	ensureWorldSponsorAddresses(workspace)
+	ensureWorldSponsorAddresses(c, container.ContainerSuiPlayground)
 
 	// 2. Install dependencies & deploy
 	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdDeployWorld}); err != nil {

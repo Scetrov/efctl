@@ -14,6 +14,8 @@ Maintain a healthy testing balance according to the pyramid:
 - **Integration Tests:** Medium volume, testing interactions between modules (e.g., container operations, CLI commands).
 - **E2E Tests:** Low volume, verifying full user flows across the entire environment.
 
+When making changes to the codebase, ensure that tests are also updated in-line with the changes.
+
 ## 3. Clean Code & Quality Gates
 
 - Write clean, maintainable, and idiomatic Go code.

@@ -1,13 +1,19 @@
 package setup
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"efctl/pkg/container"
 	"efctl/pkg/ui"
 )
+
+// containerEnvPath is the path to the world-contracts .env file inside the
+// sui-playground container.
+const containerEnvPath = "/workspace/world-contracts/.env"
 
 // cleanStaleMoveLocks removes Move.lock files from world-contracts so
 // that `sui client test-publish --build-env testnet` resolves framework
@@ -38,26 +44,26 @@ func removeMoveLocksInSubdirs(root string, debugPrefix string) {
 
 // ensureWorldSponsorAddresses backfills SPONSOR_ADDRESSES from ADMIN_ADDRESS
 // when upstream env-generation scripts fail to populate the sponsor list.
-func ensureWorldSponsorAddresses(workspace string) {
-	envPath := filepath.Join(workspace, "world-contracts", ".env")
-	data, err := os.ReadFile(envPath) // #nosec G304
+//
+// The .env file is created by a script running as root inside the container,
+// so it is owned by root on the host.  To avoid permission-denied errors we
+// read and write the file through the container using ExecCapture / Exec.
+func ensureWorldSponsorAddresses(c container.ContainerClient, containerName string) {
+	data, err := c.ExecCapture(containerName, []string{"cat", containerEnvPath})
 	if err != nil {
-		log.Printf("move_patch: cannot read world env file: %v", err)
+		log.Printf("move_patch: cannot read world env file via container: %v", err)
 		return
 	}
 
-	content := string(data)
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(data, "\n")
 	admin := ""
-	sponsorIdx := -1
 	sponsorVal := ""
 
-	for i, line := range lines {
+	for _, line := range lines {
 		if strings.HasPrefix(line, "ADMIN_ADDRESS=") {
 			admin = strings.TrimSpace(strings.TrimPrefix(line, "ADMIN_ADDRESS="))
 		}
 		if strings.HasPrefix(line, "SPONSOR_ADDRESSES=") {
-			sponsorIdx = i
 			sponsorVal = strings.TrimSpace(strings.TrimPrefix(line, "SPONSOR_ADDRESSES="))
 		}
 	}
@@ -66,21 +72,16 @@ func ensureWorldSponsorAddresses(workspace string) {
 		return
 	}
 
-	newLine := "SPONSOR_ADDRESSES=" + admin
-	if sponsorIdx >= 0 {
-		lines[sponsorIdx] = newLine
-	} else {
-		lines = append(lines, newLine)
-	}
+	// Use sed to replace an empty SPONSOR_ADDRESSES line, or append if missing.
+	sedCmd := fmt.Sprintf(
+		`grep -q '^SPONSOR_ADDRESSES=' '%s' && `+
+			`sed -i 's/^SPONSOR_ADDRESSES=.*/SPONSOR_ADDRESSES=%s/' '%s' || `+
+			`echo 'SPONSOR_ADDRESSES=%s' >> '%s'`,
+		containerEnvPath, admin, containerEnvPath, admin, containerEnvPath,
+	)
 
-	updated := strings.Join(lines, "\n")
-	mode := os.FileMode(0600)
-	if fi, statErr := os.Stat(envPath); statErr == nil {
-		mode = fi.Mode().Perm()
-	}
-
-	if writeErr := os.WriteFile(envPath, []byte(updated), mode); writeErr != nil { // #nosec G703
-		log.Printf("move_patch: cannot write world env file: %v", writeErr)
+	if execErr := c.Exec(containerName, []string{"/bin/bash", "-c", sedCmd}); execErr != nil {
+		log.Printf("move_patch: cannot write world env file via container: %v", execErr)
 		return
 	}
 
