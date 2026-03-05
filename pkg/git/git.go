@@ -8,6 +8,20 @@ import (
 	"efctl/pkg/ui"
 )
 
+func ensureGitRepository(path string) error {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree") // #nosec G204
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("path %s is not a git repository: %v\n%s", path, err, string(output))
+	}
+
+	if string(output) == "" {
+		return fmt.Errorf("path %s is not a git repository", path)
+	}
+
+	return nil
+}
+
 // GitClient defines the interface for git operations.
 // Consumers should accept this interface to enable testing with mocks.
 type GitClient interface {
@@ -46,6 +60,10 @@ func (g *DefaultClient) SetupWorkDir(path string) error {
 func CloneRepository(url string, dest string) error {
 	// Check if directory already exists
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		if err := ensureGitRepository(dest); err != nil {
+			return err
+		}
+
 		spinner, _ := ui.Spin(fmt.Sprintf("%s Updating remote for %s...", ui.GitEmoji, dest))
 
 		// Try setting the remote URL
@@ -56,8 +74,7 @@ func CloneRepository(url string, dest string) error {
 			if err := cmd.Run(); err != nil {
 				spinner.Fail(fmt.Sprintf("Failed to update remote for %s", dest))
 				ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
-				// Gracefully continue, since the directory exists but might not be a valid git repo or remote couldn't be set
-				return nil
+				return fmt.Errorf("failed to configure remote origin for %s: %w", dest, err)
 			}
 		}
 
@@ -66,7 +83,7 @@ func CloneRepository(url string, dest string) error {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
 			ui.Debug.Printf("git fetch error: %v\n%s", err, string(output))
-			return nil
+			return fmt.Errorf("failed to fetch remote for %s: %v\n%s", dest, err, string(output))
 		}
 
 		spinner.Success(fmt.Sprintf("Updated remote and fetched %s", dest))
@@ -88,6 +105,10 @@ func CloneRepository(url string, dest string) error {
 
 // CheckoutBranch checks out the specified branch in the given repository path.
 func CheckoutBranch(repoPath string, branch string) error {
+	if err := ensureGitRepository(repoPath); err != nil {
+		return err
+	}
+
 	spinner, _ := ui.Spin(fmt.Sprintf("%s Checking out branch '%s' in %s...", ui.GitEmoji, branch, repoPath))
 
 	cmd := exec.Command("git", "-C", repoPath, "checkout", branch) // #nosec G204

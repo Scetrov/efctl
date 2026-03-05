@@ -2,6 +2,8 @@ package setup
 
 import (
 	"bufio"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -191,4 +193,39 @@ func TestCloneRepositories_CloneFails(t *testing.T) {
 
 	err := CloneRepositories(g, ws)
 	assert.Error(t, err)
+}
+
+func TestCloneRepositories_UsesWorkspaceSubdirs(t *testing.T) {
+	g := new(mockGitClient)
+	ws := t.TempDir()
+	worldPath := filepath.Join(ws, "world-contracts")
+	builderPath := filepath.Join(ws, "builder-scaffold")
+
+	g.On("SetupWorkDir", ws).Return(nil)
+	g.On("CloneRepository", mock.AnythingOfType("string"), worldPath).Return(nil)
+	g.On("CheckoutBranch", worldPath, mock.AnythingOfType("string")).Return(nil)
+	g.On("CloneRepository", mock.AnythingOfType("string"), builderPath).Return(nil)
+	g.On("CheckoutBranch", builderPath, mock.AnythingOfType("string")).Return(nil)
+
+	err := CloneRepositories(g, ws)
+	require.NoError(t, err)
+	g.AssertExpectations(t)
+}
+
+func TestResolveRepoPath_RejectsUnsafeRepoName(t *testing.T) {
+	ws := t.TempDir()
+
+	_, err := resolveRepoPath(ws, "../builder-scaffold")
+	require.Error(t, err)
+}
+
+func TestResolveRepoPath_RejectsSymlinkEscape(t *testing.T) {
+	ws := t.TempDir()
+	external := t.TempDir()
+	linkPath := filepath.Join(ws, "builder-scaffold")
+
+	require.NoError(t, os.Symlink(external, linkPath))
+
+	_, err := resolveRepoPath(ws, "builder-scaffold")
+	require.Error(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,5 +75,44 @@ func TestCloneRepository_DirectoryExists(t *testing.T) {
 	err = CloneRepository("https://github.com/evefrontier/world-contracts.git", dest)
 	if err != nil {
 		t.Errorf("Expected nil error when directory already exists and remote updated, got: %v", err)
+	}
+}
+
+func TestCloneRepository_DirectoryExistsNotGitRepoFails(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "efctl-git-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dest := filepath.Join(tempDir, "not-a-repo")
+	if err := os.Mkdir(dest, 0750); err != nil {
+		t.Fatalf("Failed to create directory: %v", err)
+	}
+
+	err = CloneRepository("https://github.com/evefrontier/world-contracts.git", dest)
+	if err == nil {
+		t.Fatal("Expected an error when destination exists but is not a git repository")
+	}
+
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("Expected not-a-git-repository error, got: %v", err)
+	}
+}
+
+func TestCheckoutBranch_NonGitRepoFails(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "efctl-git-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	err = CheckoutBranch(tempDir, "main")
+	if err == nil {
+		t.Fatal("Expected checkout to fail for non-git directory")
+	}
+
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("Expected not-a-git-repository error, got: %v", err)
 	}
 }
