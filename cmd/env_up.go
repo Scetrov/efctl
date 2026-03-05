@@ -32,13 +32,10 @@ var envUpCmd = &cobra.Command{
 			}
 		}
 
-		// Inform user if config file wasn't found and optional features are disabled
-		if cfg != nil && !cfg.WasLoaded() && !withGraphql && !withFrontend {
-			ui.Debug.Println("No efctl.yaml config file found. Optional features (GraphQL, Frontend) are disabled.")
-			ui.Debug.Println("To enable them, either:")
-			ui.Debug.Println("  1. Create an efctl.yaml file in the current directory")
-			ui.Debug.Println("  2. Use --config-file to specify the config location")
-			ui.Debug.Println("  3. Use --with-graphql and/or --with-frontend flags")
+		// Inform user if config file wasn't found; features are enabled by default.
+		if cfg != nil && !cfg.WasLoaded() {
+			ui.Debug.Println("No efctl.yaml config file found. GraphQL and Frontend are enabled by default.")
+			ui.Debug.Println("Create efctl.yaml to customize defaults (for example, set with-graphql/with-frontend to false).")
 		}
 
 		ui.Info.Println("Checking prerequisites...")
@@ -142,11 +139,11 @@ var envUpCmd = &cobra.Command{
 	},
 }
 
-var withGraphql bool
-var withFrontend bool
+var withGraphql = true
+var withFrontend = true
 
 func init() {
-	envUpCmd.Flags().BoolVar(&withGraphql, "with-graphql", false, "Enable the SQL Indexer and GraphQL API")
-	envUpCmd.Flags().BoolVar(&withFrontend, "with-frontend", false, "Enable the builder-scaffold web frontend (Vite dev server on port 5173)")
+	envUpCmd.Flags().BoolVar(&withGraphql, "with-graphql", true, "Enable the SQL Indexer and GraphQL API")
+	envUpCmd.Flags().BoolVar(&withFrontend, "with-frontend", true, "Enable the builder-scaffold web frontend (Vite dev server on port 5173)")
 	envCmd.AddCommand(envUpCmd)
 }

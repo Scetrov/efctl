@@ -768,10 +768,10 @@ func (m model) handleMainKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // If restartAll is true, --with-frontend is explicitly added.
 func (m model) handleRestartBackend(restartAll bool) (tea.Model, tea.Cmd) {
 	args := []string{"env", "up", "-w", m.workspace}
-	if m.graphqlOn {
+	if m.isGraphQLEnabled() {
 		args = append(args, "--with-graphql")
 	}
-	if m.frontendOn || restartAll {
+	if m.isFrontendEnabled() || restartAll {
 		args = append(args, "--with-frontend")
 	}
 	downCmd := exec.Command("efctl", "env", "down", "-w", m.workspace) // #nosec G204
@@ -809,9 +809,9 @@ func (m model) handleEnvDown() (tea.Model, tea.Cmd) {
 
 // handleEnableGraphQL enables GraphQL if not already on.
 func (m model) handleEnableGraphQL() (tea.Model, tea.Cmd) {
-	if !m.graphqlOn {
+	if !m.isGraphQLEnabled() {
 		args := []string{"env", "up", "-w", m.workspace, "--with-graphql"}
-		if m.frontendOn {
+		if m.isFrontendEnabled() {
 			args = append(args, "--with-frontend")
 		}
 		c := exec.Command("efctl", args...) // #nosec G204
@@ -827,9 +827,9 @@ func (m model) handleEnableGraphQL() (tea.Model, tea.Cmd) {
 
 // handleEnableFrontend enables the frontend dApp if not already on.
 func (m model) handleEnableFrontend() (tea.Model, tea.Cmd) {
-	if !m.frontendOn {
+	if !m.isFrontendEnabled() {
 		args := []string{"env", "up", "-w", m.workspace, "--with-frontend"}
-		if m.graphqlOn {
+		if m.isGraphQLEnabled() {
 			args = append(args, "--with-graphql")
 		}
 		c := exec.Command("efctl", args...) // #nosec G204
@@ -969,15 +969,34 @@ func (m model) View() string {
 
 	// Vertical budget
 	available := m.height - headerH
-	containerRows := 4
-	topRows := max((available*30)/100, 8)
+	containerRows := max(4, m.serviceRowCount()+2) // include required top/bottom blank lines
+	minTopRows := containerRows + 1 + 3            // Services + divider + minimum Environment rows
+	maxTopRows := max(0, available-3)              // keep at least 3 rows for bottom panels
+	baseTopRows := max((available*30)/100, max(8, minTopRows))
+
+	envRendered := renderToLines(m.renderEnvContent(), leftInner)
+	desiredTopRows := containerRows + 1 + len(envRendered)
+
+	topRows := baseTopRows
+	if desiredTopRows > topRows {
+		topRows = desiredTopRows
+	}
+	if topRows > maxTopRows {
+		topRows = maxTopRows
+	}
+	if maxTopRows >= minTopRows && topRows < minTopRows {
+		topRows = minTopRows
+	}
+	if topRows < 0 {
+		topRows = 0
+	}
 	envRows := max(topRows-containerRows-1, 3)
 	rightRows := containerRows + envRows + 1
 	botRows := max(available-topRows-3, 3)
 
 	// ── Render panel content ──
 	containerLines := padLines(renderToLines(m.renderContainerContent(), leftInner), containerRows, leftInner)
-	envLines := padLines(renderToLines(m.renderEnvContent(), leftInner), envRows, leftInner)
+	envLines, _ := m.fitEnvLines(envRendered, envRows, leftInner)
 	rightLines := padLines(renderToLines(m.renderRightContent(rightRows), rightInner), rightRows, rightInner)
 
 	logW, logLines, eventLines := m.renderBottomPanels(hasEvents, botRows, leftInner, rightInner, logInner)
@@ -992,6 +1011,42 @@ func (m model) View() string {
 	return out.String()
 }
 
+// fitEnvLines truncates/pads environment lines and appends a warning line when content overflows.
+func (m model) fitEnvLines(envRendered []string, envRows, leftInner int) ([]string, int) {
+	envLines := padLines(envRendered, envRows, leftInner)
+	overflow := max(0, len(envRendered)-envRows)
+	if overflow > 0 && envRows > 0 {
+		warning := lipgloss.NewStyle().Foreground(yellow).Bold(true).Render(
+			fmt.Sprintf("Overflow: +%d lines", overflow),
+		)
+		warningLine := padLines(renderToLines(warning, leftInner), 1, leftInner)[0]
+		envLines[envRows-1] = warningLine
+	}
+	return envLines, overflow
+}
+
+// isGraphQLEnabled returns true when GraphQL/indexer services are enabled in config or already running.
+func (m model) isGraphQLEnabled() bool {
+	return m.graphqlOn || m.pgStat.Status == "Running"
+}
+
+// isFrontendEnabled returns true when frontend is enabled in config or already running.
+func (m model) isFrontendEnabled() bool {
+	return m.frontendOn || m.feStat.Status == "Running"
+}
+
+// serviceRowCount returns how many service rows are currently expected in the Services panel.
+func (m model) serviceRowCount() int {
+	count := 1 // sui-playground is always shown
+	if m.isGraphQLEnabled() {
+		count++
+	}
+	if m.isFrontendEnabled() {
+		count++
+	}
+	return count
+}
+
 // renderHeader builds the header bar showing service status and uptime.
 func (m model) renderHeader() string {
 	uptime := time.Since(m.startTime).Round(time.Second)
@@ -1004,11 +1059,11 @@ func (m model) renderHeader() string {
 		dbUp = "DOWN"
 	}
 	gqlStatus := "gql:OFF"
-	if m.graphqlOn {
+	if m.isGraphQLEnabled() {
 		gqlStatus = "gql:ON"
 	}
 	feStatus := "fe:OFF"
-	if m.frontendOn {
+	if m.isFrontendEnabled() {
 		feStatus = "fe:ON"
 	}
 	headerTitle := fmt.Sprintf(" efctl dashboard │ sui:%s  db:%s  %s  %s │ Uptime: %v ", suiUp, dbUp, gqlStatus, feStatus, uptime)
@@ -1107,12 +1162,12 @@ func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows,
 	footerKeys := "[r] restart  [d] env down  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
 	if m.restarting {
 		footerKeys = "[f] frontend  [b] backend  [a] all  [q/esc] cancel"
-	} else if !m.graphqlOn || !m.frontendOn {
+	} else if !m.isGraphQLEnabled() || !m.isFrontendEnabled() {
 		extras := ""
-		if !m.graphqlOn {
+		if !m.isGraphQLEnabled() {
 			extras += "  [g] enable graphql"
 		}
-		if !m.frontendOn {
+		if !m.isFrontendEnabled() {
 			extras += "  [f] enable frontend"
 		}
 		footerKeys = "[r] restart  [d] env down" + extras + "  [↑↓/PgUp/PgDn] scroll  [Home/End] jump  [q] quit"
@@ -1126,6 +1181,12 @@ func (m model) writeBottomSection(out *strings.Builder, hasEvents bool, botRows,
 
 func (m model) renderContainerContent() string {
 	var b bytes.Buffer
+	type serviceRow struct {
+		name     string
+		stat     containerStat
+		shortcut string
+	}
+
 	renderRow := func(name string, stat containerStat, shortcut string) {
 		dot := lipgloss.NewStyle().Foreground(green).Bold(true).Render("●")
 		if stat.Status == "Stopped" {
@@ -1135,25 +1196,35 @@ func (m model) renderContainerContent() string {
 		}
 
 		nameDisplay := name
-		if m.restarting && shortcut != "" {
-			hint := lipgloss.NewStyle().Foreground(orange).Bold(true).Render(shortcut)
-			nameDisplay = name + " " + hint
-		}
-		visibleLen := lipgloss.Width(nameDisplay)
-		if visibleLen < 18 {
-			nameDisplay += strings.Repeat(" ", 18-visibleLen)
+		if visibleLen := lipgloss.Width(nameDisplay); visibleLen < 14 {
+			nameDisplay += strings.Repeat(" ", 14-visibleLen)
 		}
 
-		b.WriteString(fmt.Sprintf(" %s %s %s %-7s  %s %s\n",
-			dot, nameDisplay,
+		shortcutDisplay := "   "
+		if m.restarting && shortcut != "" {
+			shortcutDisplay = lipgloss.NewStyle().Foreground(orange).Bold(true).Render(shortcut)
+		}
+		if visibleLen := lipgloss.Width(shortcutDisplay); visibleLen < 3 {
+			shortcutDisplay += strings.Repeat(" ", 3-visibleLen)
+		}
+
+		b.WriteString(fmt.Sprintf(" %s %s %s %s %-7s  %s %s\n",
+			dot, nameDisplay, shortcutDisplay,
 			grayStyle.Render("CPU"), valueStyle.Render(stat.CPU),
 			grayStyle.Render("Mem"), valueStyle.Render(stat.Mem)))
 	}
+
+	services := []serviceRow{{name: "sui-playground", stat: m.suiStat, shortcut: "[b]"}}
+	if m.isGraphQLEnabled() {
+		services = append(services, serviceRow{name: "database", stat: m.pgStat, shortcut: "[b]"})
+	}
+	if m.isFrontendEnabled() {
+		services = append(services, serviceRow{name: "frontend", stat: m.feStat, shortcut: "[f]"})
+	}
+
 	b.WriteString("\n")
-	renderRow("sui-playground", m.suiStat, "[b]")
-	renderRow("database", m.pgStat, "")
-	if m.frontendOn {
-		renderRow("frontend", m.feStat, "[f]")
+	for _, svc := range services {
+		renderRow(svc.name, svc.stat, svc.shortcut)
 	}
 	b.WriteString("\n")
 	return b.String()

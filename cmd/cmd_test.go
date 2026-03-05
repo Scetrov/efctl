@@ -262,6 +262,113 @@ func TestHexShortener_NarrowTerminal(t *testing.T) {
 	assert.Contains(t, shortened, "…")
 }
 
+func TestRenderContainerContent_AlwaysPadsWithBlankLines(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		pgStat:     containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
+		feStat:     containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
+		graphqlOn:  false,
+		frontendOn: false,
+	}
+
+	out := m.renderContainerContent()
+	assert.True(t, strings.HasPrefix(out, "\n"), "services content should start with a blank line")
+	assert.True(t, strings.HasSuffix(out, "\n\n"), "services content should end with a blank line")
+	assert.Contains(t, out, "sui-playground")
+	assert.NotContains(t, out, "database")
+	assert.NotContains(t, out, "frontend")
+}
+
+func TestRenderContainerContent_ShowsFrontendWhenContainerRunning(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		pgStat:     containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		feStat:     containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		graphqlOn:  true,
+		frontendOn: false,
+	}
+
+	out := m.renderContainerContent()
+	assert.Contains(t, out, "frontend")
+}
+
+func TestRenderContainerContent_HidesRestartShortcutsByDefault(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		pgStat:     containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		feStat:     containerStat{Status: "Stopped", CPU: "-", Mem: "-"},
+		graphqlOn:  true,
+		frontendOn: false,
+		restarting: false,
+	}
+
+	out := m.renderContainerContent()
+	assert.Contains(t, out, "database")
+	assert.NotContains(t, out, "[b]")
+	assert.NotContains(t, out, "[f]")
+}
+
+func TestRenderContainerContent_ShowsRestartShortcutsWhenRestarting(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		pgStat:     containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		feStat:     containerStat{Status: "Running", CPU: "1%", Mem: "10MB / 1GB"},
+		graphqlOn:  true,
+		frontendOn: true,
+		restarting: true,
+	}
+
+	out := m.renderContainerContent()
+	assert.GreaterOrEqual(t, strings.Count(out, "[b]"), 2)
+	assert.Contains(t, out, "[f]")
+}
+
+func TestServiceRowCount_ThreeServicesWhenRunning(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running"},
+		pgStat:     containerStat{Status: "Running"},
+		feStat:     containerStat{Status: "Running"},
+		graphqlOn:  false,
+		frontendOn: false,
+	}
+
+	assert.Equal(t, 3, m.serviceRowCount())
+}
+
+func TestServiceRowCount_BaseServiceOnly(t *testing.T) {
+	m := model{
+		suiStat:    containerStat{Status: "Running"},
+		pgStat:     containerStat{Status: "Stopped"},
+		feStat:     containerStat{Status: "Stopped"},
+		graphqlOn:  false,
+		frontendOn: false,
+	}
+
+	assert.Equal(t, 1, m.serviceRowCount())
+}
+
+func TestFitEnvLines_NoOverflow(t *testing.T) {
+	m := model{}
+	lines := []string{"line1", "line2"}
+	rendered := padLines(lines, 2, 20)
+
+	got, overflow := m.fitEnvLines(rendered, 4, 20)
+	assert.Equal(t, 0, overflow)
+	assert.Len(t, got, 4)
+	assert.Contains(t, got[0], "line1")
+	assert.Contains(t, got[1], "line2")
+}
+
+func TestFitEnvLines_OverflowAddsWarning(t *testing.T) {
+	m := model{}
+	rendered := []string{"l1", "l2", "l3", "l4", "l5"}
+
+	got, overflow := m.fitEnvLines(rendered, 3, 24)
+	assert.Equal(t, 2, overflow)
+	assert.Len(t, got, 3)
+	assert.Contains(t, got[2], "Overflow: +2 lines")
+}
+
 // ── command tree structure ─────────────────────────────────────────
 
 func TestCommandTree(t *testing.T) {
@@ -277,4 +384,13 @@ func TestCommandTree(t *testing.T) {
 	assert.True(t, names["update"], "update command should exist")
 	assert.True(t, names["env"], "env command should exist")
 	assert.True(t, names["graphql"], "graphql command should exist")
+}
+
+func TestEnvUpFlagDefaultsEnabled(t *testing.T) {
+	graphqlFlag := envUpCmd.Flags().Lookup("with-graphql")
+	frontendFlag := envUpCmd.Flags().Lookup("with-frontend")
+	require.NotNil(t, graphqlFlag)
+	require.NotNil(t, frontendFlag)
+	assert.Equal(t, "true", graphqlFlag.DefValue)
+	assert.Equal(t, "true", frontendFlag.DefValue)
 }
