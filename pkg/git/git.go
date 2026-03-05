@@ -49,10 +49,10 @@ func CloneRepository(url string, dest string) error {
 		spinner, _ := ui.Spin(fmt.Sprintf("%s Updating remote for %s...", ui.GitEmoji, dest))
 
 		// Try setting the remote URL
-		cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url)
+		cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url) // #nosec G204
 		if err := cmd.Run(); err != nil {
 			// If set-url fails, try adding the remote
-			cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url)
+			cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url) // #nosec G204
 			if err := cmd.Run(); err != nil {
 				spinner.Fail(fmt.Sprintf("Failed to update remote for %s", dest))
 				ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
@@ -62,7 +62,7 @@ func CloneRepository(url string, dest string) error {
 		}
 
 		// Fetch from the updated remote
-		cmd = exec.Command("git", "-C", dest, "fetch", "origin")
+		cmd = exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
 		if output, err := cmd.CombinedOutput(); err != nil {
 			spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
 			ui.Debug.Printf("git fetch error: %v\n%s", err, string(output))

@@ -13,6 +13,11 @@ import (
 func DeployWorld(c container.ContainerClient, workspace string) error {
 	ui.Info.Println("Deploying world contracts...")
 
+	// 0. Remove stale Move.lock files so the Sui CLI resolves framework
+	//    dependencies from the installed binary instead of pinned git revisions
+	//    that may no longer exist upstream.
+	cleanStaleMoveLocks(workspace)
+
 	// 1. Generate environment
 	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
 		return fmt.Errorf("failed to generate world env: %w", err)
