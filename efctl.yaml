@@ -8,13 +8,13 @@ with-frontend: true
 with-graphql: true
 
 # Git clone URL for the world-contracts repository
-world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
+world-contracts-url: "https://github.com/scetrov/world-contracts.git"
 
 # Branch to checkout for world-contracts (default: main)
 world-contracts-branch: "main"
 
 # Git clone URL for the builder-scaffold repository
-builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
+builder-scaffold-url: "https://github.com/scetrov/builder-scaffold.git"
 
 # Branch to checkout for builder-scaffold (default: main)
-builder-scaffold-branch: "main"
+builder-scaffold-branch: "fix/sponsor-addresses-env"

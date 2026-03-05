@@ -46,6 +46,30 @@ func (g *DefaultClient) SetupWorkDir(path string) error {
 func CloneRepository(url string, dest string) error {
 	// Check if directory already exists
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		spinner, _ := ui.Spin(fmt.Sprintf("%s Updating remote for %s...", ui.GitEmoji, dest))
+
+		// Try setting the remote URL
+		cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url)
+		if err := cmd.Run(); err != nil {
+			// If set-url fails, try adding the remote
+			cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url)
+			if err := cmd.Run(); err != nil {
+				spinner.Fail(fmt.Sprintf("Failed to update remote for %s", dest))
+				ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
+				// Gracefully continue, since the directory exists but might not be a valid git repo or remote couldn't be set
+				return nil
+			}
+		}
+
+		// Fetch from the updated remote
+		cmd = exec.Command("git", "-C", dest, "fetch", "origin")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
+			ui.Debug.Printf("git fetch error: %v\n%s", err, string(output))
+			return nil
+		}
+
+		spinner.Success(fmt.Sprintf("Updated remote and fetched %s", dest))
 		return nil
 	}
 
@@ -72,6 +96,11 @@ func CheckoutBranch(repoPath string, branch string) error {
 		spinner.Fail(fmt.Sprintf("Failed to checkout branch '%s'", branch))
 		return fmt.Errorf("git checkout error: %v\n%s", err, string(output))
 	}
+
+	// Pull latest changes from the branch if tracking a remote
+	cmd = exec.Command("git", "-C", repoPath, "pull", "origin", branch) // #nosec G204
+	// We ignore pull errors since the branch might be local-only or already up-to-date
+	cmd.Run()
 
 	spinner.Success(fmt.Sprintf("Checked out branch '%s' in %s", branch, repoPath))
 	return nil

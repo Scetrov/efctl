@@ -2,6 +2,7 @@ package git
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -63,9 +64,15 @@ func TestCloneRepository_DirectoryExists(t *testing.T) {
 	dest := filepath.Join(tempDir, "existing-repo")
 	os.Mkdir(dest, 0755)
 
-	// Should return nil because directory already exists
+	// Initialize as a git repo so remote commands work
+	cmd := exec.Command("git", "-C", dest, "init")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	// Should return nil because directory already exists and remote was added/fetched successfully
 	err = CloneRepository("https://github.com/evefrontier/world-contracts.git", dest)
 	if err != nil {
-		t.Errorf("Expected nil error when directory already exists, got: %v", err)
+		t.Errorf("Expected nil error when directory already exists and remote updated, got: %v", err)
 	}
 }

@@ -133,10 +133,19 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 	// The container generates its internal .env.sui. We must extract it
 	// manually so host scripts can use it, avoiding rootless bind mount
 	// permission issues.
-	output, err := c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/root/.sui/.env.sui"})
-	if err != nil {
+	var output string
+	var err error
+	for i := 0; i < 15; i++ {
+		output, err = c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/root/.sui/.env.sui"})
+		if err == nil && len(strings.TrimSpace(output)) > 0 {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil || len(strings.TrimSpace(output)) == 0 {
 		ui.Warn.Println("Failed to extract .env.sui from container. Tests may fail to run locally.")
-	} else if len(output) > 0 {
+	} else {
 		envPath := filepath.Join(dockerDir, ".env.sui")
 		if writeErr := os.WriteFile(envPath, []byte(output), 0600); writeErr != nil {
 			ui.Warn.Println(fmt.Sprintf("Failed to write extracted .env.sui to host: %v", writeErr))
