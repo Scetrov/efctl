@@ -21,6 +21,9 @@ type Config struct {
 	WorldContractsBranch  string `yaml:"world-contracts-branch"`
 	BuilderScaffoldURL    string `yaml:"builder-scaffold-url"`
 	BuilderScaffoldBranch string `yaml:"builder-scaffold-branch"`
+
+	// Internal field to track if a config file was actually loaded
+	configFileLoaded bool
 }
 
 // DefaultWorldContractsURL is the default git clone URL for world-contracts.
@@ -35,13 +38,57 @@ const DefaultBranch = "main"
 // DefaultConfigFile is the default configuration file name.
 const DefaultConfigFile = "efctl.yaml"
 
+// AlternateDefaultConfigFile is the alternate supported config file name.
+const AlternateDefaultConfigFile = "efctl.yml"
+
+// DefaultConfigFiles lists default config names in preference order.
+var DefaultConfigFiles = []string{DefaultConfigFile, AlternateDefaultConfigFile}
+
 // Loaded holds the currently loaded configuration (populated after Load).
 var Loaded *Config
+
+// FindDefaultConfigPath searches from startDir upward for efctl.yaml/efctl.yml.
+// Returns the first match in DefaultConfigFiles order.
+func FindDefaultConfigPath(startDir string) (string, bool, error) {
+	if startDir == "" {
+		startDir = "."
+	}
+
+	dir, err := filepath.Abs(filepath.Clean(startDir))
+	if err != nil {
+		return "", false, fmt.Errorf("failed to resolve start directory %s: %w", startDir, err)
+	}
+
+	for {
+		for _, name := range DefaultConfigFiles {
+			candidate := filepath.Join(dir, name)
+			info, statErr := os.Stat(candidate)
+			if statErr == nil {
+				if info.Mode().IsRegular() {
+					return candidate, true, nil
+				}
+				continue
+			}
+			if !os.IsNotExist(statErr) {
+				return "", false, fmt.Errorf("failed to stat config file %s: %w", candidate, statErr)
+			}
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return "", false, nil
+}
 
 // Load reads and parses the config file at the given path.
 // If the file does not exist and the path is the default, an empty config is returned without error.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
+	cfg.configFileLoaded = false
 
 	cleanPath := filepath.Clean(path)
 	data, err := os.ReadFile(cleanPath) // #nosec G304 -- config file path is intentionally user-specified via CLI flag
@@ -53,6 +100,8 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
+
+	cfg.configFileLoaded = true
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", path, err)
@@ -133,4 +182,12 @@ func (c *Config) GetBuilderScaffoldBranch() string {
 		return c.BuilderScaffoldBranch
 	}
 	return DefaultBranch
+}
+
+// WasLoaded returns true if a config file was successfully loaded (not just defaulted).
+func (c *Config) WasLoaded() bool {
+	if c == nil {
+		return false
+	}
+	return c.configFileLoaded
 }

@@ -11,7 +11,16 @@
 
 ## Configuration File
 
-`efctl` supports an optional `efctl.yaml` configuration file. By default it looks for `efctl.yaml` in the current directory. Use `--config-file` to specify a different path.
+`efctl` supports optional `efctl.yaml` and `efctl.yml` configuration files. By default it starts in the **current working directory** (the directory from which you run the `efctl` command) and recursively searches parent directories until it finds one.
+
+If both `efctl.yaml` and `efctl.yml` exist in the same directory, `efctl.yaml` is preferred.
+
+**Important:** Config discovery is independent of the `--workspace` flag. Use `--config-file` to bypass discovery and load an explicit config path.
+
+To see which config file is loaded (or if none was found), use the `--debug` flag:
+```bash
+efctl --debug env up
+```
 
 All properties are optional. CLI flags override values from the config file.
 

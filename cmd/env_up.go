@@ -32,6 +32,15 @@ var envUpCmd = &cobra.Command{
 			}
 		}
 
+		// Inform user if config file wasn't found and optional features are disabled
+		if cfg != nil && !cfg.WasLoaded() && !withGraphql && !withFrontend {
+			ui.Debug.Println("No efctl.yaml config file found. Optional features (GraphQL, Frontend) are disabled.")
+			ui.Debug.Println("To enable them, either:")
+			ui.Debug.Println("  1. Create an efctl.yaml file in the current directory")
+			ui.Debug.Println("  2. Use --config-file to specify the config location")
+			ui.Debug.Println("  3. Use --with-graphql and/or --with-frontend flags")
+		}
+
 		ui.Info.Println("Checking prerequisites...")
 		res := env.CheckPrerequisites()
 

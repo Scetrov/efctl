@@ -230,3 +230,44 @@ func TestGetters_NilConfig(t *testing.T) {
 	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsBranch())
 	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldBranch())
 }
+
+func TestFindDefaultConfigPath_FindsInCurrentDirectory(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte("with-frontend: true\n"), 0600))
+
+	path, found, err := FindDefaultConfigPath(dir)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, filepath.Join(dir, DefaultConfigFile), path)
+}
+
+func TestFindDefaultConfigPath_FindsInParentDirectory(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "a", "b", "c")
+	require.NoError(t, os.MkdirAll(nested, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, AlternateDefaultConfigFile), []byte("with-graphql: true\n"), 0600))
+
+	path, found, err := FindDefaultConfigPath(nested)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, filepath.Join(root, AlternateDefaultConfigFile), path)
+}
+
+func TestFindDefaultConfigPath_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	path, found, err := FindDefaultConfigPath(dir)
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Equal(t, "", path)
+}
+
+func TestFindDefaultConfigPath_PrefersYAMLOverYMLInSameDirectory(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, AlternateDefaultConfigFile), []byte("with-graphql: true\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte("with-frontend: true\n"), 0600))
+
+	path, found, err := FindDefaultConfigPath(dir)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, filepath.Join(dir, DefaultConfigFile), path)
+}

@@ -25,12 +25,29 @@ var rootCmd = &cobra.Command{
 			ui.DebugEnabled = true
 		}
 
-		cfg, err := config.Load(configFile)
+		resolvedConfigPath := configFile
+		if !cmd.Flags().Changed("config-file") {
+			if discoveredPath, found, discoverErr := config.FindDefaultConfigPath("."); discoverErr != nil {
+				ui.Error.Println("Failed to discover config file: " + discoverErr.Error())
+				os.Exit(1)
+			} else if found {
+				resolvedConfigPath = discoveredPath
+			}
+		}
+
+		cfg, err := config.Load(resolvedConfigPath)
 		if err != nil {
 			ui.Error.Println("Failed to load config: " + err.Error())
 			os.Exit(1)
 		}
 		config.Loaded = cfg
+
+		if cfg != nil && !cfg.WasLoaded() {
+			ui.Debug.Println("Config file not found in current directory or any parent directories.")
+			ui.Debug.Println("Using default configuration. To customize, create efctl.yaml or efctl.yml.")
+		} else if cfg != nil && cfg.WasLoaded() {
+			ui.Debug.Println("Loaded configuration from: " + resolvedConfigPath)
+		}
 
 		// Resolve workspacePath to an absolute path so that bind-mount
 		// sources are correct regardless of the container daemon's cwd.
@@ -53,7 +70,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml configuration file")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml or efctl.yml configuration file")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable verbose debug logging")
 }
 
