@@ -44,7 +44,7 @@ jobs:
           go build -trimpath -ldflags="${LDFLAGS}" -o output/$BINARY_NAME main.go
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: output/efctl-*
@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: binaries
           pattern: binary-*
