@@ -20,8 +20,8 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockervolume "github.com/docker/docker/api/types/volume"
 	dockerclient "github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/go-connections/nat"
+	"github.com/moby/go-archive"
 
 	"efctl/pkg/env"
 	"efctl/pkg/ui"
