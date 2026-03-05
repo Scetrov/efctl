@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/docker/docker v27.5.1+incompatible
+	github.com/docker/docker v28.0.0+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/jedib0t/go-pretty/v6 v6.7.8
 	github.com/pterm/pterm v0.12.83
