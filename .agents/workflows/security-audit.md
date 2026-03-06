@@ -29,7 +29,7 @@ Based on the project's specific development rules, contribution guidelines, and 
 #### 1. Go Development & Compilation Standards
 
 * **Output Directory**: Ensure all Go compilations use the `-o` flag set to `./output` to maintain location consistency.
-* **Language Version**: Verify that the development environment uses **Go 1.20+** (as required for contributors) or **Go 1.25+** (if building from source).
+* **Language Version**: Verify that the development environment uses **Go 1.20+** (as required for contributors) or **Go 1.26+** (if building from source).
 * **Build Optimization**: When building from source, ensure the use of `-trimpath` and `-ldflags="-s -w"` to produce optimized binaries.
 
 #### 2. Pre-Commit Quality Gate

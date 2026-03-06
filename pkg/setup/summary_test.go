@@ -167,14 +167,14 @@ func TestCloneRepositories_Success(t *testing.T) {
 
 	g.On("SetupWorkDir", ws).Return(nil)
 	g.On("CloneRepository", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
-	g.On("CheckoutBranch", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	g.On("CheckoutRef", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	err := CloneRepositories(g, ws)
 	require.NoError(t, err)
 	g.AssertExpectations(t)
 	// Should have cloned two repos (world-contracts + builder-scaffold)
 	g.AssertNumberOfCalls(t, "CloneRepository", 2)
-	g.AssertNumberOfCalls(t, "CheckoutBranch", 2)
+	g.AssertNumberOfCalls(t, "CheckoutRef", 2)
 }
 
 func TestCloneRepositories_SetupFails(t *testing.T) {
@@ -203,9 +203,9 @@ func TestCloneRepositories_UsesWorkspaceSubdirs(t *testing.T) {
 
 	g.On("SetupWorkDir", ws).Return(nil)
 	g.On("CloneRepository", mock.AnythingOfType("string"), worldPath).Return(nil)
-	g.On("CheckoutBranch", worldPath, mock.AnythingOfType("string")).Return(nil)
+	g.On("CheckoutRef", worldPath, mock.AnythingOfType("string")).Return(nil)
 	g.On("CloneRepository", mock.AnythingOfType("string"), builderPath).Return(nil)
-	g.On("CheckoutBranch", builderPath, mock.AnythingOfType("string")).Return(nil)
+	g.On("CheckoutRef", builderPath, mock.AnythingOfType("string")).Return(nil)
 
 	err := CloneRepositories(g, ws)
 	require.NoError(t, err)

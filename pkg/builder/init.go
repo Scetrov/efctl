@@ -82,6 +82,8 @@ func InitExtensionEnv(workspace string, network string) error {
 		"PLAYER_A_PRIVATE_KEY": worldEnvMap["PLAYER_A_PRIVATE_KEY"],
 		"PLAYER_B_ADDRESS":     worldEnvMap["PLAYER_B_ADDRESS"],
 		"PLAYER_B_PRIVATE_KEY": worldEnvMap["PLAYER_B_PRIVATE_KEY"],
+		"SPONSOR_ADDRESS":      worldEnvMap["SPONSOR_ADDRESS"],
+		"SPONSOR_ADDRESSES":    worldEnvMap["SPONSOR_ADDRESSES"],
 	}
 
 	if err := updateEnvFile(dstEnv, envUpdates); err != nil {

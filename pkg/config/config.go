@@ -18,9 +18,11 @@ type Config struct {
 	WithFrontend          *bool  `yaml:"with-frontend"`
 	WithGraphql           *bool  `yaml:"with-graphql"`
 	WorldContractsURL     string `yaml:"world-contracts-url"`
-	WorldContractsBranch  string `yaml:"world-contracts-branch"`
+	WorldContractsRef     string `yaml:"world-contracts-ref"`
+	WorldContractsBranch  string `yaml:"world-contracts-branch"` // Deprecated: use world-contracts-ref
 	BuilderScaffoldURL    string `yaml:"builder-scaffold-url"`
-	BuilderScaffoldBranch string `yaml:"builder-scaffold-branch"`
+	BuilderScaffoldRef    string `yaml:"builder-scaffold-ref"`
+	BuilderScaffoldBranch string `yaml:"builder-scaffold-branch"` // Deprecated: use builder-scaffold-ref
 
 	// Internal field to track if a config file was actually loaded
 	configFileLoaded bool
@@ -131,20 +133,24 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate branch names — prevent argument injection via git checkout
+	// Validate ref names — prevent argument injection via git checkout
 	for _, entry := range []struct {
-		name, branch string
+		name, ref string
 	}{
-		{"world-contracts-branch", c.WorldContractsBranch},
-		{"builder-scaffold-branch", c.BuilderScaffoldBranch},
+		{"world-contracts-ref", c.GetWorldContractsRef()},
+		{"builder-scaffold-ref", c.GetBuilderScaffoldRef()},
 	} {
-		if entry.branch != "" {
-			if !safeBranchRe.MatchString(entry.branch) {
-				return fmt.Errorf("%s contains invalid characters: %s (allowed: alphanumeric, hyphens, underscores, dots, slashes)", entry.name, entry.branch)
+		if entry.ref != "" {
+			// Allow commit hashes (40-character hex)
+			isCommit, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, entry.ref)
+			if !isCommit {
+				if !safeBranchRe.MatchString(entry.ref) {
+					return fmt.Errorf("%s contains invalid characters: %s (allowed: alphanumeric, hyphens, underscores, dots, slashes, or 40-char commit hash)", entry.name, entry.ref)
+				}
 			}
-			// Reject branches starting with "-" to prevent argument injection
-			if strings.HasPrefix(entry.branch, "-") {
-				return fmt.Errorf("%s must not start with a hyphen: %s", entry.name, entry.branch)
+			// Reject refs starting with "-" to prevent argument injection
+			if strings.HasPrefix(entry.ref, "-") {
+				return fmt.Errorf("%s must not start with a hyphen: %s", entry.name, entry.ref)
 			}
 		}
 	}
@@ -168,18 +174,28 @@ func (c *Config) GetBuilderScaffoldURL() string {
 	return DefaultBuilderScaffoldURL
 }
 
-// GetWorldContractsBranch returns the configured world-contracts branch, falling back to default.
-func (c *Config) GetWorldContractsBranch() string {
-	if c != nil && c.WorldContractsBranch != "" {
-		return c.WorldContractsBranch
+// GetWorldContractsRef returns the configured world-contracts ref, falling back to branch, then default.
+func (c *Config) GetWorldContractsRef() string {
+	if c != nil {
+		if c.WorldContractsRef != "" {
+			return c.WorldContractsRef
+		}
+		if c.WorldContractsBranch != "" {
+			return c.WorldContractsBranch
+		}
 	}
 	return DefaultBranch
 }
 
-// GetBuilderScaffoldBranch returns the configured builder-scaffold branch, falling back to default.
-func (c *Config) GetBuilderScaffoldBranch() string {
-	if c != nil && c.BuilderScaffoldBranch != "" {
-		return c.BuilderScaffoldBranch
+// GetBuilderScaffoldRef returns the configured builder-scaffold ref, falling back to branch, then default.
+func (c *Config) GetBuilderScaffoldRef() string {
+	if c != nil {
+		if c.BuilderScaffoldRef != "" {
+			return c.BuilderScaffoldRef
+		}
+		if c.BuilderScaffoldBranch != "" {
+			return c.BuilderScaffoldBranch
+		}
 	}
 	return DefaultBranch
 }

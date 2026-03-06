@@ -15,11 +15,11 @@ import (
 // sui-playground container.
 const containerEnvPath = "/workspace/world-contracts/.env"
 
-// cleanStaleMoveLocks removes Move.lock files from world-contracts so
+// CleanStaleMoveLocks removes Move.lock files from world-contracts so
 // that `sui client test-publish --build-env testnet` resolves framework
 // dependencies from the Sui binary rather than from stale pinned git
 // revisions that may no longer exist upstream.
-func cleanStaleMoveLocks(workspace string) {
+func CleanStaleMoveLocks(workspace string) {
 	removeMoveLocksInSubdirs(filepath.Join(workspace, "world-contracts", "contracts"), "contracts")
 	removeMoveLocksInSubdirs(filepath.Join(workspace, "builder-scaffold", "move-contracts"), filepath.Join("builder-scaffold", "move-contracts"))
 }

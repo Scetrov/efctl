@@ -107,8 +107,8 @@ func (m *mockGitClient) CloneRepository(url, dest string) error {
 	return m.Called(url, dest).Error(0)
 }
 
-func (m *mockGitClient) CheckoutBranch(repoDir, branch string) error {
-	return m.Called(repoDir, branch).Error(0)
+func (m *mockGitClient) CheckoutRef(repoDir, ref string) error {
+	return m.Called(repoDir, ref).Error(0)
 }
 
 func (m *mockGitClient) SetupWorkDir(workspace string) error {

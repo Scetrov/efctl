@@ -48,7 +48,7 @@ func TestCleanStaleMoveLocks_RemovesLockFiles(t *testing.T) {
 		))
 	}
 
-	cleanStaleMoveLocks(workspace)
+	CleanStaleMoveLocks(workspace)
 
 	for _, pkg := range []string{"world", "assets"} {
 		lockPath := filepath.Join(contractsDir, pkg, "Move.lock")
@@ -74,7 +74,7 @@ func TestCleanStaleMoveLocks_RemovesLockFiles(t *testing.T) {
 func TestCleanStaleMoveLocks_NoopOnMissingDir(t *testing.T) {
 	workspace := t.TempDir()
 	// contracts dir does not exist — should not panic
-	cleanStaleMoveLocks(workspace)
+	CleanStaleMoveLocks(workspace)
 }
 
 func TestCleanStaleMoveLocks_NoopOnMissingLock(t *testing.T) {
@@ -83,7 +83,7 @@ func TestCleanStaleMoveLocks_NoopOnMissingLock(t *testing.T) {
 	pkgDir := filepath.Join(contractsDir, "world")
 	require.NoError(t, os.MkdirAll(pkgDir, 0755))
 	// No Move.lock file — should not error
-	cleanStaleMoveLocks(workspace)
+	CleanStaleMoveLocks(workspace)
 }
 
 func TestEnsureWorldSponsorAddresses_BackfillsFromAdmin(t *testing.T) {

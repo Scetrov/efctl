@@ -107,7 +107,7 @@ func TestCheckoutBranch_NonGitRepoFails(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	err = CheckoutBranch(tempDir, "main")
+	err = CheckoutRef(tempDir, "main")
 	if err == nil {
 		t.Fatal("Expected checkout to fail for non-git directory")
 	}
