@@ -17,4 +17,4 @@ world-contracts-branch: "v0.0.14"
 builder-scaffold-url: "https://github.com/scetrov/builder-scaffold.git"
 
 # Branch to checkout for builder-scaffold (default: main)
-builder-scaffold-branch: "fix/sponsor-addresses-env"
+builder-scaffold-branch: "main"
