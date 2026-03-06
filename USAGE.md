@@ -34,14 +34,14 @@ with-graphql: false
 # Git clone URL for the world-contracts repository
 world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
 
-# Branch to checkout for world-contracts (default: main)
-world-contracts-branch: "main"
+# Ref (branch, tag, or commit) to checkout for world-contracts (default: main)
+world-contracts-ref: "main"
 
 # Git clone URL for the builder-scaffold repository
 builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
 
-# Branch to checkout for builder-scaffold (default: main)
-builder-scaffold-branch: "main"
+# Ref (branch, tag, or commit) to checkout for builder-scaffold (default: main)
+builder-scaffold-ref: "main"
 ```
 
 ---

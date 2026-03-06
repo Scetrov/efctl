@@ -10,11 +10,13 @@ with-graphql: true
 # Git clone URL for the world-contracts repository
 world-contracts-url: "https://github.com/scetrov/world-contracts.git"
 
-# Branch to checkout for world-contracts (default: main)
-world-contracts-branch: "v0.0.14"
+# Ref (branch, tag, or commit) to checkout for world-contracts (default: main)
+world-contracts-ref: "v0.0.14"
+# world-contracts-branch: "v0.0.14" # Deprecated: use world-contracts-ref
 
 # Git clone URL for the builder-scaffold repository
 builder-scaffold-url: "https://github.com/scetrov/builder-scaffold.git"
 
-# Branch to checkout for builder-scaffold (default: main)
-builder-scaffold-branch: "main"
+# Ref (branch, tag, or commit) to checkout for builder-scaffold (default: main)
+builder-scaffold-ref: "main"
+# builder-scaffold-branch: "main" # Deprecated: use builder-scaffold-ref

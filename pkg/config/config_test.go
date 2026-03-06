@@ -11,10 +11,10 @@ import (
 
 func TestValidate_ValidConfig(t *testing.T) {
 	cfg := &Config{
-		WorldContractsURL:     "https://github.com/evefrontier/world-contracts.git",
-		BuilderScaffoldURL:    "https://github.com/evefrontier/builder-scaffold.git",
-		WorldContractsBranch:  "main",
-		BuilderScaffoldBranch: "feature/my-branch",
+		WorldContractsURL:  "https://github.com/evefrontier/world-contracts.git",
+		BuilderScaffoldURL: "https://github.com/evefrontier/builder-scaffold.git",
+		WorldContractsRef:  "main",
+		BuilderScaffoldRef: "feature/my-branch",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected valid config, got error: %v", err)
@@ -74,29 +74,31 @@ func TestValidate_RejectsInvalidBranch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{WorldContractsBranch: tt.branch}
+			cfg := &Config{WorldContractsRef: tt.branch}
 			if err := cfg.Validate(); err == nil {
-				t.Fatalf("expected validation error for branch %q, got nil", tt.branch)
+				t.Fatalf("expected validation error for ref %q, got nil", tt.branch)
 			}
 		})
 	}
 }
 
 func TestValidate_AcceptsValidBranches(t *testing.T) {
-	branches := []string{
+	refs := []string{
 		"main",
 		"develop",
 		"feature/my-feature",
 		"release/v1.2.3",
 		"hotfix/fix-123",
 		"user.name/branch_name",
+		"v1.0.0",
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", // 40-char hex (commit)
 	}
 
-	for _, branch := range branches {
-		t.Run(branch, func(t *testing.T) {
-			cfg := &Config{WorldContractsBranch: branch}
+	for _, ref := range refs {
+		t.Run(ref, func(t *testing.T) {
+			cfg := &Config{WorldContractsRef: ref}
 			if err := cfg.Validate(); err != nil {
-				t.Fatalf("expected branch %q to be valid, got error: %v", branch, err)
+				t.Fatalf("expected ref %q to be valid, got error: %v", ref, err)
 			}
 		})
 	}
@@ -148,8 +150,8 @@ with-graphql: false
 	require.NoError(t, err)
 	assert.Equal(t, "https://github.com/test/wc.git", cfg.WorldContractsURL)
 	assert.Equal(t, "https://github.com/test/bs.git", cfg.BuilderScaffoldURL)
-	assert.Equal(t, "develop", cfg.WorldContractsBranch)
-	assert.Equal(t, "feature/x", cfg.BuilderScaffoldBranch)
+	assert.Equal(t, "develop", cfg.GetWorldContractsRef())
+	assert.Equal(t, "feature/x", cfg.GetBuilderScaffoldRef())
 	assert.True(t, *cfg.WithFrontend)
 	assert.False(t, *cfg.WithGraphql)
 	// Loaded global should be set
@@ -203,32 +205,52 @@ func TestGetBuilderScaffoldURL_Custom(t *testing.T) {
 	assert.Equal(t, "https://example.com/bs.git", cfg.GetBuilderScaffoldURL())
 }
 
-func TestGetWorldContractsBranch_Default(t *testing.T) {
+func TestGetWorldContractsRef_Default(t *testing.T) {
 	cfg := &Config{}
-	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsBranch())
+	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsRef())
 }
 
-func TestGetWorldContractsBranch_Custom(t *testing.T) {
-	cfg := &Config{WorldContractsBranch: "develop"}
-	assert.Equal(t, "develop", cfg.GetWorldContractsBranch())
+func TestGetWorldContractsRef_Custom(t *testing.T) {
+	cfg := &Config{WorldContractsRef: "develop"}
+	assert.Equal(t, "develop", cfg.GetWorldContractsRef())
 }
 
-func TestGetBuilderScaffoldBranch_Default(t *testing.T) {
+func TestGetWorldContractsRef_BackwardCompatibility(t *testing.T) {
+	cfg := &Config{WorldContractsBranch: "legacy-branch"}
+	assert.Equal(t, "legacy-branch", cfg.GetWorldContractsRef())
+}
+
+func TestGetWorldContractsRef_Priority(t *testing.T) {
+	cfg := &Config{WorldContractsRef: "new-ref", WorldContractsBranch: "old-branch"}
+	assert.Equal(t, "new-ref", cfg.GetWorldContractsRef())
+}
+
+func TestGetBuilderScaffoldRef_Default(t *testing.T) {
 	cfg := &Config{}
-	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldBranch())
+	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldRef())
 }
 
-func TestGetBuilderScaffoldBranch_Custom(t *testing.T) {
-	cfg := &Config{BuilderScaffoldBranch: "release/v2"}
-	assert.Equal(t, "release/v2", cfg.GetBuilderScaffoldBranch())
+func TestGetBuilderScaffoldRef_Custom(t *testing.T) {
+	cfg := &Config{BuilderScaffoldRef: "release/v2"}
+	assert.Equal(t, "release/v2", cfg.GetBuilderScaffoldRef())
+}
+
+func TestGetBuilderScaffoldRef_BackwardCompatibility(t *testing.T) {
+	cfg := &Config{BuilderScaffoldBranch: "legacy-branch"}
+	assert.Equal(t, "legacy-branch", cfg.GetBuilderScaffoldRef())
+}
+
+func TestGetBuilderScaffoldRef_Priority(t *testing.T) {
+	cfg := &Config{BuilderScaffoldRef: "new-ref", BuilderScaffoldBranch: "old-branch"}
+	assert.Equal(t, "new-ref", cfg.GetBuilderScaffoldRef())
 }
 
 func TestGetters_NilConfig(t *testing.T) {
 	var cfg *Config
 	assert.Equal(t, DefaultWorldContractsURL, cfg.GetWorldContractsURL())
 	assert.Equal(t, DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
-	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsBranch())
-	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldBranch())
+	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsRef())
+	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldRef())
 }
 
 func TestFindDefaultConfigPath_FindsInCurrentDirectory(t *testing.T) {

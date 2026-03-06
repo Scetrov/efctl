@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ func ensureGitRepository(path string) error {
 // Consumers should accept this interface to enable testing with mocks.
 type GitClient interface {
 	CloneRepository(url string, dest string) error
-	CheckoutBranch(repoPath string, branch string) error
+	CheckoutRef(repoPath string, ref string) error
 	SetupWorkDir(path string) error
 }
 
@@ -48,9 +49,9 @@ func (g *DefaultClient) CloneRepository(url string, dest string) error {
 	return CloneRepository(url, dest)
 }
 
-// CheckoutBranch checks out the specified branch in the given repository path.
-func (g *DefaultClient) CheckoutBranch(repoPath string, branch string) error {
-	return CheckoutBranch(repoPath, branch)
+// CheckoutRef checks out the specified ref (branch, tag, or commit) in the given repository path.
+func (g *DefaultClient) CheckoutRef(repoPath string, ref string) error {
+	return CheckoutRef(repoPath, ref)
 }
 
 // SetupWorkDir creates the workspace directory if it doesn't exist
@@ -173,27 +174,32 @@ func isRetriableGitError(output string, err error) bool {
 	return false
 }
 
-// CheckoutBranch checks out the specified branch in the given repository path.
-func CheckoutBranch(repoPath string, branch string) error {
+// CheckoutRef checks out the specified ref (branch, tag, or commit) in the given repository path.
+func CheckoutRef(repoPath string, ref string) error {
 	if err := ensureGitRepository(repoPath); err != nil {
 		return err
 	}
 
-	spinner, _ := ui.Spin(fmt.Sprintf("%s Checking out branch '%s' in %s...", ui.GitEmoji, branch, repoPath))
+	spinner, _ := ui.Spin(fmt.Sprintf("%s Checking out ref '%s' in %s...", ui.GitEmoji, ref, repoPath))
 
-	cmd := exec.Command("git", "-C", repoPath, "checkout", branch) // #nosec G204
+	cmd := exec.Command("git", "-C", repoPath, "checkout", ref) // #nosec G204
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to checkout branch '%s'", branch))
+		spinner.Fail(fmt.Sprintf("Failed to checkout ref '%s'", ref))
 		return fmt.Errorf("git checkout error: %v\n%s", err, string(output))
 	}
 
-	// Pull latest changes from the branch if tracking a remote
-	cmd = exec.Command("git", "-C", repoPath, "pull", "origin", branch) // #nosec G204
-	// We ignore pull errors since the branch might be local-only or already up-to-date
-	cmd.Run()
+	// Try to pull latest changes only if it looks like a branch (not a full 40-char commit hash and not a tag-like ref)
+	// This is a heuristic: if it's not a 40-char hex string, we'll try to pull.
+	// Tags will fail the pull but we ignore errors anyway.
+	isCommit, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, ref)
+	if !isCommit {
+		cmd = exec.Command("git", "-C", repoPath, "pull", "origin", ref) // #nosec G204
+		// We ignore pull errors since the ref might be local-only or already up-to-date
+		cmd.Run()
+	}
 
-	spinner.Success(fmt.Sprintf("Checked out branch '%s' in %s", branch, repoPath))
+	spinner.Success(fmt.Sprintf("Checked out ref '%s' in %s", ref, repoPath))
 	return nil
 }
 

@@ -32,7 +32,7 @@ with-graphql: true
 
 	assert.Equal(t, "https://github.com/test/wc.git", cfg.GetWorldContractsURL())
 	assert.Equal(t, "https://github.com/test/bs.git", cfg.GetBuilderScaffoldURL())
-	assert.Equal(t, "develop", cfg.GetWorldContractsBranch())
+	assert.Equal(t, "develop", cfg.GetWorldContractsRef())
 	assert.Equal(t, "release/v2", cfg.GetBuilderScaffoldBranch())
 	assert.True(t, *cfg.WithFrontend)
 	assert.True(t, *cfg.WithGraphql)
@@ -49,7 +49,7 @@ func TestConfigDefaults(t *testing.T) {
 
 	assert.Equal(t, config.DefaultWorldContractsURL, cfg.GetWorldContractsURL())
 	assert.Equal(t, config.DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
-	assert.Equal(t, config.DefaultBranch, cfg.GetWorldContractsBranch())
+	assert.Equal(t, config.DefaultBranch, cfg.GetWorldContractsRef())
 	assert.Equal(t, config.DefaultBranch, cfg.GetBuilderScaffoldBranch())
 }
 

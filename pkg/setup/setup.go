@@ -84,30 +84,30 @@ func CloneRepositories(g git.GitClient, workspace string) error {
 
 	cfg := config.Loaded
 	worldContractsUrl := cfg.GetWorldContractsURL()
-	worldContractsBranch := cfg.GetWorldContractsBranch()
+	worldContractsRef := cfg.GetWorldContractsRef()
 	worldContractsPath, err := resolveRepoPath(workspacePath, "world-contracts")
 	if err != nil {
 		return err
 	}
-	ui.Info.Printfln("Setting up %s using branch %s", pterm.Bold.Sprint(extractRepoName(worldContractsUrl)), pterm.Bold.Sprint(worldContractsBranch))
+	ui.Info.Printfln("Setting up %s using ref %s", pterm.Bold.Sprint(extractRepoName(worldContractsUrl)), pterm.Bold.Sprint(worldContractsRef))
 	if err := g.CloneRepository(worldContractsUrl, worldContractsPath); err != nil {
 		return err
 	}
-	if err := g.CheckoutBranch(worldContractsPath, worldContractsBranch); err != nil {
+	if err := g.CheckoutRef(worldContractsPath, worldContractsRef); err != nil {
 		return err
 	}
 
 	builderScaffoldUrl := cfg.GetBuilderScaffoldURL()
-	builderScaffoldBranch := cfg.GetBuilderScaffoldBranch()
+	builderScaffoldRef := cfg.GetBuilderScaffoldRef()
 	builderScaffoldPath, err := resolveRepoPath(workspacePath, "builder-scaffold")
 	if err != nil {
 		return err
 	}
-	ui.Info.Printfln("Setting up %s using branch %s", pterm.Bold.Sprint(extractRepoName(builderScaffoldUrl)), pterm.Bold.Sprint(builderScaffoldBranch))
+	ui.Info.Printfln("Setting up %s using ref %s", pterm.Bold.Sprint(extractRepoName(builderScaffoldUrl)), pterm.Bold.Sprint(builderScaffoldRef))
 	if err := g.CloneRepository(builderScaffoldUrl, builderScaffoldPath); err != nil {
 		return err
 	}
-	if err := g.CheckoutBranch(builderScaffoldPath, builderScaffoldBranch); err != nil {
+	if err := g.CheckoutRef(builderScaffoldPath, builderScaffoldRef); err != nil {
 		return err
 	}
 
