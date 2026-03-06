@@ -11,7 +11,7 @@ with-graphql: true
 world-contracts-url: "https://github.com/scetrov/world-contracts.git"
 
 # Branch to checkout for world-contracts (default: main)
-world-contracts-branch: "main"
+world-contracts-branch: "v0.0.14"
 
 # Git clone URL for the builder-scaffold repository
 builder-scaffold-url: "https://github.com/scetrov/builder-scaffold.git"
