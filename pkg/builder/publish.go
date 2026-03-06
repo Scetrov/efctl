@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"efctl/pkg/container"
+	"efctl/pkg/setup"
 	"efctl/pkg/ui"
 )
 
@@ -40,6 +41,9 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 	if err != nil {
 		return err
 	}
+
+	// Clean stale Move.lock files before publishing to avoid framework drift issues
+	setup.CleanStaleMoveLocks(workspace)
 
 	ui.Warn.Println("Publish logging will be piped below:")
 

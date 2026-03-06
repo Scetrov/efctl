@@ -166,6 +166,8 @@ func isKnownUpstreamDrift(output string) bool {
 		"Unable to resolve",
 		"dependency version mismatch",
 		"no published package",
+		"Invalid call",
+		"Invalid argument",
 	}
 
 	for _, pattern := range knownPatterns {
@@ -247,7 +249,10 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	t.Run("extension_publish", func(t *testing.T) {
 		out, err := runEfctl(t, bin, workspace, "env", "extension", "publish", "smart_gate")
 		if err != nil {
-			t.Skipf("skipping extension publish due upstream builder/world contract drift:\n%s", out)
+			if isKnownUpstreamDrift(out) {
+				t.Skipf("skipping extension publish due to known upstream builder/world contract drift:\n%s", out)
+			}
+			require.NoError(t, err, "efctl env extension publish failed (NOT a known drift issue):\n%s", out)
 		}
 		require.NoError(t, err, "efctl env extension publish failed:\n%s", out)
 		assert.Contains(t, out, "Extension contract published successfully")
