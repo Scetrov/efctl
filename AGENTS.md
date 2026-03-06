@@ -35,3 +35,4 @@ To maintain a non-breaking flow and avoid permission requests:
 
 - All temporary files, intermediate build artifacts, or scratchpads must be stored in the `./tmp` directory.
 - Do not write to system-level directories or paths outside the repository root.
+- Do not write changes to the builder-scaffold and world-contracts directory for anything other than testing, prefer patching the files in code.

@@ -24,18 +24,16 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 		)
 	}
 
+	usernsMode := ""
+	if engine == "podman" {
+		usernsMode = "keep-id"
+	}
+
 	mounts := []MountDef{
-		{Type: "volume", Source: VolumeSuiConfig, Target: "/root/.sui"},
+		{Type: "volume", Source: VolumeSuiConfig, Target: "/workspace/.sui"},
 		{Type: "bind", Source: builderScaffold, Target: "/workspace/builder-scaffold", SELinux: true},
 		{Type: "bind", Source: worldContracts, Target: "/workspace/world-contracts", SELinux: true},
 	}
-
-	// The sui-dev image runs as root (Dockerfile installs sui into /root,
-	// sets SUI_CONFIG_DIR=/root/.sui, etc.).  Podman rootless without
-	// keep-id maps container UID 0 → host UID, so /root is accessible AND
-	// bind-mount writes appear as the host user on the host filesystem.
-	// keep-id would map the host UID into the container as a non-root user,
-	// breaking access to /root.
 
 	return ContainerConfig{
 		Name:        ContainerSuiPlayground,
@@ -47,6 +45,7 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 		Aliases:     []string{"sui-dev", ContainerSuiPlayground},
 		Tty:         true,
 		OpenStdin:   true,
+		UsernsMode:  usernsMode,
 	}
 }
 
@@ -70,12 +69,11 @@ func PostgresConfig(networkName, user, password, dbName string) ContainerConfig 
 	}
 }
 
-// FrontendConfig returns the ContainerConfig for the Vite dev-server frontend.
 func FrontendConfig(workspace, networkName, engine string) ContainerConfig {
-	// The frontend container runs `npm install -g pnpm` which requires root
-	// access to /usr/local/lib/node_modules.  Podman rootless without
-	// keep-id maps container UID 0 → host UID, so global npm installs work
-	// and bind-mount writes still appear as the host user.
+	usernsMode := ""
+	if engine == "podman" {
+		usernsMode = "keep-id"
+	}
 
 	return ContainerConfig{
 		Name:  ContainerFrontend,
@@ -88,6 +86,7 @@ func FrontendConfig(workspace, networkName, engine string) ContainerConfig {
 		NetworkName: networkName,
 		Aliases:     []string{"frontend"},
 		WorkingDir:  "/workspace/builder-scaffold/dapps",
-		Cmd:         []string{"sh", "-c", "set -e\nnpm install -g pnpm\npnpm install\nexec pnpm dev --host 0.0.0.0"},
+		Cmd:         []string{"sh", "-c", "set -e\nnpx pnpm install\nexec npx pnpm dev --host 0.0.0.0"},
+		UsernsMode:  usernsMode,
 	}
 }

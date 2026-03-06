@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+ENV SUI_CONFIG_DIR=/root/.sui
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 `
 	os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644)
@@ -35,7 +36,7 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
 	entrypointContent := `#!/usr/bin/env bash
 set -e
-SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
 ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
 
 # ---------- start local node ----------
@@ -64,6 +65,7 @@ echo "[sui-dev] RPC ready."
 	dockerfileBody, _ := os.ReadFile(dockerfilePath)
 	bodyStr := string(dockerfileBody)
 	assert.Contains(t, bodyStr, "postgresql-client \\", "Dockerfile should contain postgresql-client")
+	assert.Contains(t, bodyStr, `ENV SUI_CONFIG_DIR=/workspace/.sui`, "Dockerfile should contain patched SUI_CONFIG_DIR")
 	assert.Contains(t, bodyStr, `sed -i`, "Dockerfile should contain sed safety-net")
 
 	// 4. Assert entrypoint.sh patches
@@ -109,7 +111,7 @@ func TestPrepareDockerEnvironment_CleansUpStaleOverride(t *testing.T) {
 // ── patchEntrypointEnvPath ─────────────────────────────────────────
 
 func TestPatchEntrypointEnvPath_DoubleQuoted(t *testing.T) {
-	content := `SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+	content := `SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
 ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
 `
 	result := patchEntrypointEnvPath(content)
@@ -118,7 +120,7 @@ ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
 }
 
 func TestPatchEntrypointEnvPath_SingleQuoted(t *testing.T) {
-	content := `SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+	content := `SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
 ENV_FILE='/workspace/builder-scaffold/docker/.env.sui'
 `
 	result := patchEntrypointEnvPath(content)
@@ -126,7 +128,7 @@ ENV_FILE='/workspace/builder-scaffold/docker/.env.sui'
 }
 
 func TestPatchEntrypointEnvPath_Unquoted(t *testing.T) {
-	content := `SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+	content := `SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
 ENV_FILE=/workspace/builder-scaffold/docker/.env.sui
 `
 	result := patchEntrypointEnvPath(content)
@@ -134,7 +136,7 @@ ENV_FILE=/workspace/builder-scaffold/docker/.env.sui
 }
 
 func TestPatchEntrypointEnvPath_ExportPrefix(t *testing.T) {
-	content := `SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+	content := `SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
 export ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
 `
 	result := patchEntrypointEnvPath(content)
@@ -178,7 +180,7 @@ sui start --with-faucet --force-regenesis &
 	body, _ := os.ReadFile(entrypointPath)
 	assert.NotContains(t, string(body), `/workspace/builder-scaffold/docker/.env.sui`,
 		"post-patch validation must eliminate all occurrences of the bind-mount path")
-	assert.Contains(t, string(body), `/root/.sui/.env.sui`)
+	assert.Contains(t, string(body), `/workspace/.sui/.env.sui`)
 }
 
 // ── patchDockerfile safety-net ──────────────────────────────────────
@@ -198,7 +200,7 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	body, _ := os.ReadFile(dockerfilePath)
 	bodyStr := string(body)
 	assert.Contains(t, bodyStr, `RUN sed -i`)
-	assert.Contains(t, bodyStr, `/root/.sui/.env.sui`)
+	assert.Contains(t, bodyStr, `/workspace/.sui/.env.sui`)
 	// The sed must use global replacement (trailing |g') to catch all occurrences
 	assert.Contains(t, bodyStr, `|g'`, "sed must use global replacement flag")
 	// sed line must come after the COPY + dos2unix line
@@ -214,7 +216,7 @@ func TestPatchDockerfile_ReplacesOldNarrowSed(t *testing.T) {
 	content := `FROM ubuntu:24.04
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
-RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
+RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/workspace/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 `
 	os.WriteFile(dockerfilePath, []byte(content), 0644)
