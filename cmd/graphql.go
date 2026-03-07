@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var graphqlEndpoint string
+var GraphqlEndpoint string
 
 var graphqlCmd = &cobra.Command{
 	Use:   "graphql",
@@ -13,6 +13,6 @@ var graphqlCmd = &cobra.Command{
 }
 
 func init() {
-	graphqlCmd.PersistentFlags().StringVarP(&graphqlEndpoint, "endpoint", "e", "http://localhost:9125/graphql", "Sui GraphQL RPC endpoint")
+	graphqlCmd.PersistentFlags().StringVarP(&GraphqlEndpoint, "endpoint", "e", "http://localhost:9125/graphql", "Sui GraphQL RPC endpoint")
 	rootCmd.AddCommand(graphqlCmd)
 }
