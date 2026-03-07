@@ -739,6 +739,13 @@ func (c *Client) Exec(ctx context.Context, containerName string, command []strin
 
 	if err != nil {
 		spinner.Fail("Execution failed")
+
+		// Diagnostic: list containers on failure to catch "no such container" issues
+		debugCmd := exec.Command(c.Engine, "ps", "-a") // #nosec G204
+		debugOut, _ := debugCmd.CombinedOutput()
+		ui.Warn.Println("Exec failed, current containers:")
+		fmt.Println(string(debugOut))
+
 		return fmt.Errorf("exec error: %w\n%s", err, string(output))
 	}
 

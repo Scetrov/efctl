@@ -20,10 +20,10 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 		exitCode, exitErr := c.ContainerExitCode(container.ContainerSuiPlayground)
 
 		// Log all containers for debugging if this fails
-		ui.Debug.Println("Container not running, listing all containers for diagnostics:")
+		ui.Warn.Println("Container not running, listing all containers for diagnostics:")
 		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
 		debugOut, _ := debugCmd.CombinedOutput()
-		ui.Debug.Println(string(debugOut))
+		fmt.Println(string(debugOut))
 
 		return fmt.Errorf("sui-playground container is not running (ExitCode: %d, ExitErr: %v). Last 50 lines of logs:\n%s", exitCode, exitErr, lastLogs)
 	}
@@ -36,10 +36,10 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	// 1. Generate environment
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
 		// Log all containers for debugging if this fails
-		ui.Debug.Println("Command failed, listing all containers for diagnostics:")
+		ui.Warn.Println("Command failed, listing all containers for diagnostics:")
 		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
 		debugOut, _ := debugCmd.CombinedOutput()
-		ui.Debug.Println(string(debugOut))
+		fmt.Println(string(debugOut))
 
 		return fmt.Errorf("failed to generate world env: %w", err)
 	}
@@ -48,10 +48,10 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	// 2. Install dependencies & deploy
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdDeployWorld}); err != nil {
 		// Log all containers for debugging if this fails
-		ui.Debug.Println("Command failed, listing all containers for diagnostics:")
+		ui.Warn.Println("Command failed, listing all containers for diagnostics:")
 		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
 		debugOut, _ := debugCmd.CombinedOutput()
-		ui.Debug.Println(string(debugOut))
+		fmt.Println(string(debugOut))
 
 		return fmt.Errorf("failed to deploy world: %w", err)
 	}
@@ -66,10 +66,10 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	// 4. Configure World State
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdConfigureWorld}); err != nil {
 		// Log all containers for debugging if this fails
-		ui.Debug.Println("Command failed, listing all containers for diagnostics:")
+		ui.Warn.Println("Command failed, listing all containers for diagnostics:")
 		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
 		debugOut, _ := debugCmd.CombinedOutput()
-		ui.Debug.Println(string(debugOut))
+		fmt.Println(string(debugOut))
 
 		return fmt.Errorf("failed to configure world: %w", err)
 	}
@@ -78,10 +78,10 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	ui.Info.Println("Spawning game structures (Gates)...")
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdCreateTestResources}); err != nil {
 		// Log all containers for debugging if this fails
-		ui.Debug.Println("Command failed, listing all containers for diagnostics:")
+		ui.Warn.Println("Command failed, listing all containers for diagnostics:")
 		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
 		debugOut, _ := debugCmd.CombinedOutput()
-		ui.Debug.Println(string(debugOut))
+		fmt.Println(string(debugOut))
 
 		return fmt.Errorf("failed to create test resources: %w", err)
 	}
