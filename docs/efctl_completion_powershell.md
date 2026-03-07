@@ -1,8 +1,8 @@
-# efctl completion powershell
+## efctl completion powershell
 
 Generate powershell completion script
 
-## Synopsis
+### Synopsis
 
 Generate the autocompletion script for PowerShell.
 
@@ -14,16 +14,26 @@ To install permanently, add the output to your PowerShell profile:
 
   PS> efctl completion powershell >> $PROFILE
 
-```text
+
+```
 efctl completion powershell
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for powershell
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl completion](efctl_completion.md) - Generate shell completion scripts
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+```
+
+### SEE ALSO
+
+* [efctl completion](efctl_completion.md)	 - Generate shell completion scripts
+

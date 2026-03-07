@@ -4,7 +4,9 @@
 
 ## Global Options
 
-- `--config-file string`: Path to the `efctl.yaml` configuration file. (default: `efctl.yaml`)
+- `--config-file string`: Path to the `efctl.yaml` or `efctl.yml` configuration file. (default: `efctl.yaml`)
+- `--debug`: Enable verbose debug logging.
+- `--no-progress`: Disable the progress spinner for cleaner CI output.
 - `--help`: Use the `--help` flag with any command to see the available options and subcommands.
 
 ---
@@ -48,7 +50,7 @@ builder-scaffold-ref: "main"
 
 ## Environment Management
 
-The `env` command groups operations to bring up and tear down the EVE Frontier local development environment.
+The `env` command groups operations to bring up, manage, and tear down the EVE Frontier local development environment.
 
 ### `efctl env up`
 
@@ -60,8 +62,6 @@ Brings up the local environment. It sequentially runs checks, setup, start, and 
 - `--with-graphql`: Enable the SQL Indexer and GraphQL API.
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
-These flags can also be set via `efctl.yaml` (`with-frontend`, `with-graphql`). CLI flags take precedence over config file values.
-
 ### `efctl env down`
 
 Tears down the local environment, stopping containers and cleaning up images/volumes.
@@ -69,6 +69,28 @@ Tears down the local environment, stopping containers and cleaning up images/vol
 **Options:**
 
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+### `efctl env status`
+
+Displays the current status of the local environment containers.
+
+**Options:**
+
+- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+### `efctl env shell`
+
+Drops you into an interactive `/bin/bash` shell inside the `builder-scaffold` container.
+
+**Options:**
+
+- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+
+### `efctl env dash`
+
+Opens an interactive terminal dashboard for inspecting and managing the local environment.
+
+**Options:**
 
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
@@ -89,11 +111,12 @@ Initializes the builder-scaffold by copying world artifacts `deployments/localne
 
 ### `efctl env extension publish [contract-path]`
 
-Publishes the custom extension to the smart assembly testnet and updates the builder.env. `[contract-path]` must be relative to `builder-scaffold/move-contracts`.
+Publishes the custom extension to the smart assembly testnet and updates the builder.env. `[contract-path]` must be relative to `builder-scaffold/move-contracts` or `world-contracts/contracts`.
 
 **Options:**
 
 - `-n, --network string`: The network to publish to (default: `localnet`)
+- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
 ---
 
@@ -102,8 +125,6 @@ Publishes the custom extension to the smart assembly testnet and updates the bui
 ### `efctl env run [script-name] [args...]`
 
 Runs a predefined script (e.g. from `package.json`) or a custom command directly inside the container in the `/workspace/builder-scaffold` directory.
-
-Example: `efctl env run authorise-gate`
 
 ---
 
@@ -117,7 +138,7 @@ Query a specific object by its ID/address.
 
 **Options:**
 
-- `-e, --endpoint string`: Sui GraphQL RPC endpoint.
+- `-e, --endpoint string`: Sui GraphQL RPC endpoint. (default: `http://localhost:9125/graphql`)
 
 ### `efctl graphql package [address]`
 
@@ -125,4 +146,48 @@ Query a package and list its associated modules by package ID/address.
 
 **Options:**
 
-- `-e, --endpoint string`: Sui GraphQL RPC endpoint.
+- `-e, --endpoint string`: Sui GraphQL RPC endpoint. (default: `http://localhost:9125/graphql`)
+
+---
+
+## World Interaction
+
+The `world` command groups operations used to query and interact with the deployed EVE Frontier local world contracts.
+
+### `efctl world query [object_id]`
+
+A utility that queries your smart assemblies (gates, turrets) or tokens on-chain to provide a human-readable list of information using GraphQL.
+
+**Options:**
+
+- `-e, --endpoint string`: Sui GraphQL endpoint. (default: `http://localhost:9125/graphql`)
+
+---
+
+## Sui Dependency Management
+
+The `sui` command helps you manage the host-level Sui dependencies, primarily setting up the local CLI client that efctl needs.
+
+### `efctl sui install`
+
+Installs the Sui CLI binary directly depending on your OS and architecture. Uses the pre-built binaries from GitHub Releases to save compilation time.
+
+**Options:**
+
+- `-v, --version string`: Set the required sui-cli version. (default: `mainnet-v1.41.0`)
+
+---
+
+## Other Commands
+
+### `efctl update`
+
+Downloads and installs the latest version of `efctl` directly from GitHub releases. Updates the binary in-place or helps you download it if you don't have write access to its current location.
+
+### `efctl completion`
+
+Generate shell autocomplete features for `bash`, `fish`, `powershell`, or `zsh`.
+
+### `efctl version`
+
+Prints the current version of the `efctl` binary.

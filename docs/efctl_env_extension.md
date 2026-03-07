@@ -1,19 +1,29 @@
-# efctl env extension
+## efctl env extension
 
 Manage the builder-scaffold extension flow
 
-## Synopsis
+### Synopsis
 
-The extension command groups operations defined in the EVE Frontier Builder Flow for Docker. It automates Steps 6 to 9 of the Builder documentation.
+The extension command groups operations defined in the EVE Frontier Builder Flow for Docker, such as init and publish.
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for extension
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl env](efctl_env.md) - efctl manages the local EVE Frontier Sui development environment
-- [efctl env extension init](efctl_env_extension_init.md) - Initialize the builder-scaffold by copying world artifacts
-- [efctl env extension publish](efctl_env_extension_publish.md) - Publish a custom extension contract
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+  -w, --workspace string     Path to the workspace directory (default ".")
+```
+
+### SEE ALSO
+
+* [efctl env](efctl_env.md)	 - Manage the local Sui development environment
+* [efctl env extension init](efctl_env_extension_init.md)	 - Initialize the builder-scaffold by copying world artifacts
+* [efctl env extension publish](efctl_env_extension_publish.md)	 - Publish a custom extension contract
+

@@ -1,15 +1,15 @@
-## efctl graphql object
+## efctl world query
 
-Query an object by ID
+Query an EVE Frontier Smart Assembly
 
 ```
-efctl graphql object [id] [flags]
+efctl world query [object_id] [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for object
+  -h, --help   help for query
 ```
 
 ### Options inherited from parent commands
@@ -18,10 +18,11 @@ efctl graphql object [id] [flags]
       --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
       --debug                Enable verbose debug logging
   -e, --endpoint string      Sui GraphQL RPC endpoint (default "http://localhost:9125/graphql")
+  -n, --network string       The network to query (localnet, devnet, testnet, mainnet) (default "localnet")
       --no-progress          Disable the progress spinner for cleaner CI output
 ```
 
 ### SEE ALSO
 
-* [efctl graphql](efctl_graphql.md)	 - Interact with the Sui GraphQL RPC
+* [efctl world](efctl_world.md)	 - Interact with the EVE Frontier local world contracts
 

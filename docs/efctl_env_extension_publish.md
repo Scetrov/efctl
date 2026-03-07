@@ -1,22 +1,32 @@
-# efctl env extension publish
+## efctl env extension publish
 
 Publish a custom extension contract
 
-## Synopsis
+### Synopsis
 
-Runs Step 8 of the Builder flow. Publishes the custom contract locally via the container and outputs BUILDER_PACKAGE_ID and EXTENSION_CONFIG_ID.
+Runs Step 8 of the Builder flow. Publishes the custom contract locally via the container and updates BUILDER_PACKAGE_ID and EXTENSION_CONFIG_ID in .env
 
-```bash
+```
 efctl env extension publish [contract-path] [flags]
 ```
 
-## Options
+### Options
 
-```text
-  -h, --help               help for publish
-  -n, --network string     The network to publish to (localnet or testnet) (default "localnet")
+```
+  -h, --help             help for publish
+  -n, --network string   The network to publish to (localnet or testnet) (default "localnet")
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl env extension](efctl_env_extension.md) - Manage the builder-scaffold extension flow
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+  -w, --workspace string     Path to the workspace directory (default ".")
+```
+
+### SEE ALSO
+
+* [efctl env extension](efctl_env_extension.md)	 - Manage the builder-scaffold extension flow
+

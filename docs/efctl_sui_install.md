@@ -1,17 +1,26 @@
-# efctl sui install
+## efctl sui install
 
 Install suiup and the Sui client
 
-```text
+```
 efctl sui install [flags]
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for install
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl sui](efctl_sui.md) - Manage the local Sui client and environment
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+```
+
+### SEE ALSO
+
+* [efctl sui](efctl_sui.md)	 - Manage the local Sui client and environment
+

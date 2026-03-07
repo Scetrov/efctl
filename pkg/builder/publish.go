@@ -29,13 +29,47 @@ type objectChange struct {
 // and updates the builder-scaffold/.env with the extracted package IDs.
 func PublishExtension(c container.ContainerClient, workspace string, network string, contractPath string) error {
 
-	// Ensure no leading slashes — treat it as relative to move-contracts
+	// Ensure no absolute paths
 	cleanContractPath := filepath.Clean(contractPath)
-	if strings.HasPrefix(cleanContractPath, "/") {
-		return fmt.Errorf("contract path must be relative to builder-scaffold/move-contracts, got absolute: %s", contractPath)
+	slashContractPath := filepath.ToSlash(cleanContractPath)
+	if filepath.IsAbs(cleanContractPath) || strings.HasPrefix(slashContractPath, "/") {
+		return fmt.Errorf("contract path must be relative to builder-scaffold/move-contracts or world-contracts/contracts, got absolute: %s", contractPath)
 	}
 
-	containerContractDir := fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", cleanContractPath)
+	builderScaffoldPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", filepath.FromSlash(slashContractPath))
+	worldContractsPath := filepath.Join(workspace, "world-contracts", "contracts", filepath.FromSlash(slashContractPath))
+
+	builderExists := true
+	if _, err := os.Stat(builderScaffoldPath); err != nil {
+		if os.IsNotExist(err) {
+			builderExists = false
+		} else {
+			return fmt.Errorf("failed to stat %s: %w", builderScaffoldPath, err)
+		}
+	}
+
+	worldExists := true
+	if _, err := os.Stat(worldContractsPath); err != nil {
+		if os.IsNotExist(err) {
+			worldExists = false
+		} else {
+			return fmt.Errorf("failed to stat %s: %w", worldContractsPath, err)
+		}
+	}
+
+	if builderExists && worldExists {
+		ui.Warn.Printf("Warning: Contract path '%s' exists in both builder-scaffold/move-contracts and world-contracts/contracts. Defaulting to builder-scaffold/move-contracts.\n", slashContractPath)
+	}
+
+	var containerContractDir string
+	if builderExists {
+		containerContractDir = fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", slashContractPath)
+	} else if worldExists {
+		containerContractDir = fmt.Sprintf("/workspace/world-contracts/contracts/%s", slashContractPath)
+	} else {
+		return fmt.Errorf("contract path '%s' not found in either builder-scaffold/move-contracts or world-contracts/contracts", slashContractPath)
+	}
+
 	ui.Info.Printf("Executing publish inside container at %s...\n", containerContractDir)
 
 	publishCmd, err := buildPublishCmd(workspace, network, containerContractDir)
@@ -69,7 +103,7 @@ func buildPublishCmd(workspace, network, containerContractDir string) (string, e
 			return "", fmt.Errorf("failed to remove previous publish file: %w", err)
 		}
 		return fmt.Sprintf(
-			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path ../../deployments/localnet/Pub.extension.toml --json",
+			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
 			containerContractDir,
 		), nil
 
