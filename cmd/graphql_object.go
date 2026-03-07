@@ -21,9 +21,9 @@ var graphqlObjectCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		ui.Info.Printf("Querying object %s at %s...\n", id, graphqlEndpoint)
+		ui.Info.Printf("Querying object %s at %s...\n", id, GraphqlEndpoint)
 
-		if err := graphql.QueryObject(graphqlEndpoint, id); err != nil {
+		if err := graphql.QueryObject(GraphqlEndpoint, id); err != nil {
 			ui.Error.Println("GraphQL query failed: " + err.Error())
 			os.Exit(1)
 		}

@@ -21,9 +21,9 @@ var graphqlPackageCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		ui.Info.Printf("Querying package %s at %s...\n", id, graphqlEndpoint)
+		ui.Info.Printf("Querying package %s at %s...\n", id, GraphqlEndpoint)
 
-		if err := graphql.QueryPackage(graphqlEndpoint, id); err != nil {
+		if err := graphql.QueryPackage(GraphqlEndpoint, id); err != nil {
 			ui.Error.Println("GraphQL query failed: " + err.Error())
 			os.Exit(1)
 		}
