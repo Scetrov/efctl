@@ -61,11 +61,15 @@ jobs:
       - name: Build efctl
         run: go build -trimpath -ldflags="-s -w" -o output/efctl main.go
 
+      - name: Verify Docker
+        run: docker info
+
       - name: E2E Tests
         run: |
           EFCTL_BINARY=${{ github.workspace }}/output/efctl \
           go test -v -count=1 -tags e2e -timeout 15m ./tests/e2e/...
         env:
+          CI: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
   security:

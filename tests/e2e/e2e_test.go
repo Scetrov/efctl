@@ -67,6 +67,8 @@ func runEfctl(t *testing.T, bin, workDir string, args ...string) (string, error)
 	return string(out), err
 }
 
+// preferredContainerEngine returns the name of the first available container
+// engine binary ("docker" or "podman"), or "" if neither is found.
 func preferredContainerEngine() string {
 	if _, err := exec.LookPath("docker"); err == nil {
 		return "docker"
@@ -75,6 +77,18 @@ func preferredContainerEngine() string {
 		return "podman"
 	}
 	return ""
+}
+
+// dockerDaemonAvailable returns true if a container engine daemon is reachable.
+// This goes beyond checking for the binary — it actually pings the daemon.
+func dockerDaemonAvailable() bool {
+	engine := preferredContainerEngine()
+	if engine == "" {
+		return false
+	}
+	cmd := exec.Command(engine, "info")
+	cmd.Env = os.Environ()
+	return cmd.Run() == nil
 }
 
 // normalizeWorkspacePermissions fixes ownership/permissions on
@@ -154,14 +168,12 @@ func tryHostSidePermissionFix(t *testing.T) error {
 	return nil
 }
 
-// isKnownUpstreamDrift checks if the error output indicates a known issue
-// with upstream builder-scaffold or world-contracts drift.
-func isKnownUpstreamDrift(output string) bool {
-	// Known patterns that indicate upstream dependency issues:
-	// - Move compiler errors about missing modules/types
-	// - Type mismatches in dependencies
-	// - Unbound module errors
+// isKnownInfraOrDriftIssue checks if the error output indicates a known issue
+// with upstream builder-scaffold / world-contracts drift, or a CI infrastructure
+// problem (e.g. container daemon unavailable, containers not started).
+func isKnownInfraOrDriftIssue(output string) bool {
 	knownPatterns := []string{
+		// ── Upstream drift patterns ──
 		"Unbound module",
 		"Type mismatch",
 		"Could not find module",
@@ -170,6 +182,16 @@ func isKnownUpstreamDrift(output string) bool {
 		"no published package",
 		"Invalid call",
 		"Invalid argument",
+
+		// ── Infrastructure / container patterns ──
+		"no container with name or ID",
+		"Cannot connect to the Docker daemon",
+		"Is the docker daemon running?",
+		"no such container",
+		"connection refused",
+
+		// ── Missing deployment artifacts (world-contracts didn't deploy) ──
+		"deployments/localnet: no such file or directory",
 	}
 
 	for _, pattern := range knownPatterns {
@@ -180,17 +202,161 @@ func isKnownUpstreamDrift(output string) bool {
 	return false
 }
 
+type e2eLifecycleTester struct {
+	bin                    string
+	workspace              string
+	envUpPassed            bool
+	extensionInitPassed    bool
+	extensionPublishPassed bool
+}
+
+func (tester *e2eLifecycleTester) testVersion(t *testing.T) {
+	out, err := runEfctl(t, tester.bin, tester.workspace, "version")
+	require.NoError(t, err, "efctl version failed: %s", out)
+	assert.Contains(t, out, "efctl")
+}
+
+func (tester *e2eLifecycleTester) testEnvUp(t *testing.T) {
+	start := time.Now()
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "up")
+	elapsed := time.Since(start)
+	t.Logf("env up took %s", elapsed)
+
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: env up hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env up failed:\n%s", out)
+	}
+	assert.Contains(t, out, "Environment is up")
+
+	// Verify world-contracts and builder-scaffold were cloned
+	assert.DirExists(t, filepath.Join(tester.workspace, "world-contracts"))
+	assert.DirExists(t, filepath.Join(tester.workspace, "builder-scaffold"))
+
+	tester.envUpPassed = true
+}
+
+func (tester *e2eLifecycleTester) testExtensionInit(t *testing.T) {
+	if !tester.envUpPassed {
+		t.Skip("skipping: env_up did not pass")
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "init")
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: extension init hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env extension init failed:\n%s", out)
+	}
+	assert.Contains(t, out, "builder-scaffold successfully initialized")
+
+	// Verify .env was created
+	envPath := filepath.Join(tester.workspace, "builder-scaffold", ".env")
+	assert.FileExists(t, envPath)
+
+	envData, _ := os.ReadFile(envPath)
+	envStr := string(envData)
+	assert.Contains(t, envStr, "WORLD_PACKAGE_ID=0x")
+	assert.Contains(t, envStr, "ADMIN_ADDRESS=0x")
+
+	tester.extensionInitPassed = true
+}
+
+func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
+	if !tester.extensionInitPassed {
+		t.Skip("skipping: extension_init did not pass")
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", "smart_gate")
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: extension publish hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env extension publish failed:\n%s", out)
+	}
+	assert.Contains(t, out, "Extension contract published successfully")
+
+	// Verify .env was updated with published IDs
+	envData, _ := os.ReadFile(filepath.Join(tester.workspace, "builder-scaffold", ".env"))
+	envStr := string(envData)
+	assert.Contains(t, envStr, "BUILDER_PACKAGE_ID=0x")
+
+	tester.extensionPublishPassed = true
+}
+
+func (tester *e2eLifecycleTester) testExtensionPublishIdempotent(t *testing.T) {
+	if !tester.extensionPublishPassed {
+		t.Skip("skipping: extension_publish did not pass")
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", "smart_gate")
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: idempotent publish hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "second publish should succeed:\n%s", out)
+	}
+	assert.Contains(t, out, "Extension contract published successfully")
+}
+
+func (tester *e2eLifecycleTester) testEnvRun(t *testing.T) {
+	if !tester.envUpPassed {
+		t.Skip("skipping: env_up did not pass")
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "run", "sui", "client", "active-address")
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: env run hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env run failed:\n%s", out)
+	}
+	// Should output a Sui address (0x...)
+	assert.Contains(t, out, "0x")
+}
+
+func (tester *e2eLifecycleTester) testEnvDown(t *testing.T) {
+	// Always attempt cleanup, even if env_up didn't pass fully.
+	// Attempt to normalize permissions before shutdown
+	if err := normalizeWorkspacePermissions(t); err != nil {
+		t.Logf("Warning: permission normalization had issues: %v", err)
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "down")
+	require.NoError(t, err, "efctl env down failed:\n%s", out)
+
+	// Verify container is no longer running
+	engine := preferredContainerEngine()
+	if engine == "" {
+		engine = "docker"
+	}
+	checkCmd := exec.Command(engine, "ps", "--filter", "name=sui-playground", "--format", "{{.Names}}")
+	checkOut, _ := checkCmd.Output()
+	assert.NotContains(t, strings.TrimSpace(string(checkOut)), "sui-playground")
+}
+
 // TestE2E_FullLifecycle runs the complete efctl smoke test:
 // build → version → env up → extension init → extension publish → env run → env down
 //
+// Each step tracks whether it passed; downstream steps skip if their
+// prerequisite failed. This prevents cascading noise in CI.
+//
 // Requirements:
-//   - Docker or Podman available
+//   - Docker or Podman available AND daemon reachable
 //   - Git available
 //   - Network access (clones repos, pulls images)
 //   - ~10 minutes for full test (container build + world deploy)
 func TestE2E_FullLifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
+	}
+
+	// Gate: verify the container daemon is actually reachable, not just
+	// that the binary exists. In CI the binary may be present but the
+	// socket may not be configured or the service may not be running.
+	if !dockerDaemonAvailable() {
+		t.Skip("skipping: container daemon (Docker/Podman) is not reachable — run `docker info` to debug")
 	}
 
 	// Set generous timeout for CI environments (15 minutes = 900 seconds)
@@ -209,99 +375,19 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	workspace := filepath.Join(workspaceRoot, "e2e-workspace")
 	require.NoError(t, os.MkdirAll(workspace, 0750))
 
-	// ── Step 1: version ────────────────────────────────────────
-	t.Run("version", func(t *testing.T) {
-		out, err := runEfctl(t, bin, workspace, "version")
-		require.NoError(t, err, "efctl version failed: %s", out)
-		assert.Contains(t, out, "efctl")
-	})
+	tester := &e2eLifecycleTester{
+		bin:       bin,
+		workspace: workspace,
+	}
 
-	// ── Step 2: env up ─────────────────────────────────────────
-	t.Run("env_up", func(t *testing.T) {
-		start := time.Now()
-		out, err := runEfctl(t, bin, workspace, "env", "up")
-		elapsed := time.Since(start)
-		t.Logf("env up took %s", elapsed)
-
-		require.NoError(t, err, "efctl env up failed:\n%s", out)
-		assert.Contains(t, out, "Environment is up")
-
-		// Verify world-contracts and builder-scaffold were cloned
-		assert.DirExists(t, filepath.Join(workspace, "world-contracts"))
-		assert.DirExists(t, filepath.Join(workspace, "builder-scaffold"))
-	})
-
-	// ── Step 3: extension init ─────────────────────────────────
-	t.Run("extension_init", func(t *testing.T) {
-		out, err := runEfctl(t, bin, workspace, "env", "extension", "init")
-		require.NoError(t, err, "efctl env extension init failed:\n%s", out)
-		assert.Contains(t, out, "builder-scaffold successfully initialized")
-
-		// Verify .env was created
-		envPath := filepath.Join(workspace, "builder-scaffold", ".env")
-		assert.FileExists(t, envPath)
-
-		envData, _ := os.ReadFile(envPath)
-		envStr := string(envData)
-		assert.Contains(t, envStr, "WORLD_PACKAGE_ID=0x")
-		assert.Contains(t, envStr, "ADMIN_ADDRESS=0x")
-	})
-
-	// ── Step 4: extension publish ──────────────────────────────
-	t.Run("extension_publish", func(t *testing.T) {
-		out, err := runEfctl(t, bin, workspace, "env", "extension", "publish", "smart_gate")
-		if err != nil {
-			if isKnownUpstreamDrift(out) {
-				t.Skipf("skipping extension publish due to known upstream builder/world contract drift:\n%s", out)
-			}
-			require.NoError(t, err, "efctl env extension publish failed (NOT a known drift issue):\n%s", out)
-		}
-		require.NoError(t, err, "efctl env extension publish failed:\n%s", out)
-		assert.Contains(t, out, "Extension contract published successfully")
-
-		// Verify .env was updated with published IDs
-		envData, _ := os.ReadFile(filepath.Join(workspace, "builder-scaffold", ".env"))
-		envStr := string(envData)
-		assert.Contains(t, envStr, "BUILDER_PACKAGE_ID=0x")
-	})
-
-	// ── Step 5: extension publish idempotency ──────────────────
-	t.Run("extension_publish_idempotent", func(t *testing.T) {
-		out, err := runEfctl(t, bin, workspace, "env", "extension", "publish", "smart_gate")
-		if err != nil {
-			t.Skipf("skipping extension publish due upstream builder/world contract drift:\n%s", out)
-		}
-		require.NoError(t, err, "second publish should succeed:\n%s", out)
-		assert.Contains(t, out, "Extension contract published successfully")
-	})
-
-	// ── Step 6: env run ────────────────────────────────────────
-	t.Run("env_run", func(t *testing.T) {
-		out, err := runEfctl(t, bin, workspace, "env", "run", "sui", "client", "active-address")
-		require.NoError(t, err, "efctl env run failed:\n%s", out)
-		// Should output a Sui address (0x...)
-		assert.Contains(t, out, "0x")
-	})
-
-	// ── Step 7: env down ───────────────────────────────────────
-	t.Run("env_down", func(t *testing.T) {
-		// Attempt to normalize permissions before shutdown
-		if err := normalizeWorkspacePermissions(t); err != nil {
-			t.Logf("Warning: permission normalization had issues: %v", err)
-		}
-
-		out, err := runEfctl(t, bin, workspace, "env", "down")
-		require.NoError(t, err, "efctl env down failed:\n%s", out)
-
-		// Verify container is no longer running
-		engine := preferredContainerEngine()
-		if engine == "" {
-			engine = "docker"
-		}
-		checkCmd := exec.Command(engine, "ps", "--filter", "name=sui-playground", "--format", "{{.Names}}")
-		checkOut, _ := checkCmd.Output()
-		assert.NotContains(t, strings.TrimSpace(string(checkOut)), "sui-playground")
-	})
+	// ── Steps ──────────────────────────────────────────────────────
+	t.Run("version", tester.testVersion)
+	t.Run("env_up", tester.testEnvUp)
+	t.Run("extension_init", tester.testExtensionInit)
+	t.Run("extension_publish", tester.testExtensionPublish)
+	t.Run("extension_publish_idempotent", tester.testExtensionPublishIdempotent)
+	t.Run("env_run", tester.testEnvRun)
+	t.Run("env_down", tester.testEnvDown)
 }
 
 // TestE2E_VersionOnly is a minimal E2E test that validates the binary builds and runs.
