@@ -67,12 +67,11 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 }
 
 func TestSuiDevConfig_PodmanUserns(t *testing.T) {
-	// The sui-dev container must NOT use keep-id because the Dockerfile
-	// installs everything under /root.  Podman rootless without keep-id
-	// maps container UID 0 → host UID, preserving /root access.
+	// The sui-dev container must use keep-id to avoid host permission
+	// issues with bind mounts in Podman rootless mode.
 	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db")
-	if cfg.UsernsMode != "" {
-		t.Errorf("Expected empty UsernsMode for Podman sui-dev, got %q", cfg.UsernsMode)
+	if cfg.UsernsMode != "keep-id" {
+		t.Errorf("Expected UsernsMode 'keep-id' for Podman sui-dev, got %q", cfg.UsernsMode)
 	}
 
 	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db")

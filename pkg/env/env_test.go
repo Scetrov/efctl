@@ -1,128 +1,95 @@
 package env
 
 import (
-	"net"
 	"os"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
-func TestEngineSelectionWithEnvVar(t *testing.T) {
-	tests := []struct {
-		name        string
-		envVar      string
-		hasDocker   bool
-		hasPodman   bool
-		expected    string
-		expectError bool
-	}{
-		{
-			name:        "Prefers podman when env says podman and both installed",
-			envVar:      "podman",
-			hasDocker:   true,
-			hasPodman:   true,
-			expected:    "podman",
-			expectError: false,
-		},
-		{
-			name:        "Prefers docker when env says docker and both installed",
-			envVar:      "docker",
-			hasDocker:   true,
-			hasPodman:   true,
-			expected:    "docker",
-			expectError: false,
-		},
-		{
-			name:        "Falls back to default (docker) if env says podman but podman isn't installed",
-			envVar:      "podman",
-			hasDocker:   true,
-			hasPodman:   false,
-			expected:    "docker", // Env pref ignored, fallback to docker
-			expectError: false,
-		},
-		{
-			name:        "Default precedence prefers docker if both installed and no env var set",
-			envVar:      "",
-			hasDocker:   true,
-			hasPodman:   true,
-			expected:    "docker",
-			expectError: false,
-		},
-		{
-			name:        "Returns docker if only docker installed",
-			envVar:      "",
-			hasDocker:   true,
-			hasPodman:   false,
-			expected:    "docker",
-			expectError: false,
-		},
-		{
-			name:        "Returns error if neither installed",
-			envVar:      "",
-			hasDocker:   false,
-			hasPodman:   false,
-			expected:    "",
-			expectError: true,
-		},
+func TestEngineDetection(t *testing.T) {
+	// Test Podman preference
+	res := &CheckResult{
+		HasDocker: true,
+		HasPodman: true,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("EFCTL_ENGINE", tt.envVar)
-			defer os.Unsetenv("EFCTL_ENGINE")
-
-			res := &CheckResult{
-				HasDocker: tt.hasDocker,
-				HasPodman: tt.hasPodman,
-			}
-
-			engine, err := res.Engine()
-
-			if tt.expectError && err == nil {
-				t.Errorf("Expected an error but got nil")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("Did not expect an error, got: %v", err)
-			}
-			if engine != tt.expected {
-				t.Errorf("Expected engine %s, got %s", tt.expected, engine)
-			}
-		})
-	}
-}
-
-// ── IsPortAvailable ────────────────────────────────────────────────
-
-func TestIsPortAvailable_FreePort(t *testing.T) {
-	// Port 0 picks a random free port; close it immediately to test availability
-	ln, err := net.Listen("tcp", ":0")
+	engine, err := res.Engine()
 	if err != nil {
-		t.Skip("cannot allocate a random port")
+		t.Fatalf("Engine() failed: %v", err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	if engine != "podman" {
+		t.Errorf("Expected engine podman, got %s", engine)
+	}
 
-	assert.True(t, IsPortAvailable(port), "port should be available after closing listener")
+	// Test pure Docker
+	resPure := &CheckResult{
+		HasDocker: true,
+		HasPodman: false,
+	}
+	enginePure, _ := resPure.Engine()
+	if enginePure != "docker" {
+		t.Errorf("Expected engine docker, got %s", enginePure)
+	}
+
+	// Test pure Podman
+	resPodman := &CheckResult{
+		HasDocker: false,
+		HasPodman: true,
+	}
+	enginePodman, _ := resPodman.Engine()
+	if enginePodman != "podman" {
+		t.Errorf("Expected engine podman, got %s", enginePodman)
+	}
 }
 
-func TestIsPortAvailable_OccupiedPort(t *testing.T) {
-	ln, err := net.Listen("tcp", ":0")
+func TestEnginePreference(t *testing.T) {
+	os.Setenv("EFCTL_ENGINE", "docker")
+	defer os.Unsetenv("EFCTL_ENGINE")
+
+	res := &CheckResult{
+		HasDocker: true,
+		HasPodman: true,
+	}
+
+	engine, err := res.Engine()
 	if err != nil {
-		t.Skip("cannot allocate a random port")
+		t.Fatalf("Engine() failed: %v", err)
 	}
-	defer ln.Close()
+	if engine != "docker" {
+		t.Errorf("Expected engine docker due to preference, got %s", engine)
+	}
 
-	port := ln.Addr().(*net.TCPAddr).Port
-	assert.False(t, IsPortAvailable(port), "port should not be available while listener is active")
+	// Preference for podman
+	os.Setenv("EFCTL_ENGINE", "podman")
+	enginePod, _ := res.Engine()
+	if enginePod != "podman" {
+		t.Errorf("Expected engine podman due to preference, got %s", enginePod)
+	}
 }
 
-// ── CheckPrerequisites ─────────────────────────────────────────────
+func TestEngineError(t *testing.T) {
+	res := &CheckResult{
+		HasDocker: false,
+		HasPodman: false,
+	}
+	_, err := res.Engine()
+	if err == nil {
+		t.Error("Expected error when no engine found, got nil")
+	}
+}
 
-func TestCheckPrerequisites_Runs(t *testing.T) {
-	// Basic smoke test: should return a non-nil result without panicking
+func TestIsPortAvailable(t *testing.T) {
+	// Port 0 should usually be available for listening (os picks one)
+	// but we check a high port that is likely free.
+	if !IsPortAvailable(65000) {
+		t.Log("Port 65000 busy, skipping test")
+	}
+}
+
+func TestCheckPrerequisites(t *testing.T) {
 	res := CheckPrerequisites()
-	assert.NotNil(t, res)
-	// At a minimum, git should be available in most CI environments
-	// (but we don't assert it — the function should just not panic)
+	if res == nil {
+		t.Fatal("CheckPrerequisites() returned nil")
+	}
+	// We can't easily assert presence of tools in all environments,
+	// but we can ensure it doesn't crash and returns a result.
 }

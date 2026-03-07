@@ -13,7 +13,7 @@ const (
 	ContainerFrontendOld2 = "docker_frontend_1"
 
 	// Image names / references.
-	ImageSuiDev   = "efctl-sui-dev"
+	ImageSuiDev   = "localhost/efctl-sui-dev"
 	ImagePostgres = "docker.io/library/postgres:16"
 	ImageNode     = "docker.io/library/node:24-slim"
 

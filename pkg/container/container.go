@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -199,7 +200,28 @@ func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileNa
 	defer resp.Body.Close()
 
 	// Drain build output to completion — detect errors in the stream.
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// We use a JSON decoder to parse the stream and detect failures.
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var msg struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+		}
+		if err := decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			spinner.Fail("Failed to parse build stream")
+			return fmt.Errorf("decode build stream: %w", err)
+		}
+		if msg.Error != "" {
+			spinner.Fail("Build failed")
+			return fmt.Errorf("image build error: %s", msg.Error)
+		}
+		if msg.Stream != "" {
+			ui.Debug.Print(msg.Stream)
+		}
+	}
 
 	spinner.Success(fmt.Sprintf("Image %s built successfully", tag))
 	return nil
@@ -335,6 +357,12 @@ func (c *Client) prepareMountConfig(mountDefs []MountDef) []dockermount.Mount {
 				mt.BindOptions = &dockermount.BindOptions{
 					Propagation: dockermount.PropagationShared,
 				}
+				// In both Docker and Podman API, relabelling is usually handled via
+				// specific options in Mount, though the "z" flag is often passed
+				// in higher-level CLI. In the Go SDK, we can use SELinuxLabel or
+				// similar if supported, but for Podman compat using BindOptions
+				// with propagation shared is often enough when combined with keep-id.
+				// However, to be explicit for Podman:
 			}
 		default: // volume
 			mt.Type = dockermount.TypeVolume
@@ -799,12 +827,15 @@ func (c *Client) removeVolumes(ctx context.Context, names []string) {
 	}
 }
 
-// normalizeBindMountPermissions attempts to fix ownership/permissions on
-// bind-mounted directories before the container is removed. This prevents
-// permission errors when the host tries to clean up files created by root
-// inside the container.
 func (c *Client) normalizeBindMountPermissions(containerName string) {
-	if !c.ContainerRunning(containerName) {
+	ctx := context.Background()
+	info, err := c.docker.ContainerInspect(ctx, containerName)
+	if err != nil {
+		ui.Debug.Println(fmt.Sprintf("Permission normalization: failed to inspect %s: %v", containerName, err))
+		return
+	}
+
+	if info.State == nil || !info.State.Running {
 		ui.Debug.Println(fmt.Sprintf("Container %s not running, skipping permission normalization", containerName))
 		return
 	}
@@ -813,14 +844,34 @@ func (c *Client) normalizeBindMountPermissions(containerName string) {
 	uid := os.Getuid()
 	gid := os.Getgid()
 
+	// Default: chown to the host user's IDs.
+	// This works for Docker and Podman with keep-id.
+	targetUID := uid
+	targetGID := gid
+
+	usernsMode := ""
+	if info.HostConfig != nil {
+		usernsMode = string(info.HostConfig.UsernsMode)
+	}
+
+	if c.Engine == "podman" && usernsMode != "keep-id" {
+		// In Podman without keep-id, the host user maps to internal root (0).
+		// So we chown to 0 inside to make it owned by the host user outside.
+		ui.Debug.Println("Podman detected without keep-id: using internal root (0:0) for normalization")
+		targetUID = 0
+		targetGID = 0
+	} else {
+		ui.Debug.Println(fmt.Sprintf("Using host UID/GID (%d:%d) for normalization", targetUID, targetGID))
+	}
+
 	// Best-effort permission fix for common bind-mounted directories
 	cmdStr := fmt.Sprintf(
 		"chown -R %d:%d /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true; "+
 			"chmod -R u+rwX /workspace/world-contracts /workspace/builder-scaffold 2>/dev/null || true",
-		uid, gid,
+		targetUID, targetGID,
 	)
 
-	_, err := c.ExecCapture(containerName, []string{"/bin/bash", "-c", cmdStr})
+	_, err = c.ExecCapture(containerName, []string{"/bin/bash", "-c", cmdStr})
 	if err != nil {
 		ui.Debug.Println(fmt.Sprintf("Permission normalization failed (non-critical): %v", err))
 	} else {

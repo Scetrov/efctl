@@ -39,6 +39,9 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	dockerDir := filepath.Join(workspace, "builder-scaffold", "docker")
 	ctx := context.Background()
 
+	// Patch package.json files to allow esbuild scripts.
+	patchPnpmDependencies(workspace)
+
 	// Patch Dockerfile and entrypoint.sh from the upstream clone.
 	if err := prepareDockerEnvironment(dockerDir, c.GetEngine(), withGraphql, withFrontend); err != nil {
 		return err
@@ -149,7 +152,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 	var output string
 	var err error
 	for i := 0; i < 15; i++ {
-		output, err = c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/root/.sui/.env.sui"})
+		output, err = c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/workspace/.sui/.env.sui"})
 		if err == nil && len(strings.TrimSpace(output)) > 0 {
 			break
 		}

@@ -79,6 +79,13 @@ type DebugPrinter struct {
 	SpacedPrinter
 }
 
+func (d DebugPrinter) Print(a ...any) {
+	if !DebugEnabled {
+		return
+	}
+	d.SpacedPrinter.Print(a...)
+}
+
 func (d DebugPrinter) Println(a ...any) {
 	if !DebugEnabled {
 		return
@@ -91,6 +98,13 @@ func (d DebugPrinter) Printf(format string, a ...any) {
 		return
 	}
 	d.SpacedPrinter.Printf(format, a...)
+}
+
+func (d DebugPrinter) Printfln(format string, a ...any) {
+	if !DebugEnabled {
+		return
+	}
+	d.SpacedPrinter.Printfln(format, a...)
 }
 
 func init() {

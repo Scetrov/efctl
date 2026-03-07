@@ -62,13 +62,16 @@ func patchDockerfile(dockerDir string) {
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
 	}
+	if strings.Contains(content, "ENV SUI_CONFIG_DIR=/root/.sui") {
+		content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
+	}
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
 	// at build time.  This uses a broad global replacement (not just the
 	// ENV_FILE assignment) so it survives even when podman-compose reuses a
 	// cached COPY layer that still contains the unpatched upstream file.
 	// The command is idempotent — a no-op when the path is already correct.
-	const sedSafetyNet = `RUN sed -i 's|/workspace/builder-scaffold/docker/\.env\.sui|/root/.sui/.env.sui|g' /workspace/scripts/entrypoint.sh`
+	const sedSafetyNet = `RUN sed -i 's|/workspace/builder-scaffold/docker/\.env\.sui|/workspace/.sui/.env.sui|g' /workspace/scripts/entrypoint.sh`
 
 	// Remove a narrower sed variant injected by earlier versions of efctl,
 	// so we don't accumulate duplicate (and less effective) RUN layers.
@@ -76,6 +79,20 @@ func patchDockerfile(dockerDir string) {
 	if strings.Contains(content, oldSed) {
 		content = strings.Replace(content, oldSed+"\n", "", 1)
 		content = strings.Replace(content, oldSed, "", 1)
+	}
+
+	// Move sui and suiup to /usr/local/bin so they are globally accessible
+	// for non-root users (critical for Podman keep-id).
+	const globalSui = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
+    mv "$SUI_PATH" /usr/local/bin/sui && \
+    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
+    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
+
+	if !strings.Contains(content, globalSui) {
+		content = strings.Replace(content,
+			`&& sui --version`,
+			`&& sui --version`+"\n"+globalSui,
+			1)
 	}
 
 	if !strings.Contains(content, sedSafetyNet) {
@@ -112,7 +129,7 @@ func patchEntrypoint(dockerDir string) {
 	const bindMountEnvPath = "/workspace/builder-scaffold/docker/.env.sui"
 	if strings.Contains(content, bindMountEnvPath) {
 		log.Printf("patch: entrypoint.sh still references bind-mount path for .env.sui — applying forced replacement")
-		content = strings.ReplaceAll(content, bindMountEnvPath, "/root/.sui/.env.sui")
+		content = strings.ReplaceAll(content, bindMountEnvPath, "/workspace/.sui/.env.sui")
 	}
 
 	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath

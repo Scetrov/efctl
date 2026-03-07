@@ -29,13 +29,13 @@ func (c *CheckResult) Engine() (string, error) {
 		}
 	}
 
-	// Default precedence: Docker, then Podman.
-	// This aligns with CI and common local setups where docker compose behavior is expected.
-	if c.HasDocker {
-		return "docker", nil
-	}
+	// Default precedence: Podman (if it's aliased as docker or native), then Docker.
+	// This ensures keep-id and other Podman-specific logic is applied when possible.
 	if c.HasPodman {
 		return "podman", nil
+	}
+	if c.HasDocker {
+		return "docker", nil
 	}
 	return "", fmt.Errorf("no container engine found")
 }
@@ -47,8 +47,11 @@ func CheckPrerequisites() *CheckResult {
 	if _, err := exec.LookPath("git"); err == nil {
 		res.HasGit = true
 	}
-	if _, err := exec.LookPath("docker"); err == nil {
+	if out, err := exec.Command("docker", "--version").Output(); err == nil {
 		res.HasDocker = true
+		if strings.Contains(strings.ToLower(string(out)), "podman") {
+			res.HasPodman = true
+		}
 	}
 	if _, err := exec.LookPath("podman"); err == nil {
 		res.HasPodman = true
