@@ -25,13 +25,13 @@ var (
 	GlobeEmoji   = "🌍"
 
 	// Printers
-	Info    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "  INF  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
-	Success = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
-	Warn    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
-	Error   = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Info    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "  INF  ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgCyan)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Success = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgGreen)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Warn    = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "WARNING", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgYellow)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
+	Error   = SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " ERROR ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgRed)}, MessageStyle: pterm.NewStyle(pterm.FgDefault)}}
 
 	// Debug uses a distinct prefix; output is suppressed unless DebugEnabled is set.
-	Debug = DebugPrinter{SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " DEBUG ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgMagenta, pterm.Bold)}, MessageStyle: pterm.NewStyle(pterm.FgGray)}}}
+	Debug = DebugPrinter{SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: " DEBUG ", Style: pterm.NewStyle(pterm.FgBlack, pterm.BgMagenta)}, MessageStyle: pterm.NewStyle(pterm.FgGray)}}}
 )
 
 type SpacedPrinter struct {
@@ -115,8 +115,49 @@ func init() {
 	pterm.EnableColor()
 }
 
-// Spin configures and returns a spinner
-func Spin(text string) (*pterm.SpinnerPrinter, error) {
+// Ensure our custom spacing applies to spinners manually without relying on pterm's implicit newlines.
+type SpacedSpinner struct {
+	*pterm.SpinnerPrinter
+}
+
+// Success displays the success printer with trailing newline spacing
+func (s SpacedSpinner) Success(message ...any) {
+	wasActive := s.IsActive && !pterm.RawOutput
+	s.SpinnerPrinter.Success(message...)
+	if !wasActive {
+		pterm.Println()
+	}
+}
+
+// Fail displays the fail printer with trailing newline spacing
+func (s SpacedSpinner) Fail(message ...any) {
+	wasActive := s.IsActive && !pterm.RawOutput
+	s.SpinnerPrinter.Fail(message...)
+	if !wasActive {
+		pterm.Println()
+	}
+}
+
+// Warning displays the warning printer with trailing newline spacing
+func (s SpacedSpinner) Warning(message ...any) {
+	wasActive := s.IsActive && !pterm.RawOutput
+	s.SpinnerPrinter.Warning(message...)
+	if !wasActive {
+		pterm.Println()
+	}
+}
+
+// Info displays the info printer with trailing newline spacing
+func (s SpacedSpinner) Info(message ...any) {
+	wasActive := s.IsActive && !pterm.RawOutput
+	s.SpinnerPrinter.Info(message...)
+	if !wasActive {
+		pterm.Println()
+	}
+}
+
+// Spin configures and returns a spaced spinner
+func Spin(text string) (*SpacedSpinner, error) {
 	chars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	seqLen := 40
 	var gradientSeq []string
@@ -144,9 +185,10 @@ func Spin(text string) (*pterm.SpinnerPrinter, error) {
 
 	s := pterm.DefaultSpinner.WithText(text)
 	if !ProgressEnabled {
-		return s, nil
+		return &SpacedSpinner{s}, nil
 	}
-	return s.Start()
+	s, err := s.Start()
+	return &SpacedSpinner{s}, err
 }
 
 // Confirm asks the user for permission
