@@ -124,17 +124,16 @@ func NewClient() (*Client, error) {
 		dockerclient.WithAPIVersionNegotiation(),
 	}
 
-	// For Podman on Linux, ensure DOCKER_HOST points at the Podman socket when it
-	// is not already set. On other platforms (e.g. Windows), allow the SDK to
-	// use its default connection logic (e.g. named pipes).
-	if engine == "podman" && os.Getenv("DOCKER_HOST") == "" && runtime.GOOS == "linux" {
+	// For Podman on Linux, ensure we use the Podman socket to be consistent
+	// with the Podman CLI, even if DOCKER_HOST is set to the Docker socket.
+	if engine == "podman" && runtime.GOOS == "linux" {
 		uid := os.Getuid()
 		sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
 		opts = append(opts, dockerclient.WithHost(sock))
-		ui.Warn.Println(fmt.Sprintf("NewClient: overriding podman host to %s", sock))
+		ui.Warn.Println(fmt.Sprintf("NewClient: explicitly using podman host %s", sock))
+	} else {
+		ui.Warn.Println(fmt.Sprintf("NewClient: engine=%s, DOCKER_HOST=%s", engine, os.Getenv("DOCKER_HOST")))
 	}
-
-	ui.Warn.Println(fmt.Sprintf("NewClient: engine=%s, DOCKER_HOST=%s", engine, os.Getenv("DOCKER_HOST")))
 
 	dc, err := dockerclient.NewClientWithOpts(opts...)
 	if err != nil {
