@@ -58,7 +58,9 @@ func projectRoot(t *testing.T) string {
 // Returns stdout+stderr combined, and any error.
 func runEfctl(t *testing.T, bin, workDir string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	// Always include --no-progress for cleaner test output
+	fullArgs := append([]string{"--no-progress"}, args...)
+	cmd := exec.Command(bin, fullArgs...)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	out, err := cmd.CombinedOutput()

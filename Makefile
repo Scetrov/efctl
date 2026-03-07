@@ -68,7 +68,7 @@ pre-commit: fmt vet build test gosec govulncheck
 	@echo "✅ All pre-commit checks passed."
 
 clean:
-	output/efctl env down
+	output/efctl --no-progress env down
 	rm -f output/efctl output/efctl-*
 	rm -f gosec-results.json gosec-ci-results.json
 	rm -rf builder-scaffold

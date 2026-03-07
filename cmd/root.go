@@ -13,6 +13,7 @@ import (
 var (
 	configFile string
 	debugMode  bool
+	noProgress bool
 )
 
 var rootCmd = &cobra.Command{
@@ -23,6 +24,11 @@ var rootCmd = &cobra.Command{
 		// Enable debug output before any other work so early messages are visible.
 		if debugMode {
 			ui.DebugEnabled = true
+		}
+
+		// Disable progress spinner if explicitly requested or running in CI.
+		if noProgress || os.Getenv("CI") == "true" {
+			ui.ProgressEnabled = false
 		}
 
 		resolvedConfigPath := configFile
@@ -72,6 +78,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml or efctl.yml configuration file")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable verbose debug logging")
+	rootCmd.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "Disable the progress spinner for cleaner CI output")
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -101,6 +108,7 @@ func GetNewRootCmd() *cobra.Command {
 	}
 	newRoot.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml or efctl.yml configuration file")
 	newRoot.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable verbose debug logging")
+	newRoot.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "Disable the progress spinner for cleaner CI output")
 
 	// Re-add subcommands... This is getting complex because they are added in init()
 	// Let's try a different approach: manually reset the Changed property of flags.

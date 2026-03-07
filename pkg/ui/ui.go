@@ -8,6 +8,10 @@ import (
 // Set to true via the global --debug flag.
 var DebugEnabled bool
 
+// ProgressEnabled controls whether spinners are displayed.
+// Set to false via the global --no-progress flag or CI env var.
+var ProgressEnabled = true
+
 var (
 	// Emojis
 	SuccessEmoji = "✅"
@@ -137,7 +141,12 @@ func Spin(text string) (*pterm.SpinnerPrinter, error) {
 	pterm.DefaultSpinner.FailPrinter = &Error
 	pterm.DefaultSpinner.WarningPrinter = &Warn
 	pterm.DefaultSpinner.InfoPrinter = &Info
-	return pterm.DefaultSpinner.WithText(text).Start()
+
+	s := pterm.DefaultSpinner.WithText(text)
+	if !ProgressEnabled {
+		return s, nil
+	}
+	return s.Start()
 }
 
 // Confirm asks the user for permission
