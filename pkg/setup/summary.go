@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"efctl/pkg/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/pterm/pterm"
 )
 
 // ExtractedObjectIds represents the JSON structure from world-object-ids.json
@@ -34,12 +36,12 @@ var nwnRegex = regexp.MustCompile(`NWN Object Id:\s*(0x[a-fA-F0-9]+)`)
 var ssuRegex = regexp.MustCompile(`Storage Unit Object Id:\s*(0x[a-fA-F0-9]+)`)
 var gateRegex = regexp.MustCompile(`Gate Object Id:\s*(0x[a-fA-F0-9]+)`)
 
-var adminAddressRegex = regexp.MustCompile(`^ADMIN_ADDRESS=(0x[a-fA-F0-9]+)`)
-var adminKeyRegex = regexp.MustCompile(`^ADMIN_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
-var playerAAddressRegex = regexp.MustCompile(`^PLAYER_A_ADDRESS=(0x[a-fA-F0-9]+)`)
-var playerAKeyRegex = regexp.MustCompile(`^PLAYER_A_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
-var playerBAddressRegex = regexp.MustCompile(`^PLAYER_B_ADDRESS=(0x[a-fA-F0-9]+)`)
-var playerBKeyRegex = regexp.MustCompile(`^PLAYER_B_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
+var adminAddressRegex = regexp.MustCompile(`ADMIN_ADDRESS\s*=\s*["']?(0x[a-fA-F0-9]+)["']?`)
+var adminKeyRegex = regexp.MustCompile(`ADMIN_PRIVATE_KEY\s*=\s*["']?(suiprivkey[a-zA-Z0-9]+)["']?`)
+var playerAAddressRegex = regexp.MustCompile(`PLAYER_A_ADDRESS\s*=\s*["']?(0x[a-fA-F0-9]+)["']?`)
+var playerAKeyRegex = regexp.MustCompile(`PLAYER_A_PRIVATE_KEY\s*=\s*["']?(suiprivkey[a-zA-Z0-9]+)["']?`)
+var playerBAddressRegex = regexp.MustCompile(`PLAYER_B_ADDRESS\s*=\s*["']?(0x[a-fA-F0-9]+)["']?`)
+var playerBKeyRegex = regexp.MustCompile(`PLAYER_B_PRIVATE_KEY\s*=\s*["']?(suiprivkey[a-zA-Z0-9]+)["']?`)
 
 func PrintDeploymentSummary(workspace string) {
 	fmt.Println()
@@ -55,13 +57,8 @@ func PrintDeploymentSummary(workspace string) {
 	tObjects.AppendHeader(table.Row{"Component Type", "Object ID"})
 	tObjects.SetStyle(table.StyleRounded)
 
-	tAddresses := table.NewWriter()
-	tAddresses.SetOutputMirror(os.Stdout)
-	tAddresses.AppendHeader(table.Row{"Role", "Address"})
-	tAddresses.SetStyle(table.StyleRounded)
-
 	extractWorldIds(workspace, tPackages, tObjects)
-	extractDynamicIds(workspace, tObjects, tAddresses)
+	addresses := extractDynamicIds(workspace, tObjects)
 
 	ui.Info.Println("Packages")
 	tPackages.Render()
@@ -70,8 +67,25 @@ func PrintDeploymentSummary(workspace string) {
 	tObjects.Render()
 
 	ui.Info.Println("Addresses")
-	if tAddresses.Length() > 0 {
-		tAddresses.Render()
+	if len(addresses) > 0 {
+		width := pterm.GetTerminalWidth()
+		if width < 150 {
+			for _, addr := range addresses {
+				fmt.Printf("Role:        %s\n", addr.Role)
+				fmt.Printf("Address:     %s\n", addr.Address)
+				fmt.Printf("Private Key: %s\n", addr.Key)
+				fmt.Println("---")
+			}
+		} else {
+			tAddresses := table.NewWriter()
+			tAddresses.SetOutputMirror(os.Stdout)
+			tAddresses.AppendHeader(table.Row{"Role", "Address", "Private Key"})
+			tAddresses.SetStyle(table.StyleRounded)
+			for _, addr := range addresses {
+				tAddresses.AppendRow(table.Row{addr.Role, addr.Address, addr.Key})
+			}
+			tAddresses.Render()
+		}
 	} else {
 		fmt.Println("No addresses extracted (ensure log parsing is configured)")
 	}
@@ -167,9 +181,9 @@ func parseEnvLog(scanner *bufio.Scanner) ParsedEnv {
 	return env
 }
 
-func extractDynamicIds(workspace string, tObjects, tAddresses table.Writer) {
+func extractDynamicIds(workspace string, tObjects table.Writer) []AddressInfo {
 	extractDeployLogIds(workspace, tObjects)
-	extractEnvAddresses(workspace, tAddresses)
+	return extractEnvAddresses(workspace)
 }
 
 func extractDeployLogIds(workspace string, tObjects table.Writer) {
@@ -196,32 +210,41 @@ func extractDeployLogIds(workspace string, tObjects table.Writer) {
 	}
 }
 
-func extractEnvAddresses(workspace string, tAddresses table.Writer) {
+type AddressInfo struct {
+	Role    string
+	Address string
+	Key     string
+}
+
+func extractEnvAddresses(workspace string) []AddressInfo {
+	var addresses []AddressInfo
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
 	envFile, err := os.Open(envPath) // #nosec G304
 	if err == nil {
 		defer envFile.Close()
 		env := parseEnvLog(bufio.NewScanner(envFile))
 
-		appendRoleAddress(tAddresses, "Admin", "ef-admin", env.adminAddress, env.adminKey)
-		appendRoleAddress(tAddresses, "Player A", "ef-player-a", env.playerAAddress, env.playerAKey)
-		appendRoleAddress(tAddresses, "Player B", "ef-player-b", env.playerBAddress, env.playerBKey)
+		addresses = append(addresses, deriveRoleAddress("Admin", "ef-admin", env.adminAddress, env.adminKey))
+		addresses = append(addresses, deriveRoleAddress("Player A", "ef-player-a", env.playerAAddress, env.playerAKey))
+		addresses = append(addresses, deriveRoleAddress("Player B", "ef-player-b", env.playerBAddress, env.playerBKey))
 	} else {
 		ui.Warn.Println("Could not read .env, skipping addresses...")
 	}
+	return addresses
 }
 
-func appendRoleAddress(t table.Writer, role, alias, address, key string) {
-	if address != "" {
-		t.AppendRow(table.Row{role, address})
-		return
+func deriveRoleAddress(role, alias, address, key string) AddressInfo {
+	addr := address
+	if addr == "" {
+		addr = resolveAddress(alias)
 	}
-	addr := resolveAddress(alias)
-	if addr != "" {
-		t.AppendRow(table.Row{role, addr})
-	} else if key != "" {
-		t.AppendRow(table.Row{role, "(Derived via Key: " + key[:16] + "...)"})
+	if addr == "" && key != "" {
+		addr = deriveAddress(key)
 	}
+	if addr == "" {
+		addr = "N/A"
+	}
+	return AddressInfo{Role: role, Address: addr, Key: key}
 }
 
 func resolveAddress(alias string) string {
@@ -256,5 +279,29 @@ func resolveAddress(alias string) string {
 		}
 	}
 
+	return ""
+}
+
+func deriveAddress(key string) string {
+	// sui keytool decode does not work for suiprivkey.
+	// We import the key to a temporary alias, capture the JSON output to get the address,
+	// and then immediately remove the alias to keep the keystore clean.
+	tmpAlias := fmt.Sprintf("ef-temp-%d", time.Now().UnixNano())
+	out, _ := exec.Command("sui", "keytool", "import", key, "ed25519", "--alias", tmpAlias, "--json").Output() // #nosec G204
+
+	// Clean up the temporary alias
+	_ = exec.Command("sui", "client", "remove-address", tmpAlias).Run() // #nosec G204
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(out, &data); err != nil {
+		// If JSON parsing fails, try an alternate command format just in case
+		return ""
+	}
+	if addr, ok := data["suiAddress"].(string); ok {
+		return addr
+	}
+	if addr, ok := data["address"].(string); ok {
+		return addr
+	}
 	return ""
 }

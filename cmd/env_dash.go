@@ -1265,17 +1265,55 @@ func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 	if v, ok := m.envVars["SUI_NETWORK"]; ok {
 		network = v
 	}
-	b.WriteString(labelStyle.Render(" Network:") + " " + valueStyle.Render(network))
-	b.WriteString("   " + labelStyle.Render("RPC:") + " " + valueStyle.Render("http://localhost:9000"))
+
+	leftInner, _, _ := m.panelWidths()
+
+	type item struct {
+		label string
+		value string
+	}
+	items := []item{
+		{label: " Network:", value: network},
+		{label: "RPC:", value: "http://localhost:9000"},
+	}
 	if v, ok := m.envVars["TENANT"]; ok {
-		b.WriteString("   " + labelStyle.Render("Tenant:") + " " + valueStyle.Render(v))
+		items = append(items, item{label: "Tenant:", value: v})
 	}
-	b.WriteString("\n")
 	if m.worldPkgID != "" {
-		b.WriteString(labelStyle.Render(" World Pkg:") + " " + valueStyle.Render(shorten(m.worldPkgID)) + "\n")
+		items = append(items, item{label: "World Pkg:", value: shorten(m.worldPkgID)})
 	}
-	if m.frontendOn {
-		b.WriteString(labelStyle.Render(" Frontend:") + " " + valueStyle.Render("http://localhost:5173") + "\n")
+	if m.feStat.Status == "Running" {
+		items = append(items, item{label: "Frontend:", value: "http://localhost:5173"})
+	}
+
+	var currentLine strings.Builder
+	currentWidth := 0
+	for i, it := range items {
+		rendered := labelStyle.Render(it.label) + " " + valueStyle.Render(it.value)
+		renderedWidth := lipgloss.Width(rendered)
+
+		if currentWidth == 0 {
+			currentLine.WriteString(rendered)
+			currentWidth = renderedWidth
+		} else {
+			if currentWidth+3+renderedWidth <= leftInner {
+				currentLine.WriteString("   ")
+				currentLine.WriteString(rendered)
+				currentWidth += 3 + renderedWidth
+			} else {
+				b.WriteString(currentLine.String() + "\n")
+				currentLine.Reset()
+				// Trim leading space if we wrap
+				trimmedLabel := strings.TrimSpace(it.label)
+				rendered = labelStyle.Render(" "+trimmedLabel) + " " + valueStyle.Render(it.value)
+				currentLine.WriteString(rendered)
+				currentWidth = lipgloss.Width(rendered)
+			}
+		}
+
+		if i == len(items)-1 {
+			b.WriteString(currentLine.String() + "\n")
+		}
 	}
 }
 
