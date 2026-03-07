@@ -128,9 +128,31 @@ func NewClient() (*Client, error) {
 	// with the Podman CLI, even if DOCKER_HOST is set to the Docker socket.
 	if engine == "podman" && runtime.GOOS == "linux" {
 		uid := os.Getuid()
-		sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
-		opts = append(opts, dockerclient.WithHost(sock))
-		ui.Warn.Println(fmt.Sprintf("NewClient: explicitly using podman host %s", sock))
+		// Try multiple common podman socket locations
+		sockets := []string{
+			fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid),
+			"unix:///run/podman/podman.sock",
+			"unix:///var/run/podman/podman.sock",
+		}
+
+		found := false
+		for _, s := range sockets {
+			path := strings.TrimPrefix(s, "unix://")
+			if _, err := os.Stat(path); err == nil {
+				opts = append(opts, dockerclient.WithHost(s))
+				ui.Warn.Println(fmt.Sprintf("NewClient: explicitly using podman host %s", s))
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// Fallback to the first one even if not found, to preserve previous behavior
+			// but log the failure to find any.
+			sock := sockets[0]
+			opts = append(opts, dockerclient.WithHost(sock))
+			ui.Warn.Println(fmt.Sprintf("NewClient: no podman socket found, defaulting to %s", sock))
+		}
 	} else {
 		ui.Warn.Println(fmt.Sprintf("NewClient: engine=%s, DOCKER_HOST=%s", engine, os.Getenv("DOCKER_HOST")))
 	}
