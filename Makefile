@@ -64,12 +64,12 @@ install-sec-tools:
 
 # Full pre-commit equivalent (without needing pre-commit framework)
 pre-commit: fmt vet build test docs gosec govulncheck
+	@echo ""
+	@echo "✅ All pre-commit checks passed."
 
 docs:
 	@echo "▶ Generating docs..."
 	go run tools/gen-docs/main.go
-	@echo ""
-	@echo "✅ All pre-commit checks passed."
 
 clean:
 	output/efctl --no-progress env down

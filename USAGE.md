@@ -4,7 +4,7 @@
 
 ## Global Options
 
-- `--config-file string`: Path to the `efctl.yaml` configuration file. (default: `efctl.yaml`)
+- `--config-file string`: Path to the `efctl.yaml` or `efctl.yml` configuration file. (default: `efctl.yaml`)
 - `--debug`: Enable verbose debug logging.
 - `--no-progress`: Disable the progress spinner for cleaner CI output.
 - `--help`: Use the `--help` flag with any command to see the available options and subcommands.
@@ -88,11 +88,10 @@ Drops you into an interactive `/bin/bash` shell inside the `builder-scaffold` co
 
 ### `efctl env dash`
 
-Automatically logs into the Eve Frontier Local Services dashboard using a generated session token. Requires `xdg-open` on Linux, `open` on macOS, or `rundll32` on Windows.
+Opens an interactive terminal dashboard for inspecting and managing the local environment.
 
 **Options:**
 
-- `-p, --port int`: Port the frontend is running on (default: `5173`)
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
 ---

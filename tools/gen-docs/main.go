@@ -11,7 +11,10 @@ import (
 )
 
 func main() {
-	_, b, _, _ := runtime.Caller(0)
+	_, b, _, ok := runtime.Caller(0)
+	if !ok {
+		log.Fatalf("Failed to get runtime caller information")
+	}
 	basepath := filepath.Dir(b)
 	docsPath := filepath.Join(basepath, "..", "..", "docs")
 

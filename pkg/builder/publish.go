@@ -40,13 +40,21 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 	worldContractsPath := filepath.Join(workspace, "world-contracts", "contracts", filepath.FromSlash(slashContractPath))
 
 	builderExists := true
-	if _, err := os.Stat(builderScaffoldPath); os.IsNotExist(err) {
-		builderExists = false
+	if _, err := os.Stat(builderScaffoldPath); err != nil {
+		if os.IsNotExist(err) {
+			builderExists = false
+		} else {
+			return fmt.Errorf("failed to stat %s: %w", builderScaffoldPath, err)
+		}
 	}
 
 	worldExists := true
-	if _, err := os.Stat(worldContractsPath); os.IsNotExist(err) {
-		worldExists = false
+	if _, err := os.Stat(worldContractsPath); err != nil {
+		if os.IsNotExist(err) {
+			worldExists = false
+		} else {
+			return fmt.Errorf("failed to stat %s: %w", worldContractsPath, err)
+		}
 	}
 
 	if builderExists && worldExists {
@@ -95,7 +103,7 @@ func buildPublishCmd(workspace, network, containerContractDir string) (string, e
 			return "", fmt.Errorf("failed to remove previous publish file: %w", err)
 		}
 		return fmt.Sprintf(
-			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path ../../deployments/localnet/Pub.extension.toml --json",
+			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
 			containerContractDir,
 		), nil
 
