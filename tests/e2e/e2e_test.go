@@ -19,6 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type containerRuntime struct {
+	engine string
+	env    []string
+}
+
 // efctlBin returns the absolute path to the compiled efctl binary.
 // Set EFCTL_BINARY env var to override. Otherwise it builds from source.
 func efctlBin(t *testing.T) string {
@@ -63,32 +68,86 @@ func runEfctl(t *testing.T, bin, workDir string, args ...string) (string, error)
 	cmd := exec.Command(bin, fullArgs...)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	if runtime, ok := reachableContainerRuntime(); ok {
+		cmd.Env = append(cmd.Env, runtime.env...)
+		cmd.Env = append(cmd.Env, "EFCTL_ENGINE="+runtime.engine)
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// preferredContainerEngine returns the name of the first available container
-// engine binary ("docker" or "podman"), or "" if neither is found.
-func preferredContainerEngine() string {
-	if _, err := exec.LookPath("docker"); err == nil {
-		return "docker"
+func runtimePreferenceOrder() []string {
+	switch os.Getenv("EFCTL_ENGINE") {
+	case "docker":
+		return []string{"docker", "podman"}
+	case "podman":
+		return []string{"podman", "docker"}
+	default:
+		return []string{"podman", "docker"}
 	}
-	if _, err := exec.LookPath("podman"); err == nil {
-		return "podman"
-	}
-	return ""
 }
 
-// dockerDaemonAvailable returns true if a container engine daemon is reachable.
-// This goes beyond checking for the binary — it actually pings the daemon.
-func dockerDaemonAvailable() bool {
-	engine := preferredContainerEngine()
-	if engine == "" {
-		return false
+func podmanSocketEnv() [][]string {
+	uid := strconv.Itoa(os.Getuid())
+	return [][]string{
+		{"DOCKER_HOST=unix:///run/user/" + uid + "/podman/podman.sock"},
+		{"DOCKER_HOST=unix:///run/podman/podman.sock"},
+		{"DOCKER_HOST=unix:///var/run/podman/podman.sock"},
 	}
-	cmd := exec.Command(engine, "info")
-	cmd.Env = os.Environ()
+}
+
+func runtimeCandidates() []containerRuntime {
+	seen := make(map[string]struct{})
+	var candidates []containerRuntime
+	add := func(candidate containerRuntime) {
+		key := candidate.engine + "|" + strings.Join(candidate.env, "|")
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+
+	for _, engine := range runtimePreferenceOrder() {
+		switch engine {
+		case "podman":
+			if _, err := exec.LookPath("podman"); err != nil {
+				continue
+			}
+			if host := os.Getenv("DOCKER_HOST"); strings.Contains(host, "podman.sock") {
+				add(containerRuntime{engine: "podman", env: []string{"DOCKER_HOST=" + host}})
+			}
+			for _, envVars := range podmanSocketEnv() {
+				add(containerRuntime{engine: "podman", env: envVars})
+			}
+			add(containerRuntime{engine: "podman"})
+		case "docker":
+			if _, err := exec.LookPath("docker"); err != nil {
+				continue
+			}
+			if host := os.Getenv("DOCKER_HOST"); host != "" {
+				add(containerRuntime{engine: "docker", env: []string{"DOCKER_HOST=" + host}})
+			}
+			add(containerRuntime{engine: "docker"})
+		}
+	}
+
+	return candidates
+}
+
+func runtimeAvailable(candidate containerRuntime) bool {
+	cmd := exec.Command(candidate.engine, "info")
+	cmd.Env = append(os.Environ(), candidate.env...)
 	return cmd.Run() == nil
+}
+
+func reachableContainerRuntime() (containerRuntime, bool) {
+	for _, candidate := range runtimeCandidates() {
+		if runtimeAvailable(candidate) {
+			return candidate, true
+		}
+	}
+	return containerRuntime{}, false
 }
 
 // normalizeWorkspacePermissions fixes ownership/permissions on
@@ -97,13 +156,14 @@ func dockerDaemonAvailable() bool {
 func normalizeWorkspacePermissions(t *testing.T) error {
 	t.Helper()
 
-	engine := preferredContainerEngine()
-	if engine == "" {
+	runtime, ok := reachableContainerRuntime()
+	if !ok {
 		return nil // No container engine available
 	}
 
 	// Check if container is running before attempting exec
-	checkCmd := exec.Command(engine, "inspect", "--format", "{{.State.Running}}", "sui-playground")
+	checkCmd := exec.Command(runtime.engine, "inspect", "--format", "{{.State.Running}}", "sui-playground")
+	checkCmd.Env = append(os.Environ(), runtime.env...)
 	checkOut, checkErr := checkCmd.CombinedOutput()
 	isRunning := checkErr == nil && strings.TrimSpace(string(checkOut)) == "true"
 
@@ -123,7 +183,8 @@ func normalizeWorkspacePermissions(t *testing.T) error {
 		gid,
 	)
 
-	cmd := exec.Command(engine, "exec", "sui-playground", "/bin/bash", "-lc", cmdStr)
+	cmd := exec.Command(runtime.engine, "exec", "sui-playground", "/bin/bash", "-lc", cmdStr)
+	cmd.Env = append(os.Environ(), runtime.env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("permission normalization via container failed: %v\n%s", err, string(out))
@@ -141,8 +202,8 @@ func tryHostSidePermissionFix(t *testing.T) error {
 	t.Helper()
 
 	// For rootless Podman, we might need podman unshare
-	engine := preferredContainerEngine()
-	if engine == "podman" {
+	runtime, ok := reachableContainerRuntime()
+	if ok && runtime.engine == "podman" {
 		// Try podman unshare as a fallback
 		cmd := exec.Command("podman", "unshare", "chown", "-R",
 			fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
@@ -327,11 +388,15 @@ func (tester *e2eLifecycleTester) testEnvDown(t *testing.T) {
 	require.NoError(t, err, "efctl env down failed:\n%s", out)
 
 	// Verify container is no longer running
-	engine := preferredContainerEngine()
-	if engine == "" {
-		engine = "docker"
+	runtime, ok := reachableContainerRuntime()
+	engine := "docker"
+	if ok {
+		engine = runtime.engine
 	}
 	checkCmd := exec.Command(engine, "ps", "--filter", "name=sui-playground", "--format", "{{.Names}}")
+	if ok {
+		checkCmd.Env = append(os.Environ(), runtime.env...)
+	}
 	checkOut, _ := checkCmd.Output()
 	assert.NotContains(t, strings.TrimSpace(string(checkOut)), "sui-playground")
 }
@@ -355,7 +420,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	// Gate: verify the container daemon is actually reachable, not just
 	// that the binary exists. In CI the binary may be present but the
 	// socket may not be configured or the service may not be running.
-	if !dockerDaemonAvailable() {
+	if _, ok := reachableContainerRuntime(); !ok {
 		t.Skip("skipping: container daemon (Docker/Podman) is not reachable — run `docker info` to debug")
 	}
 

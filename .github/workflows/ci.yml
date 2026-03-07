@@ -71,6 +71,7 @@ jobs:
         env:
           CI: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
+          EFCTL_ENGINE: docker
 
   security:
     runs-on: ubuntu-latest

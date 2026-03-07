@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
+
+	"efctl/pkg/env"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
@@ -100,6 +103,62 @@ func TestFrontendConfig_WorkingDir(t *testing.T) {
 	}
 	if cfg.Name != ContainerFrontend {
 		t.Errorf("Expected container name %q, got %q", ContainerFrontend, cfg.Name)
+	}
+}
+
+func TestPreferredEngineOrder(t *testing.T) {
+	res := &env.CheckResult{HasDocker: true, HasPodman: true}
+
+	t.Setenv("EFCTL_ENGINE", "docker")
+	if got := preferredEngineOrder(res); !reflect.DeepEqual(got, []string{"docker", "podman"}) {
+		t.Fatalf("expected docker preference order, got %v", got)
+	}
+
+	t.Setenv("EFCTL_ENGINE", "podman")
+	if got := preferredEngineOrder(res); !reflect.DeepEqual(got, []string{"podman", "docker"}) {
+		t.Fatalf("expected podman preference order, got %v", got)
+	}
+
+	t.Setenv("EFCTL_ENGINE", "")
+	if got := preferredEngineOrder(res); !reflect.DeepEqual(got, []string{"podman", "docker"}) {
+		t.Fatalf("expected default podman-first order, got %v", got)
+	}
+}
+
+func TestConnectionCandidates_FallbackToDockerWhenPodmanSocketMissing(t *testing.T) {
+	t.Setenv("EFCTL_ENGINE", "")
+	res := &env.CheckResult{HasDocker: true, HasPodman: true}
+	candidates := connectionCandidates(res, "linux", 1001, "unix:///var/run/docker.sock", func(host string) bool {
+		return false
+	})
+
+	if len(candidates) != 1 {
+		t.Fatalf("expected only docker candidate, got %d (%+v)", len(candidates), candidates)
+	}
+	if candidates[0].engine != "docker" {
+		t.Fatalf("expected docker fallback, got %+v", candidates[0])
+	}
+	if !candidates[0].useFromEnv {
+		t.Fatalf("expected docker candidate to use environment host, got %+v", candidates[0])
+	}
+}
+
+func TestConnectionCandidates_UsePodmanSocketWhenAvailable(t *testing.T) {
+	t.Setenv("EFCTL_ENGINE", "")
+	res := &env.CheckResult{HasDocker: true, HasPodman: true}
+	podmanHost := "unix:///run/user/1001/podman/podman.sock"
+	candidates := connectionCandidates(res, "linux", 1001, "unix:///var/run/docker.sock", func(host string) bool {
+		return host == podmanHost
+	})
+
+	if len(candidates) < 2 {
+		t.Fatalf("expected podman and docker candidates, got %+v", candidates)
+	}
+	if candidates[0].engine != "podman" || candidates[0].host != podmanHost {
+		t.Fatalf("expected first candidate to use podman socket, got %+v", candidates[0])
+	}
+	if candidates[1].engine != "docker" {
+		t.Fatalf("expected docker fallback candidate second, got %+v", candidates[1])
 	}
 }
 

@@ -106,6 +106,12 @@ type Client struct {
 	healthTests map[string][]string // container name → healthcheck Test (for exec fallback)
 }
 
+type clientConnectionCandidate struct {
+	engine     string
+	host       string
+	useFromEnv bool
+}
+
 // Compile-time check that Client implements ContainerClient.
 var _ ContainerClient = (*Client)(nil)
 
@@ -114,55 +120,166 @@ var _ ContainerClient = (*Client)(nil)
 // appropriate socket.
 func NewClient() (*Client, error) {
 	res := env.CheckPrerequisites()
-	engine, err := res.Engine()
-	if err != nil {
-		return nil, err
+	if !res.HasDocker && !res.HasPodman {
+		return nil, fmt.Errorf("no container engine found")
 	}
 
-	opts := []dockerclient.Opt{
-		dockerclient.FromEnv,
-		dockerclient.WithAPIVersionNegotiation(),
+	candidates := connectionCandidates(res, runtime.GOOS, os.Getuid(), os.Getenv("DOCKER_HOST"), socketHostExists)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no reachable container daemon found: podman socket not found and docker host unavailable")
 	}
 
-	// For Podman on Linux, ensure we use the Podman socket to be consistent
-	// with the Podman CLI, even if DOCKER_HOST is set to the Docker socket.
-	if engine == "podman" && runtime.GOOS == "linux" {
-		uid := os.Getuid()
-		// Try multiple common podman socket locations
-		sockets := []string{
-			fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid),
-			"unix:///run/podman/podman.sock",
-			"unix:///var/run/podman/podman.sock",
+	var errs []string
+	for _, candidate := range candidates {
+		dc, err := dockerclient.NewClientWithOpts(dockerClientOpts(candidate)...)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s client init failed: %v", describeCandidate(candidate), err))
+			continue
 		}
 
-		found := false
-		for _, s := range sockets {
-			path := strings.TrimPrefix(s, "unix://")
-			if _, err := os.Stat(path); err == nil {
-				opts = append(opts, dockerclient.WithHost(s))
-				ui.Warn.Println(fmt.Sprintf("NewClient: explicitly using podman host %s", s))
-				found = true
-				break
+		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, err = dc.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s ping failed: %v", describeCandidate(candidate), err))
+			_ = dc.Close()
+			continue
+		}
+
+		ui.Debug.Println(fmt.Sprintf("NewClient: using engine=%s host=%s", candidate.engine, candidateDisplayHost(candidate)))
+		return &Client{Engine: candidate.engine, docker: dc}, nil
+	}
+
+	return nil, fmt.Errorf("failed to connect to a reachable container daemon: %s", strings.Join(errs, "; "))
+}
+
+func preferredEngineOrder(res *env.CheckResult) []string {
+	order := make([]string, 0, 2)
+	add := func(engine string, available bool) {
+		if !available {
+			return
+		}
+		for _, existing := range order {
+			if existing == engine {
+				return
 			}
 		}
+		order = append(order, engine)
+	}
 
-		if !found {
-			// Fallback to the first one even if not found, to preserve previous behavior
-			// but log the failure to find any.
-			sock := sockets[0]
-			opts = append(opts, dockerclient.WithHost(sock))
-			ui.Warn.Println(fmt.Sprintf("NewClient: no podman socket found, defaulting to %s", sock))
+	switch os.Getenv("EFCTL_ENGINE") {
+	case "docker":
+		add("docker", res.HasDocker)
+		add("podman", res.HasPodman)
+	case "podman":
+		add("podman", res.HasPodman)
+		add("docker", res.HasDocker)
+	default:
+		add("podman", res.HasPodman)
+		add("docker", res.HasDocker)
+	}
+
+	return order
+}
+
+func connectionCandidates(res *env.CheckResult, goos string, uid int, dockerHost string, hostExists func(string) bool) []clientConnectionCandidate {
+	order := preferredEngineOrder(res)
+	seen := make(map[string]struct{})
+	candidates := make([]clientConnectionCandidate, 0, len(order))
+	add := func(candidate clientConnectionCandidate) {
+		key := fmt.Sprintf("%s|%t|%s", candidate.engine, candidate.useFromEnv, candidate.host)
+		if _, ok := seen[key]; ok {
+			return
 		}
-	} else {
-		ui.Warn.Println(fmt.Sprintf("NewClient: engine=%s, DOCKER_HOST=%s", engine, os.Getenv("DOCKER_HOST")))
+		seen[key] = struct{}{}
+		candidates = append(candidates, candidate)
 	}
 
-	dc, err := dockerclient.NewClientWithOpts(opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Docker SDK client: %w", err)
+	for _, engine := range order {
+		switch engine {
+		case "podman":
+			if goos != "linux" {
+				add(clientConnectionCandidate{engine: "podman", useFromEnv: true, host: dockerHost})
+				continue
+			}
+
+			if looksLikePodmanHost(dockerHost) && hostExists(dockerHost) {
+				add(clientConnectionCandidate{engine: "podman", host: dockerHost})
+			}
+			for _, host := range podmanSocketHosts(uid) {
+				if hostExists(host) {
+					add(clientConnectionCandidate{engine: "podman", host: host})
+				}
+			}
+		case "docker":
+			add(clientConnectionCandidate{engine: "docker", useFromEnv: true, host: dockerHost})
+		}
 	}
 
-	return &Client{Engine: engine, docker: dc}, nil
+	return candidates
+}
+
+func dockerClientOpts(candidate clientConnectionCandidate) []dockerclient.Opt {
+	opts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
+	if candidate.useFromEnv {
+		opts = append(opts, dockerclient.FromEnv)
+	}
+	if candidate.host != "" {
+		opts = append(opts, dockerclient.WithHost(candidate.host))
+	}
+	return opts
+}
+
+func describeCandidate(candidate clientConnectionCandidate) string {
+	return fmt.Sprintf("engine=%s host=%s", candidate.engine, candidateDisplayHost(candidate))
+}
+
+func candidateDisplayHost(candidate clientConnectionCandidate) string {
+	if candidate.host != "" {
+		return candidate.host
+	}
+	if candidate.useFromEnv {
+		if host := os.Getenv("DOCKER_HOST"); host != "" {
+			return host
+		}
+		return "from-env/default"
+	}
+	return "default"
+}
+
+func looksLikePodmanHost(host string) bool {
+	return strings.Contains(host, "podman.sock")
+}
+
+func podmanSocketHosts(uid int) []string {
+	return []string{
+		fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid),
+		"unix:///run/podman/podman.sock",
+		"unix:///var/run/podman/podman.sock",
+	}
+}
+
+func socketHostExists(host string) bool {
+	if host == "" {
+		return false
+	}
+	path := strings.TrimPrefix(host, "unix://")
+	if path == host {
+		return false
+	}
+	path = filepath.Clean(path)
+	allowed := false
+	for _, candidate := range podmanSocketHosts(os.Getuid()) {
+		if filepath.Clean(strings.TrimPrefix(candidate, "unix://")) == path {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return false
+	}
+	_, err := os.Stat(path) // #nosec G304 -- path is restricted to known Podman socket locations
+	return err == nil
 }
 
 // NewClientWithNetwork creates a client and derives a deterministic network
