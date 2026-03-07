@@ -90,8 +90,8 @@ type ContainerClient interface {
 	ContainerExitCode(name string) (int, error)
 	WaitForLogs(ctx context.Context, containerName string, searchString string) error
 	InteractiveShell(containerName string) error
-	Exec(containerName string, command []string) error
-	ExecCapture(containerName string, command []string) (string, error)
+	Exec(ctx context.Context, containerName string, command []string) error
+	ExecCapture(ctx context.Context, containerName string, command []string) (string, error)
 	RemoveImages(names []string)
 	Cleanup() error
 }
@@ -719,7 +719,7 @@ func (c *Client) InteractiveShell(containerName string) error {
 }
 
 // Exec runs a command inside a container
-func (c *Client) Exec(containerName string, command []string) error {
+func (c *Client) Exec(ctx context.Context, containerName string, command []string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Executing in %s...", containerName))
 
 	// We use the CLI for exec because it handles TTY allocation and stream
@@ -727,7 +727,7 @@ func (c *Client) Exec(containerName string, command []string) error {
 	args := make([]string, 0, 2+len(command))
 	args = append(args, "exec", containerName)
 	args = append(args, command...)
-	cmd := exec.Command(c.Engine, args...) // #nosec G204
+	cmd := exec.CommandContext(ctx, c.Engine, args...) // #nosec G204
 
 	output, err := cmd.CombinedOutput()
 
@@ -746,11 +746,11 @@ func (c *Client) Exec(containerName string, command []string) error {
 }
 
 // ExecCapture runs a command inside a container and returns the combined output.
-func (c *Client) ExecCapture(containerName string, command []string) (string, error) {
+func (c *Client) ExecCapture(ctx context.Context, containerName string, command []string) (string, error) {
 	args := make([]string, 0, 2+len(command))
 	args = append(args, "exec", containerName)
 	args = append(args, command...)
-	cmd := exec.Command(c.Engine, args...) // #nosec G204
+	cmd := exec.CommandContext(ctx, c.Engine, args...) // #nosec G204
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -871,7 +871,7 @@ func (c *Client) normalizeBindMountPermissions(containerName string) {
 		targetUID, targetGID,
 	)
 
-	_, err = c.ExecCapture(containerName, []string{"/bin/bash", "-c", cmdStr})
+	_, err = c.ExecCapture(ctx, containerName, []string{"/bin/bash", "-c", cmdStr})
 	if err != nil {
 		ui.Debug.Println(fmt.Sprintf("Permission normalization failed (non-critical): %v", err))
 	} else {

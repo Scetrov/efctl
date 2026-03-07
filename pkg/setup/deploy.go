@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,19 +14,25 @@ import (
 func DeployWorld(c container.ContainerClient, workspace string) error {
 	ui.Info.Println("Deploying world contracts...")
 
+	if !c.ContainerRunning(container.ContainerSuiPlayground) {
+		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 50)
+		exitCode, exitErr := c.ContainerExitCode(container.ContainerSuiPlayground)
+		return fmt.Errorf("sui-playground container is not running (ExitCode: %d, ExitErr: %v). Last 50 lines of logs:\n%s", exitCode, exitErr, lastLogs)
+	}
+
 	// 0. Remove stale Move.lock files so the Sui CLI resolves framework
 	//    dependencies from the installed binary instead of pinned git revisions
 	//    that may no longer exist upstream.
 	CleanStaleMoveLocks(workspace)
 
 	// 1. Generate environment
-	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
+	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
 		return fmt.Errorf("failed to generate world env: %w", err)
 	}
 	ensureWorldSponsorAddresses(c, container.ContainerSuiPlayground)
 
 	// 2. Install dependencies & deploy
-	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdDeployWorld}); err != nil {
+	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdDeployWorld}); err != nil {
 		return fmt.Errorf("failed to deploy world: %w", err)
 	}
 
@@ -37,13 +44,13 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	}
 
 	// 4. Configure World State
-	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdConfigureWorld}); err != nil {
+	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdConfigureWorld}); err != nil {
 		return fmt.Errorf("failed to configure world: %w", err)
 	}
 
 	// 5. Spawn Structures
 	ui.Info.Println("Spawning game structures (Gates)...")
-	if err := c.Exec(container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdCreateTestResources}); err != nil {
+	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdCreateTestResources}); err != nil {
 		return fmt.Errorf("failed to create test resources: %w", err)
 	}
 

@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -47,7 +48,7 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 
 	ui.Warn.Println("Publish logging will be piped below:")
 
-	output, err := c.ExecCapture(container.ContainerSuiPlayground, []string{"/bin/bash", "-c", publishCmd})
+	output, err := c.ExecCapture(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", publishCmd})
 	if output != "" {
 		fmt.Print(output)
 	}

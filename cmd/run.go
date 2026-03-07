@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -59,7 +60,7 @@ var runCmd = &cobra.Command{
 			execArgs = append(execArgs, scriptArgs...)
 		}
 
-		err = c.Exec(container.ContainerSuiPlayground, execArgs)
+		err = c.Exec(context.Background(), container.ContainerSuiPlayground, execArgs)
 		if err != nil {
 			ui.Error.Println("Script execution failed: " + err.Error())
 			os.Exit(1)

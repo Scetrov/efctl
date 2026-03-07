@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -49,7 +50,7 @@ func removeMoveLocksInSubdirs(root string, debugPrefix string) {
 // so it is owned by root on the host.  To avoid permission-denied errors we
 // read and write the file through the container using ExecCapture / Exec.
 func ensureWorldSponsorAddresses(c container.ContainerClient, containerName string) {
-	data, err := c.ExecCapture(containerName, []string{"cat", containerEnvPath})
+	data, err := c.ExecCapture(context.Background(), containerName, []string{"cat", containerEnvPath})
 	if err != nil {
 		log.Printf("move_patch: cannot read world env file via container: %v", err)
 		return
@@ -102,7 +103,7 @@ func ensureWorldSponsorAddresses(c container.ContainerClient, containerName stri
 	}
 
 	fullCmd := strings.Join(sedCmds, " && ")
-	if execErr := c.Exec(containerName, []string{"/bin/bash", "-c", fullCmd}); execErr != nil {
+	if execErr := c.Exec(context.Background(), containerName, []string{"/bin/bash", "-c", fullCmd}); execErr != nil {
 		log.Printf("move_patch: cannot write world env file via container: %v", execErr)
 		return
 	}

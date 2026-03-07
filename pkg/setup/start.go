@@ -143,7 +143,10 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 	if err := c.WaitForLogs(logCtx, container.ContainerSuiPlayground, container.ContainerLogReadyCtx); err != nil {
 		// On timeout or failure, capture container logs for diagnostics
 		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 50)
-		return fmt.Errorf("%w\n\nLast 50 lines of container logs:\n%s", err, lastLogs)
+		running := c.ContainerRunning(container.ContainerSuiPlayground)
+		exitCode, exitErr := c.ContainerExitCode(container.ContainerSuiPlayground)
+		return fmt.Errorf("%w (Running: %v, ExitCode: %d, ExitErr: %v)\n\nLast 50 lines of container logs:\n%s",
+			err, running, exitCode, exitErr, lastLogs)
 	}
 
 	// The container generates its internal .env.sui. We must extract it
@@ -152,7 +155,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 	var output string
 	var err error
 	for i := 0; i < 15; i++ {
-		output, err = c.ExecCapture(container.ContainerSuiPlayground, []string{"cat", "/workspace/.sui/.env.sui"})
+		output, err = c.ExecCapture(ctx, container.ContainerSuiPlayground, []string{"cat", "/workspace/.sui/.env.sui"})
 		if err == nil && len(strings.TrimSpace(output)) > 0 {
 			break
 		}

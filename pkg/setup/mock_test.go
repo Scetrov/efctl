@@ -80,12 +80,12 @@ func (m *mockContainerClient) InteractiveShell(containerName string) error {
 	return m.Called(containerName).Error(0)
 }
 
-func (m *mockContainerClient) Exec(containerName string, command []string) error {
-	return m.Called(containerName, command).Error(0)
+func (m *mockContainerClient) Exec(ctx context.Context, containerName string, command []string) error {
+	return m.Called(ctx, containerName, command).Error(0)
 }
 
-func (m *mockContainerClient) ExecCapture(containerName string, command []string) (string, error) {
-	args := m.Called(containerName, command)
+func (m *mockContainerClient) ExecCapture(ctx context.Context, containerName string, command []string) (string, error) {
+	args := m.Called(ctx, containerName, command)
 	return args.String(0), args.Error(1)
 }
 
