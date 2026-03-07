@@ -128,7 +128,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 
 	// Give the container a moment to start, then verify it is still running
 	// before entering the (potentially long) log-wait loop.
-	time.Sleep(3 * time.Second)
+	time.Sleep(10 * time.Second)
 	if !c.ContainerRunning(container.ContainerSuiPlayground) {
 		exitCode, _ := c.ContainerExitCode(container.ContainerSuiPlayground)
 		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 30)

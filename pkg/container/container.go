@@ -314,6 +314,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) error
 		Mounts:       mounts,
 		UsernsMode:   usernsMode,
 		NetworkMode:  hostNetworkMode,
+		AutoRemove:   false,
 	}
 
 	_, err := c.docker.ContainerCreate(ctx, containerCfg, hostCfg, networkConfig, nil, cfg.Name)
