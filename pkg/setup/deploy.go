@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"efctl/pkg/container"
@@ -27,6 +28,12 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 
 	// 1. Generate environment
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", ScriptGenerateWorldEnv}); err != nil {
+		// Log all containers for debugging if this fails
+		ui.Debug.Println("Command failed, listing all containers for diagnostics:")
+		debugCmd := exec.Command(c.GetEngine(), "ps", "-a") // #nosec G204
+		debugOut, _ := debugCmd.CombinedOutput()
+		ui.Debug.Println(string(debugOut))
+
 		return fmt.Errorf("failed to generate world env: %w", err)
 	}
 	ensureWorldSponsorAddresses(c, container.ContainerSuiPlayground)

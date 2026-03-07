@@ -806,6 +806,7 @@ func (c *Client) Cleanup() error {
 
 func (c *Client) forceRemoveContainers(ctx context.Context, names []string) {
 	for _, name := range names {
+		ui.Debug.Println(fmt.Sprintf("forceRemoveContainers: stopping and removing %s", name))
 		_ = c.docker.ContainerStop(ctx, name, dockercontainer.StopOptions{})
 		_ = c.docker.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true})
 	}
