@@ -131,7 +131,10 @@ func NewClient() (*Client, error) {
 		uid := os.Getuid()
 		sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
 		opts = append(opts, dockerclient.WithHost(sock))
+		ui.Warn.Println(fmt.Sprintf("NewClient: overriding podman host to %s", sock))
 	}
+
+	ui.Warn.Println(fmt.Sprintf("NewClient: engine=%s, DOCKER_HOST=%s", engine, os.Getenv("DOCKER_HOST")))
 
 	dc, err := dockerclient.NewClientWithOpts(opts...)
 	if err != nil {
