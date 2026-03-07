@@ -29,13 +29,14 @@ type objectChange struct {
 // and updates the builder-scaffold/.env with the extracted package IDs.
 func PublishExtension(c container.ContainerClient, workspace string, network string, contractPath string) error {
 
-	// Ensure no leading slashes — treat it as relative to move-contracts
+	// Ensure no absolute paths — treat it as relative to move-contracts
 	cleanContractPath := filepath.Clean(contractPath)
-	if strings.HasPrefix(cleanContractPath, "/") {
+	slashContractPath := filepath.ToSlash(cleanContractPath)
+	if filepath.IsAbs(cleanContractPath) || strings.HasPrefix(slashContractPath, "/") {
 		return fmt.Errorf("contract path must be relative to builder-scaffold/move-contracts, got absolute: %s", contractPath)
 	}
 
-	containerContractDir := fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", cleanContractPath)
+	containerContractDir := fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", slashContractPath)
 	ui.Info.Printf("Executing publish inside container at %s...\n", containerContractDir)
 
 	publishCmd, err := buildPublishCmd(workspace, network, containerContractDir)
