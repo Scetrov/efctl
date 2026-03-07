@@ -1,8 +1,8 @@
-# efctl completion zsh
+## efctl completion zsh
 
 Generate zsh completion script
 
-## Synopsis
+### Synopsis
 
 Generate the autocompletion script for zsh.
 
@@ -17,16 +17,26 @@ To load completions for every new session, run once:
 
 You will need to start a new shell for this setup to take effect.
 
-```text
+
+```
 efctl completion zsh
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for zsh
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl completion](efctl_completion.md) - Generate shell completion scripts
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+```
+
+### SEE ALSO
+
+* [efctl completion](efctl_completion.md)	 - Generate shell completion scripts
+

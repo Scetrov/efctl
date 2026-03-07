@@ -1,21 +1,31 @@
-# efctl env run
+## efctl env run
 
 Run a script in the builder-scaffold container
 
-## Synopsis
+### Synopsis
 
 Runs a predefined script (e.g. from package.json) or a custom arbitrary bash command directly inside the container in the /workspace/builder-scaffold directory.
 
-```bash
+```
 efctl env run [script-name] [flags]
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for run
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl env](efctl_env.md) - efctl manages the local EVE Frontier Sui development environment
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+  -w, --workspace string     Path to the workspace directory (default ".")
+```
+
+### SEE ALSO
+
+* [efctl env](efctl_env.md)	 - Manage the local Sui development environment
+

@@ -1,6 +1,14 @@
 repos:
   - repo: local
     hooks:
+      - id: gen-docs
+        name: gen docs
+        entry: go run ./tools/gen-docs/main.go
+        language: system
+        types: [go]
+        pass_filenames: false
+  - repo: local
+    hooks:
       - id: go-fmt
         name: go fmt
         entry: go fmt

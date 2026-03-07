@@ -1,16 +1,17 @@
-## efctl graphql
+## efctl world
 
-Interact with the Sui GraphQL RPC
+Interact with the EVE Frontier local world contracts
 
 ### Synopsis
 
-Executes queries against the local or remote Sui GraphQL RPC endpoint.
+Provides tools to query and interact with the localnet world contracts and smart assemblies.
 
 ### Options
 
 ```
   -e, --endpoint string   Sui GraphQL RPC endpoint (default "http://localhost:9125/graphql")
-  -h, --help              help for graphql
+  -h, --help              help for world
+  -n, --network string    The network to query (localnet, devnet, testnet, mainnet) (default "localnet")
 ```
 
 ### Options inherited from parent commands
@@ -24,6 +25,5 @@ Executes queries against the local or remote Sui GraphQL RPC endpoint.
 ### SEE ALSO
 
 * [efctl](efctl.md)	 - efctl manages the local EVE Frontier Sui development environment
-* [efctl graphql object](efctl_graphql_object.md)	 - Query an object by ID
-* [efctl graphql package](efctl_graphql_package.md)	 - Query a package and its modules by ID
+* [efctl world query](efctl_world_query.md)	 - Query an EVE Frontier Smart Assembly
 

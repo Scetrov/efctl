@@ -1,26 +1,26 @@
-## efctl env shell
+## efctl env dash
 
-Open a shell inside the running container
+Launch the environment dashboard
 
 ### Synopsis
 
-Executes into the running sui-playground container with an interactive bash shell.
+Launches an interactive, responsive terminal dashboard for the EVE Frontier local development environment.
 
 ```
-efctl env shell [flags]
+efctl env dash [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for shell
+      --debug   Enable debug logging to ~/.efctl/dash-debug.log
+  -h, --help    help for dash
 ```
 
 ### Options inherited from parent commands
 
 ```
       --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
-      --debug                Enable verbose debug logging
       --no-progress          Disable the progress spinner for cleaner CI output
   -w, --workspace string     Path to the workspace directory (default ".")
 ```

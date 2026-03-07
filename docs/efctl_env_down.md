@@ -1,27 +1,31 @@
-# efctl env down
+## efctl env down
 
 Tear down the local environment
 
-## Synopsis
+### Synopsis
 
 Cleans up the local Sui development environment by stopping and removing all related containers.
 
-```bash
+```
 efctl env down [flags]
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for down
 ```
 
-## Options inherited from parent commands
+### Options inherited from parent commands
 
-```text
-  -w, --workspace string   Path to the workspace directory (default ".")
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+  -w, --workspace string     Path to the workspace directory (default ".")
 ```
 
-## SEE ALSO
+### SEE ALSO
 
-- [efctl env](efctl_env.md) - Manage the local Sui development environment
+* [efctl env](efctl_env.md)	 - Manage the local Sui development environment
+

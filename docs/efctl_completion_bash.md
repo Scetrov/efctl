@@ -1,8 +1,8 @@
-# efctl completion bash
+## efctl completion bash
 
 Generate bash completion script
 
-## Synopsis
+### Synopsis
 
 Generate the autocompletion script for bash.
 
@@ -18,16 +18,26 @@ To install permanently (macOS with Homebrew):
 
   $ efctl completion bash > $(brew --prefix)/etc/bash_completion.d/efctl
 
-```text
+
+```
 efctl completion bash
 ```
 
-## Options
+### Options
 
-```text
+```
   -h, --help   help for bash
 ```
 
-## SEE ALSO
+### Options inherited from parent commands
 
-- [efctl completion](efctl_completion.md) - Generate shell completion scripts
+```
+      --config-file string   Path to the efctl.yaml or efctl.yml configuration file (default "efctl.yaml")
+      --debug                Enable verbose debug logging
+      --no-progress          Disable the progress spinner for cleaner CI output
+```
+
+### SEE ALSO
+
+* [efctl completion](efctl_completion.md)	 - Generate shell completion scripts
+
