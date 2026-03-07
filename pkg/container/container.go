@@ -197,6 +197,8 @@ func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileNa
 		spinner.Fail("Failed to build image")
 		return fmt.Errorf("image build: %w", err)
 	}
+	defer resp.Body.Close()
+
 	// Drain build output to completion — detect errors in the stream.
 	// We use a JSON decoder to parse the stream and detect failures.
 	decoder := json.NewDecoder(resp.Body)

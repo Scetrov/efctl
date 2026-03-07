@@ -284,10 +284,12 @@ func resolveAddress(alias string) string {
 
 func deriveAddress(key string) string {
 	// sui keytool decode does not work for suiprivkey.
-	// We import the key to a temporary alias, capture the JSON output to get the address,
-	// and then immediately remove the alias to keep the keystore clean.
+	// We import the key to a temporary alias (providing the key via stdin), capture the JSON
+	// output to get the address, and then immediately remove the alias to keep the keystore clean.
 	tmpAlias := fmt.Sprintf("ef-temp-%d", time.Now().UnixNano())
-	out, _ := exec.Command("sui", "keytool", "import", key, "ed25519", "--alias", tmpAlias, "--json").Output() // #nosec G204
+	cmd := exec.Command("sui", "keytool", "import", "ed25519", "--alias", tmpAlias, "--json") // #nosec G204
+	cmd.Stdin = strings.NewReader(key)
+	out, _ := cmd.Output()
 
 	// Clean up the temporary alias
 	_ = exec.Command("sui", "client", "remove-address", tmpAlias).Run() // #nosec G204

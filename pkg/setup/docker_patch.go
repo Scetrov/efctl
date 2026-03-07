@@ -75,7 +75,7 @@ func patchDockerfile(dockerDir string) {
 
 	// Remove a narrower sed variant injected by earlier versions of efctl,
 	// so we don't accumulate duplicate (and less effective) RUN layers.
-	const oldSed = `RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/workspace/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh`
+	const oldSed = `RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh`
 	if strings.Contains(content, oldSed) {
 		content = strings.Replace(content, oldSed+"\n", "", 1)
 		content = strings.Replace(content, oldSed, "", 1)

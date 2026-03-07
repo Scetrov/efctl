@@ -216,7 +216,7 @@ func TestPatchDockerfile_ReplacesOldNarrowSed(t *testing.T) {
 	content := `FROM ubuntu:24.04
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
-RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/workspace/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
+RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 `
 	os.WriteFile(dockerfilePath, []byte(content), 0644)
