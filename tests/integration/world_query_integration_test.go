@@ -13,6 +13,7 @@ import (
 
 	"efctl/cmd"
 	"github.com/pterm/pterm"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,6 +21,24 @@ import (
 func resetFlags() {
 	cmd.GraphqlEndpoint = "http://localhost:9125/graphql"
 	cmd.Network = "localnet"
+
+	root := cmd.GetRootCmd()
+	// Reset all flags to their default values and mark them as not changed
+	root.Flags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+	root.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+	
+	if worldCmd, _, err := root.Find([]string{"world"}); err == nil {
+		worldCmd.Flags().VisitAll(func(f *pflag.Flag) {
+			f.Value.Set(f.DefValue)
+			f.Changed = false
+		})
+	}
 }
 
 func TestWorldQuery_SSU(t *testing.T) {
@@ -63,22 +82,36 @@ func TestWorldQuery_SSU(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x1111", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Smart Storage Unit (0x1111)")
@@ -120,22 +153,36 @@ func TestWorldQuery_Gate(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x2222", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Smart Gate (0x2222)")
@@ -175,22 +222,36 @@ func TestWorldQuery_Turret(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x3333", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Smart Turret (0x3333)")
@@ -261,22 +322,36 @@ func TestWorldQuery_ComplexSSU(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x544a", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Smart Storage Unit (0x544a)")
@@ -338,22 +413,36 @@ func TestWorldQuery_NetworkNode(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x4444", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Network Node (0x4444)")
@@ -397,22 +486,36 @@ func TestWorldQuery_OwnerCap(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x000000000000000000000000000000000000000000000000000000000000000c", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Owner Capability (0x000000000000000000000000000000000000000000000000000000000000000c)")
@@ -456,22 +559,36 @@ func TestWorldQuery_Character(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x000000000000000000000000000000000000000000000000000000000000000d", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	assert.Contains(t, output, "Character (0x000000000000000000000000000000000000000000000000000000000000000d)")
@@ -513,27 +630,42 @@ func TestWorldQuery_NetworkFlag(t *testing.T) {
 	defer func() { cmd.NetworkEndpoints["devnet"] = oldDevnet }()
 
 	root := cmd.GetRootCmd()
-	
+
 	// Test devnet
 	root.SetArgs([]string{"world", "query", "0x1111", "--network", "devnet"})
-	
+
 	// We capture output
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
-	
-	_ = root.Execute()
-	
-	w.Close()
-	os.Stdout = oldStdout
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
-	
+
 	assert.Contains(t, output, fmt.Sprintf("Querying world object 0x1111 (devnet) at %s...", srv.URL))
 }
 
@@ -559,22 +691,36 @@ func TestWorldQuery_GovernorCap(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x5555", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	// "GovernorCap" should be derived as "Governor Cap"
@@ -605,22 +751,36 @@ func TestWorldQuery_AdminACL(t *testing.T) {
 	defer srv.Close()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, errPipe := os.Pipe()
+	require.NoError(t, errPipe)
+
 	os.Stdout = w
 	pterm.SetDefaultOutput(w)
 	pterm.DisableColor()
-	defer pterm.EnableColor()
-	defer pterm.SetDefaultOutput(oldStdout)
+
+	t.Cleanup(func() {
+		pterm.EnableColor()
+		pterm.SetDefaultOutput(oldStdout)
+		os.Stdout = oldStdout
+		if w != nil {
+			_ = w.Close()
+		}
+		if r != nil {
+			_ = r.Close()
+		}
+	})
 
 	root := cmd.GetRootCmd()
 	root.SetArgs([]string{"world", "query", "0x7b6e", "--endpoint", srv.URL})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stdout = oldStdout
+	_ = w.Close()
+	w = nil
+
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 	output := buf.String()
 
 	// "AdminACL" should be overridden as "Admin Access Control List"

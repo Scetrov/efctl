@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"efctl/pkg/graphql"
@@ -36,10 +37,24 @@ var worldQueryCmd = &cobra.Command{
 		// Handle network-to-endpoint mapping
 		endpoint := GraphqlEndpoint
 
-		// If endpoint is at default and network is specified, override with network defaults
-		if endpoint == "http://localhost:9125/graphql" && Network != "localnet" {
-			if url, ok := NetworkEndpoints[strings.ToLower(Network)]; ok {
+		// Only override the endpoint based on network if the user did NOT explicitly set --endpoint.
+		endpointFlagSet := cmd.Flags().Changed("endpoint") || cmd.InheritedFlags().Changed("endpoint")
+		if !endpointFlagSet {
+			normalizedNetwork := strings.ToLower(Network)
+			if normalizedNetwork == "" {
+				normalizedNetwork = "localnet"
+			}
+
+			if url, ok := NetworkEndpoints[normalizedNetwork]; ok {
 				endpoint = url
+			} else {
+				// Unknown network: fail fast with a clear error instead of silently falling back.
+				supported := make([]string, 0, len(NetworkEndpoints))
+				for name := range NetworkEndpoints {
+					supported = append(supported, name)
+				}
+				ui.Error.Printf("Unsupported network %q. Supported networks: %s\n", Network, strings.Join(supported, ", "))
+				os.Exit(1)
 			}
 		}
 
@@ -410,7 +425,15 @@ func renderMetadata(l list.Writer, metadata interface{}) {
 
 	l.AppendItem(styledKey("Metadata"))
 	l.Indent()
-	for k, v := range m {
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		v := m[k]
 		l.AppendItem(fmt.Sprintf("%s %s", styledKey(k), styledValue(fmt.Sprintf("%v", v))))
 	}
 	l.UnIndent()
@@ -516,8 +539,8 @@ func formatItem(l list.Writer, item interface{}) {
 		}
 
 		name := "Item"
-		if n, ok := m["name"]; ok && n != "" {
-			name = fmt.Sprintf("%v", n)
+		if n, ok := m["name"].(string); ok && n != "" {
+			name = n
 		} else if tid, ok := m["type_id"]; ok {
 			name = fmt.Sprintf("Type %v", tid)
 		} else if t, ok := m["type"]; ok {

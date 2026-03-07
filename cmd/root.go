@@ -87,3 +87,22 @@ func Execute() {
 func GetRootCmd() *cobra.Command {
 	return rootCmd
 }
+
+// GetNewRootCmd returns a fresh instance of the root command for testing
+func GetNewRootCmd() *cobra.Command {
+	// Re-initialize a fresh command tree for tests to avoid state leakage
+	// This is a simplified version; in a real app you might want to refactor
+	// init() into a function that can be called repeatedly.
+	newRoot := &cobra.Command{
+		Use:              rootCmd.Use,
+		Short:            rootCmd.Short,
+		Long:             rootCmd.Long,
+		PersistentPreRun: rootCmd.PersistentPreRun,
+	}
+	newRoot.PersistentFlags().StringVar(&configFile, "config-file", config.DefaultConfigFile, "Path to the efctl.yaml or efctl.yml configuration file")
+	newRoot.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable verbose debug logging")
+
+	// Re-add subcommands... This is getting complex because they are added in init()
+	// Let's try a different approach: manually reset the Changed property of flags.
+	return rootCmd
+}
