@@ -1,5 +1,6 @@
 ---
-description: Address PR Comments
+name: address-pr-comments
+description: Reviews and addresses all unresolved comments on a GitHub Pull Request
 ---
 
 ## Purpose

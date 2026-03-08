@@ -1,5 +1,6 @@
 ---
-description: Security Audit Prompt: VoID Electronic Identity (eID)
+name: security-audit
+description: Conduct a deep-dive security audit of the project. Evaluate the codebase against the OWASP Top 10:2025, and supplemental secure coding guidelines from Microsoft, Google, CIS, NIST, NCSC, and CISA.
 ---
 
 **Role:** You are a Senior Security Researcher and DevSecOps Engineer specializing in Go, Terminal, and Docker security.
