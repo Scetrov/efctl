@@ -495,16 +495,10 @@ func (c *Client) prepareMountConfig(mountDefs []MountDef) []dockermount.Mount {
 		case "bind":
 			mt.Type = dockermount.TypeBind
 			mt.Source = m.Source
-			if m.SELinux {
+			if m.SELinux && c.Engine == "podman" {
 				mt.BindOptions = &dockermount.BindOptions{
 					Propagation: dockermount.PropagationShared,
 				}
-				// In both Docker and Podman API, relabelling is usually handled via
-				// specific options in Mount, though the "z" flag is often passed
-				// in higher-level CLI. In the Go SDK, we can use SELinuxLabel or
-				// similar if supported, but for Podman compat using BindOptions
-				// with propagation shared is often enough when combined with keep-id.
-				// However, to be explicit for Podman:
 			}
 		default: // volume
 			mt.Type = dockermount.TypeVolume

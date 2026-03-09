@@ -11,6 +11,7 @@ import (
 	"efctl/pkg/env"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
+	dockermount "github.com/docker/docker/api/types/mount"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
@@ -103,6 +104,46 @@ func TestFrontendConfig_WorkingDir(t *testing.T) {
 	}
 	if cfg.Name != ContainerFrontend {
 		t.Errorf("Expected container name %q, got %q", ContainerFrontend, cfg.Name)
+	}
+}
+
+func TestPrepareMountConfig_DockerSkipsSharedPropagation(t *testing.T) {
+	c := &Client{Engine: "docker"}
+	mounts := c.prepareMountConfig([]MountDef{{
+		Type:    "bind",
+		Source:  "/tmp/workspace/builder-scaffold",
+		Target:  "/workspace/builder-scaffold",
+		SELinux: true,
+	}})
+
+	if len(mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(mounts))
+	}
+	if mounts[0].Type != dockermount.TypeBind {
+		t.Fatalf("expected bind mount, got %q", mounts[0].Type)
+	}
+	if mounts[0].BindOptions != nil {
+		t.Fatalf("expected docker bind mount to omit propagation options, got %+v", mounts[0].BindOptions)
+	}
+}
+
+func TestPrepareMountConfig_PodmanUsesSharedPropagation(t *testing.T) {
+	c := &Client{Engine: "podman"}
+	mounts := c.prepareMountConfig([]MountDef{{
+		Type:    "bind",
+		Source:  "/tmp/workspace/builder-scaffold",
+		Target:  "/workspace/builder-scaffold",
+		SELinux: true,
+	}})
+
+	if len(mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(mounts))
+	}
+	if mounts[0].BindOptions == nil {
+		t.Fatal("expected podman bind mount to include bind options")
+	}
+	if mounts[0].BindOptions.Propagation != dockermount.PropagationShared {
+		t.Fatalf("expected podman bind mount propagation %q, got %q", dockermount.PropagationShared, mounts[0].BindOptions.Propagation)
 	}
 }
 
