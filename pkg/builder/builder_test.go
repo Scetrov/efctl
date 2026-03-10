@@ -10,6 +10,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResolvePublishContractDir_UsesCanonicalBuilderContract(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+
+	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "smart_gate_extension")
+	require.NoError(t, err)
+	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/smart_gate_extension", containerDir)
+	assert.Equal(t, "smart_gate_extension", resolvedPath)
+}
+
+func TestResolvePublishContractDir_ResolvesLegacyExtensionAlias(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+
+	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "smart_gate")
+	require.NoError(t, err)
+	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/smart_gate_extension", containerDir)
+	assert.Equal(t, "smart_gate_extension", resolvedPath)
+}
+
+func TestResolvePublishContractDir_UsesWorldContractsWhenBuilderMissing(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir := filepath.Join(workspace, "world-contracts", "contracts", "extension_examples")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+
+	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "extension_examples")
+	require.NoError(t, err)
+	assert.Equal(t, "/workspace/world-contracts/contracts/extension_examples", containerDir)
+	assert.Equal(t, "extension_examples", resolvedPath)
+}
+
+func TestResolvePublishContractDir_NotFound(t *testing.T) {
+	workspace := t.TempDir()
+
+	_, _, err := resolvePublishContractDir(workspace, "smart_gate")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "contract path 'smart_gate' not found")
+}
+
 // ── extractPublishIDs ──────────────────────────────────────────────
 
 func TestExtractPublishIDs_ValidJSON(t *testing.T) {

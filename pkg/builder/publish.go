@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -36,38 +37,12 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 		return fmt.Errorf("contract path must be relative to builder-scaffold/move-contracts or world-contracts/contracts, got absolute: %s", contractPath)
 	}
 
-	builderScaffoldPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", filepath.FromSlash(slashContractPath))
-	worldContractsPath := filepath.Join(workspace, "world-contracts", "contracts", filepath.FromSlash(slashContractPath))
-
-	builderExists := true
-	if _, err := os.Stat(builderScaffoldPath); err != nil {
-		if os.IsNotExist(err) {
-			builderExists = false
-		} else {
-			return fmt.Errorf("failed to stat %s: %w", builderScaffoldPath, err)
-		}
+	containerContractDir, resolvedContractPath, err := resolvePublishContractDir(workspace, slashContractPath)
+	if err != nil {
+		return err
 	}
-
-	worldExists := true
-	if _, err := os.Stat(worldContractsPath); err != nil {
-		if os.IsNotExist(err) {
-			worldExists = false
-		} else {
-			return fmt.Errorf("failed to stat %s: %w", worldContractsPath, err)
-		}
-	}
-
-	if builderExists && worldExists {
-		ui.Warn.Printf("Warning: Contract path '%s' exists in both builder-scaffold/move-contracts and world-contracts/contracts. Defaulting to builder-scaffold/move-contracts.\n", slashContractPath)
-	}
-
-	var containerContractDir string
-	if builderExists {
-		containerContractDir = fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", slashContractPath)
-	} else if worldExists {
-		containerContractDir = fmt.Sprintf("/workspace/world-contracts/contracts/%s", slashContractPath)
-	} else {
-		return fmt.Errorf("contract path '%s' not found in either builder-scaffold/move-contracts or world-contracts/contracts", slashContractPath)
+	if resolvedContractPath != slashContractPath {
+		ui.Warn.Printf("Warning: Contract path '%s' resolved to '%s'.\n", slashContractPath, resolvedContractPath)
 	}
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", containerContractDir)
@@ -91,6 +66,63 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 	}
 
 	return writePublishedIDs(workspace, output)
+}
+
+func resolvePublishContractDir(workspace string, contractPath string) (containerDir string, resolvedPath string, err error) {
+	for _, candidate := range contractPathCandidates(contractPath) {
+		builderScaffoldPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", filepath.FromSlash(candidate))
+		worldContractsPath := filepath.Join(workspace, "world-contracts", "contracts", filepath.FromSlash(candidate))
+
+		builderExists, err := pathExists(builderScaffoldPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to stat %s: %w", builderScaffoldPath, err)
+		}
+
+		worldExists, err := pathExists(worldContractsPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to stat %s: %w", worldContractsPath, err)
+		}
+
+		if builderExists && worldExists {
+			ui.Warn.Printf("Warning: Contract path '%s' exists in both builder-scaffold/move-contracts and world-contracts/contracts. Defaulting to builder-scaffold/move-contracts.\n", candidate)
+			return fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", candidate), candidate, nil
+		}
+		if builderExists {
+			return fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", candidate), candidate, nil
+		}
+		if worldExists {
+			return fmt.Sprintf("/workspace/world-contracts/contracts/%s", candidate), candidate, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("contract path '%s' not found in either builder-scaffold/move-contracts or world-contracts/contracts", contractPath)
+}
+
+func contractPathCandidates(contractPath string) []string {
+	candidates := []string{contractPath}
+	if strings.HasSuffix(contractPath, "_extension") {
+		return candidates
+	}
+
+	base := path.Base(contractPath)
+	dir := path.Dir(contractPath)
+	aliasedBase := base + "_extension"
+	if dir == "." {
+		return append(candidates, aliasedBase)
+	}
+
+	return append(candidates, path.Join(dir, aliasedBase))
+}
+
+func pathExists(filePath string) (bool, error) {
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }
 
 // buildPublishCmd constructs the sui publish command and, for localnet, deletes any

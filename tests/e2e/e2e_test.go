@@ -24,6 +24,8 @@ type containerRuntime struct {
 	env    []string
 }
 
+const extensionPublishContractPath = "smart_gate_extension"
+
 // efctlBin returns the absolute path to the compiled efctl binary.
 // Set EFCTL_BINARY env var to override. Otherwise it builds from source.
 func efctlBin(t *testing.T) string {
@@ -329,7 +331,7 @@ func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
 		t.Skip("skipping: extension_init did not pass")
 	}
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", "smart_gate")
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", extensionPublishContractPath)
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: extension publish hit a known infra/drift issue:\n%s", out)
@@ -351,7 +353,7 @@ func (tester *e2eLifecycleTester) testExtensionPublishIdempotent(t *testing.T) {
 		t.Skip("skipping: extension_publish did not pass")
 	}
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", "smart_gate")
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", extensionPublishContractPath)
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: idempotent publish hit a known infra/drift issue:\n%s", out)
