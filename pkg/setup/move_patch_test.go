@@ -86,6 +86,67 @@ func TestCleanStaleMoveLocks_NoopOnMissingLock(t *testing.T) {
 	CleanStaleMoveLocks(workspace)
 }
 
+func TestPatchBuilderExampleMoveTomls_RemovesLegacyAddressesFromBundledExamples(t *testing.T) {
+	workspace := t.TempDir()
+	smartGateDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
+	storageUnitDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "storage_unit_extension")
+	customDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "custom_extension")
+
+	require.NoError(t, os.MkdirAll(smartGateDir, 0755))
+	require.NoError(t, os.MkdirAll(storageUnitDir, 0755))
+	require.NoError(t, os.MkdirAll(customDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(smartGateDir, "Move.toml"), []byte(`[package]
+name = "smart_gate_extension"
+
+[dependencies]
+world = { local = "../../../world-contracts/contracts/world" }
+
+[addresses]
+smart_gate_extension = "0x0"
+`), 0644))
+
+	require.NoError(t, os.WriteFile(filepath.Join(storageUnitDir, "Move.toml"), []byte(`[package]
+name = "storage_unit_extension"
+
+[dependencies]
+
+[addresses]
+storage_unit_extension = "0x0"
+
+[environments]
+local = "0x0"
+`), 0644))
+
+	customManifest := `[package]
+name = "custom_extension"
+
+[addresses]
+custom_extension = "0x0"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(customDir, "Move.toml"), []byte(customManifest), 0644))
+
+	require.NoError(t, PatchBuilderExampleMoveTomls(workspace))
+
+	smartGateData, err := os.ReadFile(filepath.Join(smartGateDir, "Move.toml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(smartGateData), "[addresses]")
+
+	storageUnitData, err := os.ReadFile(filepath.Join(storageUnitDir, "Move.toml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(storageUnitData), "[addresses]")
+	assert.Contains(t, string(storageUnitData), "[environments]")
+
+	customData, err := os.ReadFile(filepath.Join(customDir, "Move.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, customManifest, string(customData))
+}
+
+func TestPatchBuilderExampleMoveTomls_IgnoresMissingExamplePackages(t *testing.T) {
+	workspace := t.TempDir()
+	require.NoError(t, PatchBuilderExampleMoveTomls(workspace))
+}
+
 func TestEnsureWorldSponsorAddresses_BackfillsFromAdmin(t *testing.T) {
 	mc := new(mockContainerClient)
 

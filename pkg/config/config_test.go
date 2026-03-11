@@ -293,3 +293,10 @@ func TestFindDefaultConfigPath_PrefersYAMLOverYMLInSameDirectory(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, filepath.Join(dir, DefaultConfigFile), path)
 }
+
+func TestDefaultConfigYAML_MatchesRepositorySample(t *testing.T) {
+	samplePath := filepath.Join("..", "..", DefaultConfigFile)
+	data, err := os.ReadFile(samplePath)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultConfigYAML(), string(data))
+}

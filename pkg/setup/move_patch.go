@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"efctl/pkg/container"
@@ -25,6 +26,24 @@ func CleanStaleMoveLocks(workspace string) {
 	removeMoveLocksInSubdirs(filepath.Join(workspace, "builder-scaffold", "move-contracts"), filepath.Join("builder-scaffold", "move-contracts"))
 }
 
+// PatchBuilderExampleMoveTomls removes legacy named-address sections from the
+// bundled builder-scaffold example packages so they remain publishable against
+// CCP's recommended world-contracts v0.0.18 checkout.
+func PatchBuilderExampleMoveTomls(workspace string) error {
+	for _, contractName := range []string{"smart_gate_extension", "storage_unit_extension"} {
+		moveTomlPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", contractName, "Move.toml")
+		changed, err := removeManifestSection(moveTomlPath, "addresses")
+		if err != nil {
+			return err
+		}
+		if changed {
+			ui.Debug.Printfln("Patched legacy [addresses] section in %s", filepath.Join("builder-scaffold", "move-contracts", contractName, "Move.toml"))
+		}
+	}
+
+	return nil
+}
+
 func removeMoveLocksInSubdirs(root string, debugPrefix string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -41,6 +60,84 @@ func removeMoveLocksInSubdirs(root string, debugPrefix string) {
 			ui.Debug.Printfln("Removed stale %s", filepath.Join(debugPrefix, e.Name(), "Move.lock"))
 		}
 	}
+}
+
+func removeManifestSection(filePath string, sectionName string) (bool, error) {
+	content, err := os.ReadFile(filePath) // #nosec G304 -- path is workspace-local and constructed by caller
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read %s: %w", filePath, err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	sectionHeader := fmt.Sprintf("[%s]", sectionName)
+	updated := make([]string, 0, len(lines))
+	removed := false
+	inSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if !inSection && trimmed == sectionHeader {
+			inSection = true
+			removed = true
+			continue
+		}
+
+		if inSection {
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				inSection = false
+			} else {
+				continue
+			}
+		}
+
+		updated = append(updated, line)
+	}
+
+	if !removed {
+		return false, nil
+	}
+
+	updated = trimRepeatedBlankLines(updated)
+	if err := os.WriteFile(filePath, []byte(strings.Join(updated, "\n")), 0600); err != nil {
+		return false, fmt.Errorf("failed to write %s: %w", filePath, err)
+	}
+
+	return true, nil
+}
+
+func trimRepeatedBlankLines(lines []string) []string {
+	compacted := make([]string, 0, len(lines))
+	prevBlank := false
+
+	for _, line := range lines {
+		isBlank := strings.TrimSpace(line) == ""
+		if isBlank && prevBlank {
+			continue
+		}
+		compacted = append(compacted, line)
+		prevBlank = isBlank
+	}
+
+	for len(compacted) > 0 && compacted[0] == "" {
+		compacted = compacted[1:]
+	}
+	for len(compacted) > 0 && compacted[len(compacted)-1] == "" {
+		compacted = compacted[:len(compacted)-1]
+	}
+
+	if len(compacted) == 0 {
+		return []string{}
+	}
+
+	if !slices.Equal(compacted, lines) {
+		return compacted
+	}
+
+	return compacted
 }
 
 // ensureWorldSponsorAddresses backfills SPONSOR_ADDRESS and SPONSOR_ADDRESSES

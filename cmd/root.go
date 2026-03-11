@@ -31,6 +31,10 @@ var rootCmd = &cobra.Command{
 			ui.ProgressEnabled = false
 		}
 
+		if cmd == initCmd {
+			return
+		}
+
 		resolvedConfigPath := configFile
 		if !cmd.Flags().Changed("config-file") {
 			if discoveredPath, found, discoverErr := config.FindDefaultConfigPath("."); discoverErr != nil {

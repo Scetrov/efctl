@@ -26,25 +26,31 @@ efctl --debug env up
 
 All properties are optional. CLI flags override values from the config file.
 
+Run `efctl init` to scaffold a config file with the current recommended defaults.
+
 ```yaml
 # Enable the builder-scaffold web frontend (Vite dev server on port 5173)
-with-frontend: false
+with-frontend: true
 
 # Enable the SQL Indexer and GraphQL API
-with-graphql: false
+with-graphql: true
 
 # Git clone URL for the world-contracts repository
 world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
 
 # Ref (branch, tag, or commit) to checkout for world-contracts (default: main)
-world-contracts-ref: "main"
+world-contracts-ref: "v0.0.18"
 
 # Git clone URL for the builder-scaffold repository
 builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
 
 # Ref (branch, tag, or commit) to checkout for builder-scaffold (default: main)
-builder-scaffold-ref: "main"
+builder-scaffold-ref: "v0.0.2"
 ```
+
+### `efctl init`
+
+Creates an `efctl.yaml` file in the current directory. Use `--config-file` to target a different path and `--force` to overwrite an existing file.
 
 ---
 

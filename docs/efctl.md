@@ -21,6 +21,7 @@ A fast and flexible CLI to automate the setup, deployment, and teardown of the E
 * [efctl doctor](efctl_doctor.md)	 - Print diagnostic information about the environment
 * [efctl env](efctl_env.md)	 - Manage the local Sui development environment
 * [efctl graphql](efctl_graphql.md)	 - Interact with the Sui GraphQL RPC
+* [efctl init](efctl_init.md)	 - Create an efctl.yaml configuration file
 * [efctl sui](efctl_sui.md)	 - Manage the local Sui client and environment
 * [efctl update](efctl_update.md)	 - Update efctl to the latest version
 * [efctl version](efctl_version.md)	 - Print the version of efctl

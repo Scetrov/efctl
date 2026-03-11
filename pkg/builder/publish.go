@@ -54,6 +54,9 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 
 	// Clean stale Move.lock files before publishing to avoid framework drift issues
 	setup.CleanStaleMoveLocks(workspace)
+	if err := setup.PatchBuilderExampleMoveTomls(workspace); err != nil {
+		return err
+	}
 
 	ui.Warn.Println("Publish logging will be piped below:")
 
