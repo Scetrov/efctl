@@ -394,3 +394,44 @@ func TestEnvUpFlagDefaultsEnabled(t *testing.T) {
 	assert.Equal(t, "true", graphqlFlag.DefValue)
 	assert.Equal(t, "true", frontendFlag.DefValue)
 }
+
+// ── doctor command ────────────────────────────────────────────────
+
+func TestDoctorCommand(t *testing.T) {
+	// Capture stdout via os.Pipe (doctor uses fmt.Printf → stdout).
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	rootCmd.SetArgs([]string{"doctor", "--workspace", t.TempDir()})
+	execErr := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	output := buf.String()
+
+	require.NoError(t, execErr)
+
+	for _, want := range []string{"efctl:", "os:", "wsl:", "container runtime:", "node:", "git:", "env:", "port", "config file:", "config with-frontend:"} {
+		assert.Contains(t, output, want, "expected doctor output to contain %q", want)
+	}
+}
+
+func TestDoctorCommand_WorkspaceFlag(t *testing.T) {
+	flag := doctorCmd.Flags().Lookup("workspace")
+	require.NotNil(t, flag)
+	assert.Equal(t, ".", flag.DefValue)
+}
+
+func TestCommandTree_DoctorExists(t *testing.T) {
+	root := GetRootCmd()
+	names := make(map[string]bool)
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	assert.True(t, names["doctor"], "doctor command should exist")
+}
