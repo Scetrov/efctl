@@ -43,8 +43,8 @@ wget -qO /tmp/efctl https://github.com/Scetrov/efctl/releases/latest/download/ef
 
 #### curl (Homebrew not required)
 
-```bash
-curl -fsSL https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwin-$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/') \
+```zsh
+curl -fsSL "https://github.com/Scetrov/efctl/releases/latest/download/efctl-darwin-$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')" \
   -o /tmp/efctl && chmod +x /tmp/efctl && mkdir -p ~/.local/bin && mv /tmp/efctl ~/.local/bin/efctl
 ```
 
