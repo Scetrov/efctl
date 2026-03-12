@@ -1,3 +1,4 @@
+exclude: ^tmp/
 repos:
   - repo: local
     hooks:

@@ -62,6 +62,11 @@ type ContainerRuntimeInfo struct {
 	Version string // e.g. "4.9.0"
 	Path    string // absolute path to the binary
 	Found   bool
+
+	// Podman specific configuration from containers.conf
+	PodmanNetns          string
+	PodmanRuntime        string
+	PodmanFirewallDriver string
 }
 
 // NodeInfo holds the detected Node.js installation details.
@@ -261,7 +266,63 @@ func gatherContainerRuntime(prereqs *env.CheckResult) ContainerRuntimeInfo {
 		info.Version = parseContainerVersion(engine, strings.TrimSpace(string(out)))
 	}
 
+	if engine == "podman" {
+		gatherPodmanConfig(&info)
+	}
+
 	return info
+}
+
+func gatherPodmanConfig(info *ContainerRuntimeInfo) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	configPath := filepath.Join(home, ".config/containers/containers.conf")
+	data, err := os.ReadFile(configPath) // #nosec G304
+	if err != nil {
+		// Try system-wide as fallback
+		data, err = os.ReadFile("/etc/containers/containers.conf")
+		if err != nil {
+			return
+		}
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	var currentSection string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.Trim(line, "[]")
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		val := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+
+		switch currentSection {
+		case "containers":
+			if key == "netns" {
+				info.PodmanNetns = val
+			} else if key == "runtime" {
+				info.PodmanRuntime = val
+			}
+		case "network":
+			if key == "firewall_driver" {
+				info.PodmanFirewallDriver = val
+			}
+		}
+	}
 }
 
 // parseContainerVersion extracts a bare version number from the first line of

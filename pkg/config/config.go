@@ -23,6 +23,8 @@ type Config struct {
 	BuilderScaffoldURL    string `yaml:"builder-scaffold-url"`
 	BuilderScaffoldRef    string `yaml:"builder-scaffold-ref"`
 	BuilderScaffoldBranch string `yaml:"builder-scaffold-branch"` // Deprecated: use builder-scaffold-ref
+	GitAutoCRLF           *bool  `yaml:"git-autocrlf"`
+	ContainerEngine       string `yaml:"container-engine"`
 
 	// Internal field to track if a config file was actually loaded
 	configFileLoaded bool
@@ -198,6 +200,22 @@ func (c *Config) GetBuilderScaffoldRef() string {
 		}
 	}
 	return DefaultBranch
+}
+
+// GetGitAutoCRLF returns the configured git-autocrlf option, falling back to false.
+func (c *Config) GetGitAutoCRLF() bool {
+	if c != nil && c.GitAutoCRLF != nil {
+		return *c.GitAutoCRLF
+	}
+	return false
+}
+
+// GetContainerEngine returns the configured container-engine option, falling back to auto-detect.
+func (c *Config) GetContainerEngine() string {
+	if c != nil && c.ContainerEngine != "" {
+		return c.ContainerEngine
+	}
+	return "auto-detect"
 }
 
 // WasLoaded returns true if a config file was successfully loaded (not just defaulted).

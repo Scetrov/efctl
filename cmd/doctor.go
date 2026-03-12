@@ -53,7 +53,15 @@ checked-out builder-scaffold and world-contracts repositories.`,
 const doctorFmt = "%-22s %s\n"
 
 func printDoctorReport(r *doctor.Report) {
-	// ── efctl identity ────────────────────────────────────────────
+	printIdentitySection(r)
+	printToolsSection(r)
+	printEnvSection(r)
+	printPortsSection(r)
+	printReposSection(r)
+	printConfigSection(r)
+}
+
+func printIdentitySection(r *doctor.Report) {
 	fmt.Printf(doctorFmt, "efctl:", fmt.Sprintf(
 		"%s (%s) built %s %s/%s",
 		r.Efctl.Version, r.Efctl.CommitSHA, r.Efctl.BuildDate,
@@ -63,12 +71,14 @@ func printDoctorReport(r *doctor.Report) {
 	fmt.Printf(doctorFmt, "wsl:", yesNo(r.System.IsWSL))
 	fmt.Printf(doctorFmt, "go runtime:", r.System.GoVersion)
 	fmt.Println()
+}
 
-	// ── Tool versions ─────────────────────────────────────────────
+func printToolsSection(r *doctor.Report) {
 	if r.Container.Found {
 		fmt.Printf(doctorFmt, "container runtime:", fmt.Sprintf(
 			"%s %s (%s)", r.Container.Engine, r.Container.Version, r.Container.Path,
 		))
+		printPodmanDetails(r)
 	} else {
 		fmt.Printf(doctorFmt, "container runtime:", "not found")
 	}
@@ -85,8 +95,24 @@ func printDoctorReport(r *doctor.Report) {
 		fmt.Printf(doctorFmt, "git:", "not found")
 	}
 	fmt.Println()
+}
 
-	// ── Environment state ─────────────────────────────────────────
+func printPodmanDetails(r *doctor.Report) {
+	if r.Container.Engine != "podman" {
+		return
+	}
+	if r.Container.PodmanNetns != "" {
+		fmt.Printf(doctorFmt, "podman netns:", r.Container.PodmanNetns)
+	}
+	if r.Container.PodmanRuntime != "" {
+		fmt.Printf(doctorFmt, "podman runtime:", r.Container.PodmanRuntime)
+	}
+	if r.Container.PodmanFirewallDriver != "" {
+		fmt.Printf(doctorFmt, "podman firewall:", r.Container.PodmanFirewallDriver)
+	}
+}
+
+func printEnvSection(r *doctor.Report) {
 	fmt.Printf(doctorFmt, "env:", envStateLabel(r.Env))
 	if len(r.Env.Logs) > 0 {
 		fmt.Printf(doctorFmt, "container logs:", "last 10 lines from running containers")
@@ -98,8 +124,9 @@ func printDoctorReport(r *doctor.Report) {
 		}
 	}
 	fmt.Println()
+}
 
-	// ── Port availability ─────────────────────────────────────────
+func printPortsSection(r *doctor.Report) {
 	for _, p := range r.Ports {
 		avail := "free"
 		if !p.Available {
@@ -108,14 +135,16 @@ func printDoctorReport(r *doctor.Report) {
 		fmt.Printf(doctorFmt, fmt.Sprintf("port %d:", p.Port), avail)
 	}
 	fmt.Println()
+}
 
-	// ── Repository state ──────────────────────────────────────────
+func printReposSection(r *doctor.Report) {
 	for _, repo := range r.Repos {
 		fmt.Printf(doctorFmt, repo.Name+":", repoLabel(repo))
 	}
 	fmt.Println()
+}
 
-	// ── Config file ───────────────────────────────────────────────
+func printConfigSection(r *doctor.Report) {
 	if r.Config.Loaded {
 		fmt.Printf(doctorFmt, "config file:", r.Config.FilePath+" (loaded)")
 		for _, entry := range r.Config.Entries {

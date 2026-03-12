@@ -560,10 +560,16 @@ func (c *Client) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+const ProjectIssuesURL = "https://github.com/evefrontier/efctl/issues"
+
 // StartContainer starts an existing container by name.
 func (c *Client) StartContainer(ctx context.Context, name string) error {
 	if err := c.docker.ContainerStart(ctx, name, dockercontainer.StartOptions{}); err != nil {
-		return fmt.Errorf("start container %s: %w", name, err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "netavark") && strings.Contains(errStr, "nftables") {
+			return fmt.Errorf("start container %s: %w\n\nTIP: This error often occurs on WSL with Podman's default networking. Try setting 'firewall_driver = \"iptables\"' in your ~/.config/containers/containers.conf and running 'podman system reset' if the issue persists.\n\nPlease report this issue at %s - include the output of 'efctl doctor'.", name, err, ProjectIssuesURL)
+		}
+		return fmt.Errorf("start container %s: %w\n\nPlease report this issue at %s - include the output of 'efctl doctor'.", name, err, ProjectIssuesURL)
 	}
 	return nil
 }

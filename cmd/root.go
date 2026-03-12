@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -90,6 +91,8 @@ func Execute() {
 	ui.PrintBanner()
 	if err := rootCmd.Execute(); err != nil {
 		ui.Error.Println(err.Error())
+		fmt.Printf("\nIf you need help, please report this issue at https://github.com/evefrontier/efctl/issues\n")
+		fmt.Printf("Include the output of 'efctl doctor' in your report.\n")
 		os.Exit(1)
 	}
 }

@@ -31,5 +31,12 @@ builder-scaffold-url: %q
 # Ref (branch, tag, or commit) to checkout for builder-scaffold (default: main)
 builder-scaffold-ref: %q
 # builder-scaffold-branch: %q # Deprecated: use builder-scaffold-ref
+
+# Configure Git core.autocrlf for cloned repositories (default: false)
+git-autocrlf: false
+
+# Preferred container engine: "docker", "podman", or "auto-detect" (default: auto-detect)
+# If Podman networking fails on WSL, try setting this to "docker".
+container-engine: auto-detect
 `, DefaultWorldContractsURL, RecommendedWorldContractsRef, RecommendedWorldContractsRef, DefaultBuilderScaffoldURL, RecommendedBuilderScaffoldRef, RecommendedBuilderScaffoldRef)
 }

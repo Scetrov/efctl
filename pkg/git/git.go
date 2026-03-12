@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"efctl/pkg/config"
 	"efctl/pkg/ui"
 )
 
@@ -63,86 +64,108 @@ func (g *DefaultClient) SetupWorkDir(path string) error {
 func CloneRepository(url string, dest string) error {
 	// Check if directory already exists
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
-		if err := ensureGitRepository(dest); err != nil {
-			return err
-		}
-
-		spinner, _ := ui.Spin(fmt.Sprintf("%s Updating remote for %s...", ui.GitEmoji, dest))
-
-		// Try setting the remote URL
-		cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url) // #nosec G204
-		if err := cmd.Run(); err != nil {
-			// If set-url fails, try adding the remote
-			cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url) // #nosec G204
-			if err := cmd.Run(); err != nil {
-				spinner.Fail(fmt.Sprintf("Failed to update remote for %s", dest))
-				ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
-				return fmt.Errorf("failed to configure remote origin for %s: %w", dest, err)
-			}
-		}
-
-		// Fetch from the updated remote with retry logic
-		var fetchErr error
-		var fetchOutput []byte
-		for attempt := 1; attempt <= 3; attempt++ {
-			cmd = exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
-			fetchOutput, fetchErr = cmd.CombinedOutput()
-			if fetchErr == nil {
-				break
-			}
-
-			if !isRetriableGitError(string(fetchOutput), fetchErr) {
-				break
-			}
-
-			if attempt < 3 {
-				delay := time.Duration(1<<uint(attempt)) * time.Second
-				ui.Debug.Println(fmt.Sprintf("Git fetch attempt %d failed, retrying in %v...", attempt, delay))
-				time.Sleep(delay)
-			}
-		}
-
-		if fetchErr != nil {
-			spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
-			ui.Debug.Printf("git fetch error: %v\n%s", fetchErr, string(fetchOutput))
-			return fmt.Errorf("failed to fetch remote for %s: %v\n%s", dest, fetchErr, string(fetchOutput))
-		}
-
-		spinner.Success(fmt.Sprintf("Updated remote and fetched %s", dest))
-		return nil
+		return updateExistingRepository(url, dest)
 	}
 
+	return cloneNewRepository(url, dest)
+}
+
+func updateExistingRepository(url string, dest string) error {
+	if err := ensureGitRepository(dest); err != nil {
+		return err
+	}
+
+	spinner, _ := ui.Spin(fmt.Sprintf("%s Updating remote for %s...", ui.GitEmoji, dest))
+
+	// Try setting the remote URL
+	if err := setOrAddRemote(dest, url); err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to update remote for %s", dest))
+		return err
+	}
+
+	// Fetch from the updated remote with retry logic
+	if err := fetchWithRetry(dest, url); err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to fetch from %s", url))
+		return err
+	}
+
+	spinner.Success(fmt.Sprintf("Updated remote and fetched %s", dest))
+	ensureAutocrlf(dest)
+	return nil
+}
+
+func cloneNewRepository(url string, dest string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("%s Cloning %s...", ui.GitEmoji, url))
 
-	// Retry clone with exponential backoff for transient network failures
+	autocrlf := "false"
+	if config.Loaded.GetGitAutoCRLF() {
+		autocrlf = "true"
+	}
+
 	var lastErr error
 	var output []byte
 	for attempt := 1; attempt <= 3; attempt++ {
-		cmd := exec.Command("git", "clone", url, dest) // #nosec G204
+		cmd := exec.Command("git", "clone", "-c", "core.autocrlf="+autocrlf, url, dest) // #nosec G204
 		output, lastErr = cmd.CombinedOutput()
 		if lastErr == nil {
 			spinner.Success(fmt.Sprintf("Cloned %s", dest))
 			return nil
 		}
 
-		// Check if it's a network error worth retrying
-		if !isRetriableGitError(string(output), lastErr) {
-			// Not a network error, fail immediately
+		if !isRetriableGitError(string(output), lastErr) || attempt == 3 {
 			break
 		}
 
-		if attempt < 3 {
-			// Exponential backoff: 2s, 4s
-			delay := time.Duration(1<<uint(attempt)) * time.Second
-			spinner.UpdateText(fmt.Sprintf("Clone attempt %d failed, retrying in %v...", attempt, delay))
-			ui.Debug.Println(fmt.Sprintf("Git clone attempt %d failed: %v", attempt, lastErr))
-			time.Sleep(delay)
-			spinner.UpdateText(fmt.Sprintf("%s Cloning %s (attempt %d/3)...", ui.GitEmoji, url, attempt+1))
-		}
+		delay := time.Duration(1<<uint(attempt)) * time.Second
+		spinner.UpdateText(fmt.Sprintf("Clone attempt %d failed, retrying in %v...", attempt, delay))
+		time.Sleep(delay)
+		spinner.UpdateText(fmt.Sprintf("%s Cloning %s (attempt %d/3)...", ui.GitEmoji, url, attempt+1))
 	}
 
 	spinner.Fail(fmt.Sprintf("Failed to clone %s after 3 attempts", url))
-	return fmt.Errorf("git clone error after %d attempts: %v\n%s", 3, lastErr, string(output))
+	return fmt.Errorf("git clone error after 3 attempts: %v\n%s", lastErr, string(output))
+}
+
+func setOrAddRemote(dest, url string) error {
+	cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url) // #nosec G204
+	if err := cmd.Run(); err != nil {
+		cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url) // #nosec G204
+		if err := cmd.Run(); err != nil {
+			ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
+			return fmt.Errorf("failed to configure remote origin for %s: %w", dest, err)
+		}
+	}
+	return nil
+}
+
+func fetchWithRetry(dest, url string) error {
+	var fetchErr error
+	var fetchOutput []byte
+	for attempt := 1; attempt <= 3; attempt++ {
+		cmd := exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
+		fetchOutput, fetchErr = cmd.CombinedOutput()
+		if fetchErr == nil {
+			return nil
+		}
+
+		if !isRetriableGitError(string(fetchOutput), fetchErr) || attempt == 3 {
+			break
+		}
+
+		delay := time.Duration(1<<uint(attempt)) * time.Second
+		ui.Debug.Println(fmt.Sprintf("Git fetch attempt %d failed, retrying in %v...", attempt, delay))
+		time.Sleep(delay)
+	}
+	ui.Debug.Printf("git fetch error: %v\n%s", fetchErr, string(fetchOutput))
+	return fmt.Errorf("failed to fetch remote for %s: %v\n%s", dest, fetchErr, string(fetchOutput))
+}
+
+func ensureAutocrlf(dest string) {
+	autocrlf := "false"
+	if config.Loaded.GetGitAutoCRLF() {
+		autocrlf = "true"
+	}
+	_ = exec.Command("git", "-C", dest, "config", "core.autocrlf", autocrlf).Run() // #nosec G204
 }
 
 // isRetriableGitError checks if a git error is worth retrying (transient network issues)
@@ -182,6 +205,14 @@ func CheckoutRef(repoPath string, ref string) error {
 
 	spinner, _ := ui.Spin(fmt.Sprintf("%s Checking out ref '%s' in %s...", ui.GitEmoji, ref, repoPath))
 
+	// Ensure core.autocrlf matches configuration before checkout
+	autocrlf := "false"
+	if config.Loaded.GetGitAutoCRLF() {
+		autocrlf = "true"
+	}
+	cmdConfig := exec.Command("git", "-C", repoPath, "config", "core.autocrlf", autocrlf) // #nosec G204
+	cmdConfig.Run()
+
 	cmd := exec.Command("git", "-C", repoPath, "checkout", ref) // #nosec G204
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -201,6 +232,28 @@ func CheckoutRef(repoPath string, ref string) error {
 
 	spinner.Success(fmt.Sprintf("Checked out ref '%s' in %s", ref, repoPath))
 	return nil
+}
+
+// NormalizeLineEndings ensures a file has LF line endings (mimicks dos2unix).
+func NormalizeLineEndings(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(path) // #nosec G304
+	if err != nil {
+		return err
+	}
+
+	// Simple CRLF to LF replacement
+	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+
+	if normalized == string(data) {
+		return nil // No change needed
+	}
+
+	return os.WriteFile(path, []byte(normalized), info.Mode()) // #nosec G703 G304
 }
 
 // SetupWorkDir creates the workspace directory if it doesn't exist
