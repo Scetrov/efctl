@@ -23,9 +23,7 @@ A clear and concise description of what you expected to happen.
 
 ## Environment details
 
-- OS: [e.g. Ubuntu 22.04, macOS]
-- Go Version: [e.g. 1.20]
-- Container Engine: [Docker / Podman]
+Run 'efctl doctor' and paste the output here:
 
 ## Additional context
 
