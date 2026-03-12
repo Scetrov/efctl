@@ -109,6 +109,7 @@ type PortInfo struct {
 type RepoInfo struct {
 	Name    string // e.g. "builder-scaffold"
 	Path    string // absolute path on disk
+	Remote  string // git remote URL
 	Commit  string // HEAD commit SHA (full)
 	Branch  string // current branch, or empty if detached
 	IsDirty bool   // true if there are uncommitted changes
@@ -445,15 +446,21 @@ func gatherPorts() []PortInfo {
 }
 
 func gatherRepos(workspace string) []RepoInfo {
-	repos := []struct{ name, relPath string }{
-		{"builder-scaffold", filepath.Join("test-env", "builder-scaffold")},
-		{"world-contracts", filepath.Join("test-env", "world-contracts")},
-	}
+	repoNames := []string{"builder-scaffold", "world-contracts"}
+	result := make([]RepoInfo, 0, len(repoNames))
 
-	result := make([]RepoInfo, 0, len(repos))
-	for _, r := range repos {
-		fullPath := filepath.Join(workspace, r.relPath)
-		result = append(result, gatherRepo(r.name, fullPath))
+	for _, name := range repoNames {
+		// First check in the workspace root
+		fullPath := filepath.Join(workspace, name)
+		info := gatherRepo(name, fullPath)
+
+		// If not found in root, check in test-env/
+		if !info.Found {
+			testEnvPath := filepath.Join(workspace, "test-env", name)
+			info = gatherRepo(name, testEnvPath)
+		}
+
+		result = append(result, info)
 	}
 	return result
 }
@@ -485,8 +492,13 @@ func gatherRepo(name, path string) RepoInfo {
 	}
 
 	// Dirty status: any output means uncommitted changes exist.
-	if out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output(); err == nil { // #nosec G204 -- path is a directory argument to git -C, not a shell command
+	if out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output(); err == nil { // #nosec G204
 		info.IsDirty = len(strings.TrimSpace(string(out))) > 0
+	}
+
+	// Remote URL.
+	if out, err := exec.Command("git", "-C", path, "remote", "get-url", "origin").Output(); err == nil { // #nosec G204
+		info.Remote = strings.TrimSpace(string(out))
 	}
 
 	return info

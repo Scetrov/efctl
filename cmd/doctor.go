@@ -201,7 +201,11 @@ func repoLabel(r doctor.RepoInfo) string {
 		dirtyStr = "modified"
 	}
 
-	return fmt.Sprintf("%s on %s (%s)", shortSHA, branch, dirtyStr)
+	res := fmt.Sprintf("%s on %s (%s)", shortSHA, branch, dirtyStr)
+	if r.Remote != "" {
+		res = r.Remote + " " + res
+	}
+	return res
 }
 
 func init() {
