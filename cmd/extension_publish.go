@@ -11,23 +11,15 @@ import (
 )
 
 var extensionPublishCmd = &cobra.Command{
-	Use:   "publish [contract-path]",
+	Use:   "publish",
 	Short: "Publish a custom extension contract",
-	Long:  `Runs Step 8 of the Builder flow. Publishes the custom contract locally via the container and updates BUILDER_PACKAGE_ID and EXTENSION_CONFIG_ID in .env`,
-	Args:  cobra.ExactArgs(1),
+	Long:  `Runs Step 8 of the Builder flow. Publishes the single auto-discovered extension contract locally via the container and updates BUILDER_PACKAGE_ID and EXTENSION_CONFIG_ID in .env`,
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		contractPath := args[0]
-
 		if err := validate.Network(envNetwork); err != nil {
 			ui.Error.Println(err.Error())
 			os.Exit(1)
 		}
-		if err := validate.ContractPath(contractPath); err != nil {
-			ui.Error.Println(err.Error())
-			os.Exit(1)
-		}
-
-		ui.Info.Printf("Publishing extension contract from %s...\n", contractPath)
 
 		c, err := container.NewClient()
 		if err != nil {
@@ -35,7 +27,7 @@ var extensionPublishCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		if err := builder.PublishExtension(c, workspacePath, envNetwork, contractPath); err != nil {
+		if err := builder.PublishExtension(c, workspacePath, envNetwork); err != nil {
 			ui.Error.Println("Publish failed: " + err.Error())
 			os.Exit(1)
 		}

@@ -70,3 +70,27 @@ func TestConfigValidation_RejectsInsecure(t *testing.T) {
 		assert.Error(t, err, "URL %s should be rejected", url)
 	}
 }
+
+func TestConfigLoad_AdditionalBindMounts(t *testing.T) {
+	dir := t.TempDir()
+	mountDir := filepath.Join(dir, "contracts")
+	require.NoError(t, os.MkdirAll(mountDir, 0750))
+
+	cfgPath := filepath.Join(dir, "efctl.yaml")
+	yaml := `additional-bind-mounts:
+  - hostPath: ./contracts
+    identifier: contracts_mount
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(yaml), 0600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.AdditionalBindMounts, 1)
+	assert.Equal(t, "./contracts", cfg.AdditionalBindMounts[0].HostPath)
+	assert.Equal(t, "contracts_mount", cfg.AdditionalBindMounts[0].Identifier)
+
+	resolved, err := cfg.ResolveAdditionalBindMounts("")
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, mountDir, resolved[0].HostPath)
+}

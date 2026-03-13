@@ -6,49 +6,99 @@ import (
 	"path/filepath"
 	"testing"
 
+	"efctl/pkg/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolvePublishContractDir_UsesCanonicalBuilderContract(t *testing.T) {
+func TestResolvePublishContractDir_UsesSingleBuilderCandidate(t *testing.T) {
 	workspace := t.TempDir()
 	contractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
 	require.NoError(t, os.MkdirAll(contractDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir, "Move.toml"), []byte("[package]\nname = \"smart_gate_extension\"\n\n[dependencies]\nworld = { local = \"../../../world-contracts/contracts/world\" }\n"), 0600))
 
-	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "smart_gate_extension")
+	candidate, err := resolvePublishContractDir(workspace)
 	require.NoError(t, err)
-	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/smart_gate_extension", containerDir)
-	assert.Equal(t, "smart_gate_extension", resolvedPath)
+	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/smart_gate_extension", candidate.ContainerPath)
+	assert.Equal(t, contractDir, candidate.HostPath)
 }
 
-func TestResolvePublishContractDir_ResolvesLegacyExtensionAlias(t *testing.T) {
-	workspace := t.TempDir()
-	contractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
-	require.NoError(t, os.MkdirAll(contractDir, 0750))
-
-	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "smart_gate")
-	require.NoError(t, err)
-	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/smart_gate_extension", containerDir)
-	assert.Equal(t, "smart_gate_extension", resolvedPath)
-}
-
-func TestResolvePublishContractDir_UsesWorldContractsWhenBuilderMissing(t *testing.T) {
+func TestResolvePublishContractDir_UsesSingleWorldContractsCandidate(t *testing.T) {
 	workspace := t.TempDir()
 	contractDir := filepath.Join(workspace, "world-contracts", "contracts", "extension_examples")
 	require.NoError(t, os.MkdirAll(contractDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir, "Move.toml"), []byte("[package]\nname = \"extension_examples\"\n\n[dependencies]\nworld = { local = \"../world\" }\n"), 0600))
 
-	containerDir, resolvedPath, err := resolvePublishContractDir(workspace, "extension_examples")
+	candidate, err := resolvePublishContractDir(workspace)
 	require.NoError(t, err)
-	assert.Equal(t, "/workspace/world-contracts/contracts/extension_examples", containerDir)
-	assert.Equal(t, "extension_examples", resolvedPath)
+	assert.Equal(t, "/workspace/world-contracts/contracts/extension_examples", candidate.ContainerPath)
+	assert.Equal(t, contractDir, candidate.HostPath)
+}
+
+func TestResolvePublishContractDir_UsesSingleAdditionalBindMountCandidate(t *testing.T) {
+	workspace := t.TempDir()
+	customRoot := filepath.Join(workspace, "external-contracts")
+	contractDir := filepath.Join(customRoot, "smart_gate_extension")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir, "Move.toml"), []byte("[package]\nname = \"smart_gate_extension\"\n\n[dependencies]\nworld = { local = \"../../world-contracts/contracts/world\" }\n"), 0600))
+
+	previousConfig := config.Loaded
+	defer func() { config.Loaded = previousConfig }()
+	config.Loaded = &config.Config{AdditionalBindMounts: []config.AdditionalBindMount{{
+		HostPath:   customRoot,
+		Identifier: "external_contracts",
+	}}}
+
+	candidate, err := resolvePublishContractDir(workspace)
+	require.NoError(t, err)
+	assert.Equal(t, "/workspace/mounts/external_contracts/smart_gate_extension", candidate.ContainerPath)
+	assert.Equal(t, contractDir, candidate.HostPath)
+}
+
+func TestResolvePublishContractDir_IgnoresDirectoriesWithoutMoveToml(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "not_publishable")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+
+	_, err := resolvePublishContractDir(workspace)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no publishable extension found")
+}
+
+func TestResolvePublishContractDir_IgnoresMovePackagesWithoutWorldDependency(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir := filepath.Join(workspace, "world-contracts", "contracts", "world")
+	require.NoError(t, os.MkdirAll(contractDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir, "Move.toml"), []byte("[package]\nname = \"World\"\n"), 0600))
+
+	_, err := resolvePublishContractDir(workspace)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no publishable extension found")
+}
+
+func TestResolvePublishContractDir_MultipleCandidatesAbort(t *testing.T) {
+	workspace := t.TempDir()
+	builderContractDir := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
+	worldContractDir := filepath.Join(workspace, "world-contracts", "contracts", "extension_examples")
+	require.NoError(t, os.MkdirAll(builderContractDir, 0750))
+	require.NoError(t, os.MkdirAll(worldContractDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(builderContractDir, "Move.toml"), []byte("[package]\nname = \"smart_gate_extension\"\n\n[dependencies]\nworld = { local = \"../../../world-contracts/contracts/world\" }\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(worldContractDir, "Move.toml"), []byte("[package]\nname = \"extension_examples\"\n\n[dependencies]\nworld = { local = \"../world\" }\n"), 0600))
+
+	_, err := resolvePublishContractDir(workspace)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple publishable extensions found")
+	assert.Contains(t, err.Error(), builderContractDir)
+	assert.Contains(t, err.Error(), worldContractDir)
 }
 
 func TestResolvePublishContractDir_NotFound(t *testing.T) {
 	workspace := t.TempDir()
 
-	_, _, err := resolvePublishContractDir(workspace, "smart_gate")
+	_, err := resolvePublishContractDir(workspace)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "contract path 'smart_gate' not found")
+	assert.Contains(t, err.Error(), "no publishable extension found")
 }
 
 // ── extractPublishIDs ──────────────────────────────────────────────

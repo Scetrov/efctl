@@ -7,8 +7,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"efctl/pkg/config"
 	"efctl/pkg/container"
 	"efctl/pkg/setup"
 	"efctl/pkg/ui"
@@ -26,28 +28,32 @@ type objectChange struct {
 	ObjectType string `json:"objectType"`
 }
 
+type publishSearchRoot struct {
+	HostPath      string
+	ContainerPath string
+}
+
+type publishCandidate struct {
+	Name          string
+	HostPath      string
+	ContainerPath string
+}
+
+const worldDependencyMarker = "world = {"
+
 // PublishExtension publishes the custom extension to the smart assembly testnet
 // and updates the builder-scaffold/.env with the extracted package IDs.
-func PublishExtension(c container.ContainerClient, workspace string, network string, contractPath string) error {
-
-	// Ensure no absolute paths
-	cleanContractPath := filepath.Clean(contractPath)
-	slashContractPath := filepath.ToSlash(cleanContractPath)
-	if filepath.IsAbs(cleanContractPath) || strings.HasPrefix(slashContractPath, "/") {
-		return fmt.Errorf("contract path must be relative to builder-scaffold/move-contracts or world-contracts/contracts, got absolute: %s", contractPath)
-	}
-
-	containerContractDir, resolvedContractPath, err := resolvePublishContractDir(workspace, slashContractPath)
+func PublishExtension(c container.ContainerClient, workspace string, network string) error {
+	candidate, err := resolvePublishContractDir(workspace)
 	if err != nil {
 		return err
 	}
-	if resolvedContractPath != slashContractPath {
-		ui.Warn.Printf("Warning: Contract path '%s' resolved to '%s'.\n", slashContractPath, resolvedContractPath)
-	}
 
-	ui.Info.Printf("Executing publish inside container at %s...\n", containerContractDir)
+	ui.Info.Printf("Publishing extension contract from %s...\n", candidate.HostPath)
 
-	publishCmd, err := buildPublishCmd(workspace, network, containerContractDir)
+	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
+
+	publishCmd, err := buildPublishCmd(workspace, network, candidate.ContainerPath)
 	if err != nil {
 		return err
 	}
@@ -71,50 +77,34 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 	return writePublishedIDs(workspace, output)
 }
 
-func resolvePublishContractDir(workspace string, contractPath string) (containerDir string, resolvedPath string, err error) {
-	for _, candidate := range contractPathCandidates(contractPath) {
-		builderScaffoldPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", filepath.FromSlash(candidate))
-		worldContractsPath := filepath.Join(workspace, "world-contracts", "contracts", filepath.FromSlash(candidate))
-
-		builderExists, err := pathExists(builderScaffoldPath)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to stat %s: %w", builderScaffoldPath, err)
-		}
-
-		worldExists, err := pathExists(worldContractsPath)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to stat %s: %w", worldContractsPath, err)
-		}
-
-		if builderExists && worldExists {
-			ui.Warn.Printf("Warning: Contract path '%s' exists in both builder-scaffold/move-contracts and world-contracts/contracts. Defaulting to builder-scaffold/move-contracts.\n", candidate)
-			return fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", candidate), candidate, nil
-		}
-		if builderExists {
-			return fmt.Sprintf("/workspace/builder-scaffold/move-contracts/%s", candidate), candidate, nil
-		}
-		if worldExists {
-			return fmt.Sprintf("/workspace/world-contracts/contracts/%s", candidate), candidate, nil
-		}
+func resolvePublishContractDir(workspace string) (publishCandidate, error) {
+	searchRoots, err := publishSearchRoots(workspace)
+	if err != nil {
+		return publishCandidate{}, err
 	}
 
-	return "", "", fmt.Errorf("contract path '%s' not found in either builder-scaffold/move-contracts or world-contracts/contracts", contractPath)
-}
-
-func contractPathCandidates(contractPath string) []string {
-	candidates := []string{contractPath}
-	if strings.HasSuffix(contractPath, "_extension") {
-		return candidates
+	candidates, err := discoverPublishCandidates(searchRoots)
+	if err != nil {
+		return publishCandidate{}, err
 	}
 
-	base := path.Base(contractPath)
-	dir := path.Dir(contractPath)
-	aliasedBase := base + "_extension"
-	if dir == "." {
-		return append(candidates, aliasedBase)
+	if len(candidates) == 0 {
+		searchedRoots := make([]string, 0, len(searchRoots))
+		for _, root := range searchRoots {
+			searchedRoots = append(searchedRoots, root.HostPath)
+		}
+		return publishCandidate{}, fmt.Errorf("no publishable extension found; searched immediate child directories under: %s", strings.Join(searchedRoots, ", "))
 	}
 
-	return append(candidates, path.Join(dir, aliasedBase))
+	if len(candidates) > 1 {
+		matchingPaths := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			matchingPaths = append(matchingPaths, candidate.HostPath)
+		}
+		return publishCandidate{}, fmt.Errorf("multiple publishable extensions found; aborting: %s", strings.Join(matchingPaths, ", "))
+	}
+
+	return candidates[0], nil
 }
 
 func pathExists(filePath string) (bool, error) {
@@ -126,6 +116,96 @@ func pathExists(filePath string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func publishSearchRoots(workspace string) ([]publishSearchRoot, error) {
+	roots := []publishSearchRoot{
+		{
+			HostPath:      filepath.Join(workspace, "builder-scaffold", "move-contracts"),
+			ContainerPath: "/workspace/builder-scaffold/move-contracts",
+		},
+		{
+			HostPath:      filepath.Join(workspace, "world-contracts", "contracts"),
+			ContainerPath: "/workspace/world-contracts/contracts",
+		},
+	}
+
+	if config.Loaded == nil {
+		return roots, nil
+	}
+
+	resolvedMounts, err := config.Loaded.ResolveAdditionalBindMounts(workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, mount := range resolvedMounts {
+		roots = append(roots, publishSearchRoot{
+			HostPath:      mount.HostPath,
+			ContainerPath: path.Join("/workspace/mounts", mount.Identifier),
+		})
+	}
+
+	return roots, nil
+}
+
+func discoverPublishCandidates(searchRoots []publishSearchRoot) ([]publishCandidate, error) {
+	var candidates []publishCandidate
+
+	for _, root := range searchRoots {
+		entries, err := os.ReadDir(root.HostPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to read publish root %s: %w", root.HostPath, err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			hostCandidatePath := filepath.Join(root.HostPath, entry.Name())
+			manifestPath := filepath.Join(hostCandidatePath, "Move.toml")
+			moveTomlExists, err := pathExists(manifestPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to stat Move.toml for %s: %w", hostCandidatePath, err)
+			}
+			if !moveTomlExists {
+				continue
+			}
+
+			isExtension, err := isExtensionManifest(manifestPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to inspect Move.toml for %s: %w", hostCandidatePath, err)
+			}
+			if !isExtension {
+				continue
+			}
+
+			candidates = append(candidates, publishCandidate{
+				Name:          entry.Name(),
+				HostPath:      hostCandidatePath,
+				ContainerPath: path.Join(root.ContainerPath, entry.Name()),
+			})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].HostPath < candidates[j].HostPath
+	})
+
+	return candidates, nil
+}
+
+func isExtensionManifest(manifestPath string) (bool, error) {
+	manifestContent, err := os.ReadFile(manifestPath) // #nosec G304 -- manifestPath is constructed from workspace-local directories discovered via os.ReadDir
+	if err != nil {
+		return false, err
+	}
+
+	return strings.Contains(string(manifestContent), worldDependencyMarker), nil
 }
 
 // buildPublishCmd constructs the sui publish command and, for localnet, deletes any

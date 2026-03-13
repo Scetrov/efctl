@@ -24,7 +24,7 @@ type containerRuntime struct {
 	env    []string
 }
 
-const extensionPublishContractPath = "smart_gate_extension"
+const worldDependencyMarker = "world = {"
 
 // efctlBin returns the absolute path to the compiled efctl binary.
 // Set EFCTL_BINARY env var to override. Otherwise it builds from source.
@@ -265,6 +265,65 @@ func isKnownInfraOrDriftIssue(output string) bool {
 	return false
 }
 
+func publishCandidateDirs(workspace string) ([]string, error) {
+	roots := []string{
+		filepath.Join(workspace, "builder-scaffold", "move-contracts"),
+		filepath.Join(workspace, "world-contracts", "contracts"),
+	}
+
+	var candidates []string
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			candidateDir := filepath.Join(root, entry.Name())
+			manifestPath := filepath.Join(candidateDir, "Move.toml")
+			manifest, err := os.ReadFile(manifestPath)
+			if err == nil && strings.Contains(string(manifest), worldDependencyMarker) {
+				candidates = append(candidates, candidateDir)
+			}
+		}
+	}
+
+	return candidates, nil
+}
+
+func prepareSinglePublishCandidate(t *testing.T, workspace string) {
+	t.Helper()
+
+	candidates, err := publishCandidateDirs(workspace)
+	require.NoError(t, err)
+	require.NotEmpty(t, candidates, "expected at least one publish candidate in the test workspace")
+
+	preferredCandidate := filepath.Join(workspace, "builder-scaffold", "move-contracts", "smart_gate_extension")
+	keepCandidate := candidates[0]
+	for _, candidate := range candidates {
+		if candidate == preferredCandidate {
+			keepCandidate = candidate
+			break
+		}
+	}
+
+	for _, candidate := range candidates {
+		if candidate == keepCandidate {
+			continue
+		}
+		require.NoError(t, os.RemoveAll(candidate))
+	}
+
+	t.Logf("kept publish candidate %s and removed %d other candidates", keepCandidate, len(candidates)-1)
+}
+
 type e2eLifecycleTester struct {
 	bin                    string
 	workspace              string
@@ -331,7 +390,9 @@ func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
 		t.Skip("skipping: extension_init did not pass")
 	}
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", extensionPublishContractPath)
+	prepareSinglePublishCandidate(t, tester.workspace)
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish")
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: extension publish hit a known infra/drift issue:\n%s", out)
@@ -353,7 +414,7 @@ func (tester *e2eLifecycleTester) testExtensionPublishIdempotent(t *testing.T) {
 		t.Skip("skipping: extension_publish did not pass")
 	}
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", extensionPublishContractPath)
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish")
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: idempotent publish hit a known infra/drift issue:\n%s", out)

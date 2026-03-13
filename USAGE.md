@@ -115,9 +115,23 @@ Initializes the builder-scaffold by copying world artifacts `deployments/localne
 - `-n, --network string`: The network to copy artifacts from (default: `localnet`)
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
-### `efctl env extension publish [contract-path]`
+### `efctl env extension publish`
 
-Publishes the custom extension to the smart assembly testnet and updates the builder.env. `[contract-path]` must be relative to `builder-scaffold/move-contracts` or `world-contracts/contracts`.
+Publishes the single auto-discovered extension to the smart assembly testnet and updates `builder-scaffold/.env`.
+
+The command scans immediate child directories under `builder-scaffold/move-contracts`, `world-contracts/contracts`, and any configured additional bind mounts. A directory is only considered a publish candidate if it contains a `Move.toml` file and declares a `world` dependency, which filters out shared dependency packages such as `world` itself.
+
+If zero candidates are found, or if more than one candidate is found, the command aborts with an error.
+
+Optional custom bind mounts can be configured in `efctl.yaml`:
+
+```yaml
+additional-bind-mounts:
+	- hostPath: ./some/path
+		identifier: some_path
+```
+
+Each configured mount is exposed to the Sui container at `/workspace/mounts/{identifier}`.
 
 **Options:**
 

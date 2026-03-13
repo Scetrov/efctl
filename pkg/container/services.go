@@ -6,8 +6,15 @@ import (
 	"time"
 )
 
+// AdditionalBindMount represents a resolved host directory that should be mounted
+// into the container under /workspace/mounts/{identifier}.
+type AdditionalBindMount struct {
+	Source     string
+	Identifier string
+}
+
 // SuiDevConfig returns the ContainerConfig for the main Sui development node.
-func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUser, pgPass, pgDB string) ContainerConfig {
+func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUser, pgPass, pgDB string, additionalMounts []AdditionalBindMount) ContainerConfig {
 	builderScaffold := filepath.Join(workspace, "builder-scaffold")
 	worldContracts := filepath.Join(workspace, "world-contracts")
 
@@ -34,6 +41,7 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 		{Type: "bind", Source: builderScaffold, Target: "/workspace/builder-scaffold", SELinux: true},
 		{Type: "bind", Source: worldContracts, Target: "/workspace/world-contracts", SELinux: true},
 	}
+	mounts = append(mounts, additionalBindMountDefs(additionalMounts)...)
 
 	return ContainerConfig{
 		Name:        ContainerSuiPlayground,
@@ -47,6 +55,24 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 		OpenStdin:   true,
 		UsernsMode:  usernsMode,
 	}
+}
+
+func additionalBindMountDefs(additionalMounts []AdditionalBindMount) []MountDef {
+	if len(additionalMounts) == 0 {
+		return nil
+	}
+
+	mounts := make([]MountDef, 0, len(additionalMounts))
+	for _, mount := range additionalMounts {
+		mounts = append(mounts, MountDef{
+			Type:    "bind",
+			Source:  mount.Source,
+			Target:  filepath.ToSlash(filepath.Join("/workspace/mounts", mount.Identifier)),
+			SELinux: true,
+		})
+	}
+
+	return mounts
 }
 
 // PostgresConfig returns the ContainerConfig for the PostgreSQL indexer database.

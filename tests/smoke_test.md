@@ -98,15 +98,20 @@ cat builder-scaffold/.env | grep -E "WORLD_PACKAGE_ID|ADMIN_ADDRESS"
 
 ## 5. `efctl env extension publish` — Publish an extension contract
 
+The publish command now auto-discovers exactly one extension directory by scanning immediate child directories under `builder-scaffold/move-contracts`, `world-contracts/contracts`, and any configured additional bind mounts. A candidate must contain a `Move.toml` file and declare a `world` dependency.
+
+If more than one candidate exists, the command aborts. For this smoke test, make sure only one publishable extension remains under the scanned roots before continuing.
+
 ```bash
-efctl env extension publish smart_gate_extension
+efctl env extension publish
 ```
 
 **Expected output:**
 
-- ✅ `Executing publish inside container at /workspace/builder-scaffold/move-contracts/smart_gate_extension...`
+- ✅ `Publishing extension contract from ...`
+- ✅ `Executing publish inside container at /workspace/...`
 - ✅ `INCLUDING DEPENDENCY MoveStdlib` / `Sui` / `World`
-- ✅ `BUILDING smart_gate_extension`
+- ✅ `BUILDING <extension-name>`
 - ✅ A JSON blob from the Sui CLI
 - ✅ `BUILDER_PACKAGE_ID = 0x...`
 - ✅ `EXTENSION_CONFIG_ID = 0x...` _(if the contract creates an ExtensionConfig object)_
@@ -116,7 +121,7 @@ efctl env extension publish smart_gate_extension
 **Verify idempotency — run it a second time:**
 
 ```bash
-efctl env extension publish smart_gate_extension
+efctl env extension publish
 ```
 
 **Expected:** Same success output. Should **not** fail with _"Your package is already published"_.
@@ -195,8 +200,8 @@ rm -rf smoke-test
 | 2              | `efctl --version`                        | Prints version                                     |
 | 3              | `efctl env up`                           | `🌍 Environment is up!` line present               |
 | 4              | `efctl env extension init`               | `builder-scaffold successfully initialized.`       |
-| 5 (first run)  | `efctl env extension publish smart_gate_extension` | `Extension contract published successfully.`       |
-| 5 (second run) | `efctl env extension publish smart_gate_extension` | Same success, no "already published" error         |
+| 5 (first run)  | `efctl env extension publish` | `Extension contract published successfully.`       |
+| 5 (second run) | `efctl env extension publish` | Same success, no "already published" error         |
 | 5 (.env)       | `cat builder-scaffold/.env`              | `BUILDER_PACKAGE_ID` and `EXTENSION_CONFIG_ID` set |
 | 6              | `efctl env run ...`                      | Output from inside container                       |
 | 7              | `efctl graphql object ...`               | JSON object response                               |

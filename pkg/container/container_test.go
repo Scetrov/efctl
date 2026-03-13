@@ -14,6 +14,8 @@ import (
 	dockermount "github.com/docker/docker/api/types/mount"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewClient(t *testing.T) {
@@ -53,7 +55,7 @@ func TestNetworkNameForWorkspace_UniquePerPath(t *testing.T) {
 }
 
 func TestSuiDevConfig_Ports(t *testing.T) {
-	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db")
+	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil)
 	if _, ok := cfg.Ports[9000]; !ok {
 		t.Error("Expected port 9000 in SuiDevConfig")
 	}
@@ -61,7 +63,7 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 		t.Error("Port 9125 should not be present without graphql")
 	}
 
-	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db")
+	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db", nil)
 	if _, ok := cfgGql.Ports[9125]; !ok {
 		t.Error("Expected port 9125 with graphql enabled")
 	}
@@ -73,15 +75,27 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 func TestSuiDevConfig_PodmanUserns(t *testing.T) {
 	// The sui-dev container must use keep-id to avoid host permission
 	// issues with bind mounts in Podman rootless mode.
-	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db")
+	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db", nil)
 	if cfg.UsernsMode != "keep-id" {
 		t.Errorf("Expected UsernsMode 'keep-id' for Podman sui-dev, got %q", cfg.UsernsMode)
 	}
 
-	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db")
+	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil)
 	if cfgDocker.UsernsMode != "" {
 		t.Errorf("Expected empty UsernsMode for Docker, got %q", cfgDocker.UsernsMode)
 	}
+}
+
+func TestSuiDevConfig_AdditionalBindMounts(t *testing.T) {
+	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", []AdditionalBindMount{{
+		Source:     "/tmp/contracts",
+		Identifier: "contracts_mount",
+	}})
+
+	require.Len(t, cfg.Mounts, 4)
+	assert.Equal(t, "/tmp/contracts", cfg.Mounts[3].Source)
+	assert.Equal(t, "/workspace/mounts/contracts_mount", cfg.Mounts[3].Target)
+	assert.True(t, cfg.Mounts[3].SELinux)
 }
 
 func TestPostgresConfig_Healthcheck(t *testing.T) {

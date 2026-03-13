@@ -104,6 +104,74 @@ func TestValidate_AcceptsValidBranches(t *testing.T) {
 	}
 }
 
+func TestValidate_AcceptsAdditionalBindMounts(t *testing.T) {
+	cfg := &Config{
+		AdditionalBindMounts: []AdditionalBindMount{{
+			HostPath:   "./contracts",
+			Identifier: "contracts_mount",
+		}},
+	}
+
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_RejectsDuplicateAdditionalBindMountIdentifiers(t *testing.T) {
+	cfg := &Config{
+		AdditionalBindMounts: []AdditionalBindMount{
+			{HostPath: "./contracts-one", Identifier: "duplicate_mount"},
+			{HostPath: "./contracts-two", Identifier: "duplicate_mount"},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicates")
+}
+
+func TestValidate_RejectsInvalidAdditionalBindMountIdentifier(t *testing.T) {
+	cfg := &Config{
+		AdditionalBindMounts: []AdditionalBindMount{{
+			HostPath:   "./contracts",
+			Identifier: "contracts/mount",
+		}},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "identifier contains invalid characters")
+}
+
+func TestResolveAdditionalBindMounts_UsesConfigDirectory(t *testing.T) {
+	configDir := t.TempDir()
+	mountDir := filepath.Join(configDir, "contracts")
+	require.NoError(t, os.MkdirAll(mountDir, 0750))
+
+	cfgPath := filepath.Join(configDir, DefaultConfigFile)
+	require.NoError(t, os.WriteFile(cfgPath, []byte("additional-bind-mounts:\n  - hostPath: ./contracts\n    identifier: contracts_mount\n"), 0600))
+
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+
+	resolved, err := cfg.ResolveAdditionalBindMounts("")
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, mountDir, resolved[0].HostPath)
+	assert.Equal(t, "contracts_mount", resolved[0].Identifier)
+}
+
+func TestResolveAdditionalBindMounts_RejectsMissingDirectory(t *testing.T) {
+	cfg := &Config{
+		AdditionalBindMounts: []AdditionalBindMount{{
+			HostPath:   "./missing-contracts",
+			Identifier: "contracts_mount",
+		}},
+	}
+
+	_, err := cfg.ResolveAdditionalBindMounts(t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
 func TestLoad_ValidatesAfterParsing(t *testing.T) {
 	// Create a temp config file with an invalid URL
 	dir := t.TempDir()

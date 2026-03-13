@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"efctl/pkg/config"
 	"efctl/pkg/container"
 	"efctl/pkg/env"
 	"efctl/pkg/ui"
@@ -117,8 +118,12 @@ func startPostgres(c container.ContainerClient, ctx context.Context, user, pass,
 
 func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, dockerDir string, withGraphql bool, pgUser, pgPass, pgDB string) error {
 	networkName := c.NetworkName()
+	additionalMounts, mountErr := resolveAdditionalContainerMounts(workspace)
+	if mountErr != nil {
+		return mountErr
+	}
 
-	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB)
+	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB, additionalMounts)
 	if err := c.CreateContainer(ctx, suiCfg); err != nil {
 		return fmt.Errorf("failed to create sui-playground container: %w", err)
 	}
@@ -171,6 +176,27 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		}
 	}
 	return nil
+}
+
+func resolveAdditionalContainerMounts(workspace string) ([]container.AdditionalBindMount, error) {
+	if config.Loaded == nil {
+		return nil, nil
+	}
+
+	resolvedMounts, err := config.Loaded.ResolveAdditionalBindMounts(workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	additionalMounts := make([]container.AdditionalBindMount, 0, len(resolvedMounts))
+	for _, mount := range resolvedMounts {
+		additionalMounts = append(additionalMounts, container.AdditionalBindMount{
+			Source:     mount.HostPath,
+			Identifier: mount.Identifier,
+		})
+	}
+
+	return additionalMounts, nil
 }
 
 func checkRequiredPorts(withGraphql bool, withFrontend bool) error {
