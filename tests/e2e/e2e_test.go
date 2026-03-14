@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -446,12 +447,14 @@ func (tester *e2eLifecycleTester) testFaucetConfig(t *testing.T) {
 	}
 
 	// Get the active address from inside the container (sui is not on the host).
+	// The output includes efctl UI messages, so extract the 0x... address via regex.
 	addrOut, err := runEfctl(t, tester.bin, tester.workspace, "env", "run", "sui", "client", "active-address")
 	require.NoError(t, err, "failed to get active address from container:\n%s", addrOut)
 
-	addr := strings.TrimSpace(addrOut)
-	require.NotEmpty(t, addr, "sui active-address was empty")
-	require.Contains(t, addr, "0x", "expected a valid Sui address, got: %s", addr)
+	addrRe := regexp.MustCompile(`(0x[0-9a-fA-F]{40,})`)
+	matches := addrRe.FindStringSubmatch(addrOut)
+	require.NotEmpty(t, matches, "could not find Sui address in env run output:\n%s", addrOut)
+	addr := matches[1]
 
 	// Request gas via the efctl env faucet command.
 	faucetOut, err := runEfctl(t, tester.bin, tester.workspace, "env", "faucet", "--address", addr)
