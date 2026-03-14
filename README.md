@@ -121,6 +121,21 @@ Run tests:
 make test
 ```
 
+## AI Tooling
+
+This repository includes project-local context-mode configuration for both Gemini CLI and VS Code Copilot.
+
+- Gemini CLI reads [.gemini/settings.json](.gemini/settings.json) and [GEMINI.md](GEMINI.md).
+- VS Code Copilot reads [.vscode/mcp.json](.vscode/mcp.json), [.github/hooks/context-mode.json](.github/hooks/context-mode.json), and [.github/copilot-instructions.md](.github/copilot-instructions.md).
+
+Machine-level prerequisite:
+
+```bash
+npm install -g context-mode
+```
+
+After installing, restart Gemini CLI and VS Code so both clients pick up the MCP server and hooks.
+
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for more details.

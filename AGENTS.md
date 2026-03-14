@@ -36,3 +36,13 @@ To maintain a non-breaking flow and avoid permission requests:
 - All temporary files, intermediate build artifacts, or scratchpads must be stored in the `./tmp` directory.
 - Do not write to system-level directories or paths outside the repository root.
 - Do not write changes to the builder-scaffold and world-contracts directory for anything other than testing, prefer patching the files in code.
+
+## 7. Context-Mode Routing
+
+- Prefer context-mode MCP tools for analysis, research, file processing, and commands likely to produce large output.
+- Do not use `curl`, `wget`, inline HTTP shell snippets, or direct web fetch tools for external content. Use `ctx_fetch_and_index(...)` or `ctx_execute(...)` instead.
+- Use `ctx_batch_execute(...)` for multi-step repo research and `ctx_search(...)` for follow-up queries against indexed content.
+- Use `ctx_execute(...)` or `ctx_execute_file(...)` for logs, search output, and large file inspection. Use normal file reads when preparing to edit a file.
+- Keep terminal usage limited to short operational commands such as `git`, `mkdir`, `rm`, `mv`, `cd`, `ls`, and install commands.
+- Keep responses concise and write substantial artifacts to files instead of long inline output.
+- Utility commands: `ctx stats`, `ctx doctor`, `ctx upgrade`.
