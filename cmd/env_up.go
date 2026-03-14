@@ -13,6 +13,7 @@ import (
 	"efctl/pkg/setup"
 	"efctl/pkg/sui"
 	"efctl/pkg/ui"
+
 	"github.com/spf13/cobra"
 )
 
@@ -136,6 +137,8 @@ var envUpCmd = &cobra.Command{
 		}
 
 		ui.Success.Println(fmt.Sprintf("%s Environment is up! The Sui playground is running and gates are spawned.", ui.GlobeEmoji))
+		ui.Info.Println("To get test tokens for an address, run: efctl env faucet --address <your-sui-account>")
+		ui.Info.Println("if you experience ANY problems with efctl please run efctl doctor and create a GitHub issue at https://github.com/scetrov/efctl with as much information as possible to help us diagnose the issue")
 	},
 }
 

@@ -100,6 +100,15 @@ Opens an interactive terminal dashboard for inspecting and managing the local en
 
 - `-w, --workspace string`: Path to the workspace directory. (default: `.`)
 
+### `efctl env faucet`
+
+Request gas coins from the local Sui faucet for a specific address. This is useful when the standard `sui client faucet` command fails against the local node.
+
+**Options:**
+
+- `-a, --address string`: The address to receive gas (required).
+- `--faucet-url string`: The URL of the faucet (default: `http://localhost:9123`).
+
 ---
 
 ## Extension Flow

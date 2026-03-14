@@ -111,6 +111,8 @@ func ConfigureSui(workspace string) error {
 
 	// 1. Add/Update environment
 	// We use ef-localhost to avoid overriding existing localnet if any
+	// We try to remove it first to ensure the faucet URL is correctly applied if it already existed
+	_ = exec.Command("sui", "client", "remove-env", "--alias", "ef-localhost").Run()
 	_ = exec.Command("sui", "client", "new-env", "--alias", "ef-localhost", "--rpc", "http://localhost:9000").Run()
 
 	// Switch to it

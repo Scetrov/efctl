@@ -174,6 +174,23 @@ if [ -n "${SUI_INDEXER_DB_URL:-}" ]; then
   for i in {1..60}; do
     if pg_isready -d "$SUI_INDEXER_DB_URL" >/dev/null 2>&1; then
       echo "[sui-dev] Postgres is ready."
+      cat > "$CLIENT_YAML" << EOF
+---
+keystore:
+  File: $KEYSTORE
+envs:
+  - alias: localnet
+    rpc: "http://127.0.0.1:9000"
+  - alias: ef-localhost
+    rpc: "http://127.0.0.1:9000"
+    faucet: "http://127.0.0.1:9123"
+  - alias: testnet
+    rpc: "https://fullnode.testnet.sui.io"
+active_env: ef-localhost
+active_address: ~
+EOF
+
+      printf 'y\n' | sui client switch --env ef-localhost 2>/dev/null || true
       POSTGRES_READY=1
       break
     fi

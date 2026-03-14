@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -117,6 +118,16 @@ type RepoInfo struct {
 	Error   string
 }
 
+// SuiClientInfo holds the detected Sui client configuration details.
+type SuiClientInfo struct {
+	Found              bool
+	ActiveEnv          string
+	ActiveAddress      string
+	ActiveEnvRpcUrl    string
+	ActiveEnvFaucetUrl string
+	Error              string
+}
+
 // ConfigInfo holds information about the loaded efctl config file.
 type ConfigInfo struct {
 	Loaded   bool
@@ -140,6 +151,7 @@ type Report struct {
 	Env       EnvironmentInfo
 	Ports     []PortInfo
 	Repos     []RepoInfo
+	Sui       SuiClientInfo
 	Config    ConfigInfo
 }
 
@@ -170,6 +182,7 @@ func Gather(opts Options) *Report {
 	r.Env = gatherEnvironment(opts.Workspace)
 	r.Ports = gatherPorts()
 	r.Repos = gatherRepos(opts.Workspace)
+	r.Sui = gatherSuiClient()
 	r.Config = gatherConfig(opts.Config, opts.ConfigLoaded, opts.ConfigPath)
 
 	return r
@@ -434,7 +447,7 @@ func gatherEnvironment(workspace string) EnvironmentInfo {
 }
 
 func gatherPorts() []PortInfo {
-	ports := []int{9000, 9125, 5432, 5173}
+	ports := []int{9000, 9123, 9125, 5432, 5173}
 	result := make([]PortInfo, 0, len(ports))
 	for _, p := range ports {
 		result = append(result, PortInfo{
@@ -544,4 +557,122 @@ func gatherConfigEntries(cfg *config.Config) []ConfigEntry {
 	}
 
 	return entries
+}
+func gatherSuiClient() SuiClientInfo {
+	info := SuiClientInfo{}
+	if _, err := exec.LookPath("sui"); err != nil {
+		info.Found = false
+		return info
+	}
+	info.Found = true
+
+	// Gather active environment
+	if out, err := exec.Command("sui", "client", "active-env").Output(); err == nil {
+		info.ActiveEnv = strings.TrimSpace(string(out))
+	}
+
+	// Gather active address
+	if out, err := exec.Command("sui", "client", "active-address").Output(); err == nil {
+		info.ActiveAddress = strings.TrimSpace(string(out))
+	}
+
+	// Gather envs to find RPC and Faucet URLs
+	// We use --json for robust parsing if available, but keep a fallback
+	if out, err := exec.Command("sui", "client", "envs", "--json").Output(); err == nil {
+		info.ActiveEnvRpcUrl, info.ActiveEnvFaucetUrl = parseSuiEnvsJSON(string(out), info.ActiveEnv)
+	}
+
+	// Fallback/Legacy parsing for older Sui versions or if --json failed
+	if info.ActiveEnvRpcUrl == "" {
+		if out, err := exec.Command("sui", "client", "envs").Output(); err == nil {
+			info.ActiveEnvRpcUrl, info.ActiveEnvFaucetUrl = parseSuiEnvsLegacy(string(out), info.ActiveEnv)
+		}
+	}
+
+	return info
+}
+
+func parseSuiEnvsJSON(content, activeEnv string) (rpc, faucet string) {
+	// Output is like: [[{"alias":"localnet","rpc":"http://0.0.0.0:9000","ws":null,"basic_auth":null},...],"localnet"]
+	// Very simple manual "JSON" parsing to avoid adding heavy dependencies if not needed,
+	// but since we already use regex elsewhere, let's just look for the active env entry.
+
+	// Find the block for the active environment
+	envPattern := fmt.Sprintf(`"alias":"%s"`, activeEnv)
+	idx := strings.Index(content, envPattern)
+	if idx == -1 {
+		return "", ""
+	}
+
+	// Look for RPC
+	rpcPattern := regexp.MustCompile(`"rpc":"([^"]+)"`)
+	if matches := rpcPattern.FindStringSubmatch(content[idx:]); len(matches) > 1 {
+		rpc = matches[1]
+	}
+	// Look for Faucet
+	faucetPattern := regexp.MustCompile(`"faucet":"([^"]+)"`)
+	if matches := faucetPattern.FindStringSubmatch(content[idx:]); len(matches) > 1 {
+		faucet = matches[1]
+	}
+	return rpc, faucet
+}
+
+func parseSuiEnvsLegacy(content, activeEnv string) (rpc, faucet string) {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, activeEnv) {
+			continue
+		}
+		fields := strings.Fields(line)
+		cleanFields := cleanTableFields(fields)
+
+		if len(cleanFields) < 2 {
+			continue
+		}
+
+		// In table format: [alias, url, active] or [* alias url]
+		if isTargetEnv(cleanFields, activeEnv) {
+			r, f := extractUrlsFromFields(cleanFields)
+			if r != "" && rpc == "" {
+				rpc = r
+			}
+			if f != "" && faucet == "" {
+				faucet = f
+			}
+		}
+	}
+	return rpc, faucet
+}
+
+func cleanTableFields(fields []string) []string {
+	var cleanFields []string
+	for _, f := range fields {
+		if f != "│" && f != "├" && f != "┤" && f != "║" {
+			cleanFields = append(cleanFields, f)
+		}
+	}
+	return cleanFields
+}
+
+func isTargetEnv(fields []string, activeEnv string) bool {
+	if fields[0] == activeEnv {
+		return true
+	}
+	if len(fields) > 1 && fields[0] == "*" && fields[1] == activeEnv {
+		return true
+	}
+	return false
+}
+
+func extractUrlsFromFields(fields []string) (rpc, faucet string) {
+	for _, f := range fields {
+		if strings.HasPrefix(f, "http") {
+			if rpc == "" {
+				rpc = f
+			} else if faucet == "" {
+				faucet = f
+			}
+		}
+	}
+	return rpc, faucet
 }

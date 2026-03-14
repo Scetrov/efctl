@@ -149,9 +149,31 @@ efctl env run "sui client envs"
 
 **Expected:** Shows `ef-localnet` as an available environment.
 
+```bash
+efctl env run "sui client faucet"
+```
+
+**Expected:** Requests tokens from the local faucet successfully. The output should NOT say "Cannot recognize the active network".
+
 ---
 
-## 7. `efctl graphql object` — Query a deployed object
+## 7. `efctl doctor` — Check environment diagnostics
+
+```bash
+efctl doctor
+```
+
+**Expected:**
+
+- ✅ Shows `efctl` version and build info.
+- ✅ Shows container runtime and Node.js info.
+- ✅ Shows `env: up`.
+- ✅ Shows `sui active env: ef-localhost`.
+- ✅ Shows `sui faucet url: http://localhost:9123`.
+
+---
+
+## 8. `efctl graphql object` — Query a deployed object
 
 Pick any `OBJECT_ID` from the deployment summary printed in step 3.
 
@@ -163,7 +185,7 @@ efctl graphql object <OBJECT_ID>
 
 ---
 
-## 8. `efctl env down` — Tear down the environment
+## 9. `efctl env down` — Tear down the environment
 
 ```bash
 efctl env down
@@ -184,7 +206,7 @@ docker ps --filter name=sui-playground
 
 ---
 
-## 9. Clean up the workspace
+## 10. Clean up the workspace
 
 ```bash
 cd ..
@@ -204,5 +226,6 @@ rm -rf smoke-test
 | 5 (second run) | `efctl env extension publish` | Same success, no "already published" error         |
 | 5 (.env)       | `cat builder-scaffold/.env`              | `BUILDER_PACKAGE_ID` and `EXTENSION_CONFIG_ID` set |
 | 6              | `efctl env run ...`                      | Output from inside container                       |
-| 7              | `efctl graphql object ...`               | JSON object response                               |
-| 8              | `efctl env down`                         | Container removed                                  |
+| 7              | `efctl doctor`                           | Shows Sui environment and faucet URL              |
+| 8              | `efctl graphql object ...`               | JSON object response                               |
+| 9              | `efctl env down`                         | Container removed                                  |

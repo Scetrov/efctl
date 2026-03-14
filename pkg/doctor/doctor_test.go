@@ -43,12 +43,12 @@ func TestDetectWSLFrom(t *testing.T) {
 	}
 }
 
-func TestGatherPorts_FourEntries(t *testing.T) {
+func TestGatherPorts_FiveEntries(t *testing.T) {
 	ports := gatherPorts()
-	if len(ports) != 4 {
-		t.Fatalf("expected 4 port entries, got %d", len(ports))
+	if len(ports) != 5 {
+		t.Fatalf("expected 5 port entries, got %d", len(ports))
 	}
-	expected := []int{9000, 9125, 5432, 5173}
+	expected := []int{9000, 9123, 9125, 5432, 5173}
 	for i, p := range ports {
 		if p.Port != expected[i] {
 			t.Errorf("port[%d]: expected %d, got %d", i, expected[i], p.Port)
@@ -193,8 +193,8 @@ func TestGather_NonNil(t *testing.T) {
 	if r.Efctl.Version != "test" {
 		t.Errorf("expected Version=test, got %q", r.Efctl.Version)
 	}
-	if len(r.Ports) != 4 {
-		t.Errorf("expected 4 ports, got %d", len(r.Ports))
+	if len(r.Ports) != 5 {
+		t.Errorf("expected 5 ports, got %d", len(r.Ports))
 	}
 	if len(r.Repos) != 2 {
 		t.Errorf("expected 2 repos, got %d", len(r.Repos))

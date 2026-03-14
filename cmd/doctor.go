@@ -57,6 +57,7 @@ func printDoctorReport(r *doctor.Report) {
 	printToolsSection(r)
 	printEnvSection(r)
 	printPortsSection(r)
+	printSuiSection(r)
 	printReposSection(r)
 	printConfigSection(r)
 }
@@ -133,6 +134,18 @@ func printPortsSection(r *doctor.Report) {
 			avail = "in use"
 		}
 		fmt.Printf(doctorFmt, fmt.Sprintf("port %d:", p.Port), avail)
+	}
+	fmt.Println()
+}
+
+func printSuiSection(r *doctor.Report) {
+	if r.Sui.Found {
+		fmt.Printf(doctorFmt, "sui active env:", r.Sui.ActiveEnv)
+		fmt.Printf(doctorFmt, "sui active address:", r.Sui.ActiveAddress)
+		fmt.Printf(doctorFmt, "sui rpc url:", r.Sui.ActiveEnvRpcUrl)
+		fmt.Printf(doctorFmt, "sui faucet url:", r.Sui.ActiveEnvFaucetUrl)
+	} else {
+		fmt.Printf(doctorFmt, "sui client:", "not found")
 	}
 	fmt.Println()
 }

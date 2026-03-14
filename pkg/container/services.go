@@ -18,7 +18,7 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 	builderScaffold := filepath.Join(workspace, "builder-scaffold")
 	worldContracts := filepath.Join(workspace, "world-contracts")
 
-	ports := map[int]int{9000: 9000}
+	ports := map[int]int{9000: 9000, 9123: 9123}
 	if withGraphql {
 		ports[9125] = 9125
 	}

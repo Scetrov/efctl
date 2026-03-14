@@ -440,6 +440,52 @@ func (tester *e2eLifecycleTester) testEnvRun(t *testing.T) {
 	assert.Contains(t, out, "0x")
 }
 
+func (tester *e2eLifecycleTester) testFaucetConfig(t *testing.T) {
+	if !tester.envUpPassed {
+		t.Skip("skipping: env_up did not pass")
+	}
+
+	// Verify Sui environment is configured inside the container
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "run", "sui", "client", "envs")
+	require.NoError(t, err, "failed to run sui client envs:\n%s", out)
+	
+	// We want to see either localnet or ef-localhost.
+	// In the E2E container, sometimes only localnet is initialized by default.
+	assert.True(t, strings.Contains(out, "localnet") || strings.Contains(out, "ef-localhost"),
+		"Sui client should have at least localnet or ef-localhost configured inside the container.\nOutput:\n%s", out)
+
+	// Test our new efctl env faucet command
+	// 1. Get active address
+	addrOut, err := runEfctl(t, tester.bin, tester.workspace, "doctor")
+	require.NoError(t, err)
+	
+	// Extract address from doctor output: "sui active address:    0x..."
+	addr := ""
+	for _, line := range strings.Split(addrOut, "\n") {
+		if strings.Contains(line, "sui active address:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 4 {
+				addr = parts[3]
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, addr, "could not find active address in doctor output:\n%s", addrOut)
+
+	// 2. Request gas
+	faucetOut, err := runEfctl(t, tester.bin, tester.workspace, "env", "faucet", "--address", addr)
+	assert.NoError(t, err, "efctl env faucet failed:\n%s", faucetOut)
+	assert.Contains(t, faucetOut, "Gas request successful")
+}
+
+func (tester *e2eLifecycleTester) testSuiDoctor(t *testing.T) {
+	out, err := runEfctl(t, tester.bin, tester.workspace, "doctor")
+	require.NoError(t, err, "efctl doctor failed:\n%s", out)
+	assert.Contains(t, out, "sui active env:")
+	assert.Contains(t, out, "ef-localhost")
+	assert.Contains(t, out, "sui faucet url:")
+}
+
 func (tester *e2eLifecycleTester) testEnvDown(t *testing.T) {
 	// Always attempt cleanup, even if env_up didn't pass fully.
 	// Attempt to normalize permissions before shutdown
@@ -515,6 +561,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	t.Run("extension_publish", tester.testExtensionPublish)
 	t.Run("extension_publish_idempotent", tester.testExtensionPublishIdempotent)
 	t.Run("env_run", tester.testEnvRun)
+	t.Run("faucet_config", tester.testFaucetConfig)
+	t.Run("sui_doctor", tester.testSuiDoctor)
 	t.Run("env_down", tester.testEnvDown)
 }
 

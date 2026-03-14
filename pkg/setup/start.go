@@ -201,7 +201,10 @@ func resolveAdditionalContainerMounts(workspace string) ([]container.AdditionalB
 
 func checkRequiredPorts(withGraphql bool, withFrontend bool) error {
 	if !env.IsPortAvailable(9000) {
-		return fmt.Errorf("port 9000 is already in use")
+		return fmt.Errorf("port 9000 (Sui RPC) is already in use")
+	}
+	if !env.IsPortAvailable(9123) {
+		return fmt.Errorf("port 9123 (Sui Faucet) is already in use")
 	}
 	if withGraphql {
 		if !env.IsPortAvailable(8000) {
