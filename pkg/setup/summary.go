@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
+	"efctl/pkg/sui"
 	"efctl/pkg/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/pterm/pterm"
@@ -94,10 +94,14 @@ func PrintDeploymentSummary(workspace string) {
 	ui.Success.Println("Explore the generated World:")
 	fmt.Println("🔗 https://custom.suiscan.xyz/custom/home/?network=http%3A%2F%2Flocalhost%3A9000")
 
-	// Check if frontend is enabled by looking at the override file
+	// Check if optional services are enabled by looking at the override file
 	overridePath := filepath.Join(workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
 	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304
-		if strings.Contains(string(data), "frontend:") {
+		content := string(data)
+		if strings.Contains(content, "postgres:") || strings.Contains(content, "SUI_GRAPHQL_ENABLED") {
+			fmt.Println("📊 GraphQL API:   http://localhost:9125/graphql")
+		}
+		if strings.Contains(content, "frontend:") {
 			fmt.Println("💻 Frontend dApp: http://localhost:5173")
 		}
 	}
@@ -283,27 +287,10 @@ func resolveAddress(alias string) string {
 }
 
 func deriveAddress(key string) string {
-	// sui keytool decode does not work for suiprivkey.
-	// We import the key to a temporary alias (providing the key via stdin), capture the JSON
-	// output to get the address, and then immediately remove the alias to keep the keystore clean.
-	tmpAlias := fmt.Sprintf("ef-temp-%d", time.Now().UnixNano())
-	cmd := exec.Command("sui", "keytool", "import", "ed25519", "--alias", tmpAlias, "--json") // #nosec G204
-	cmd.Stdin = strings.NewReader(key)
-	out, _ := cmd.Output()
-
-	// Clean up the temporary alias
-	_ = exec.Command("sui", "client", "remove-address", tmpAlias).Run() // #nosec G204
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(out, &data); err != nil {
-		// If JSON parsing fails, try an alternate command format just in case
+	addr, err := sui.DeriveAddressFromPrivateKey(key)
+	if err != nil {
+		ui.Debug.Println(fmt.Sprintf("Failed to derive address from key: %v", err))
 		return ""
 	}
-	if addr, ok := data["suiAddress"].(string); ok {
-		return addr
-	}
-	if addr, ok := data["address"].(string); ok {
-		return addr
-	}
-	return ""
+	return addr
 }

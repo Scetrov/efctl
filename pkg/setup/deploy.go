@@ -101,11 +101,12 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 func NormalizeContainerScripts(c container.ContainerClient, containerName string) error {
 	ui.Debug.Println(fmt.Sprintf("Normalizing script line endings in container %s...", containerName))
 
-	// Find all .sh files and use sed to strip all \r characters.
-	// This ensures scripts are safe for execution regardless of host OS.
+	// Find all .sh files and use dos2unix to convert CRLF→LF.
+	// dos2unix is already installed in the container image and is a
+	// no-op when files already have Unix line endings.
 	cmd := []string{
 		"/bin/bash", "-c",
-		"find /workspace -name '*.sh' -exec sed -i 's/\\r//g' {} +",
+		"find /workspace -name '*.sh' -exec dos2unix {} + 2>/dev/null || true",
 	}
 
 	return c.Exec(context.Background(), containerName, cmd)

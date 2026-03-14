@@ -18,6 +18,7 @@ import (
 	"efctl/pkg/container"
 	"efctl/pkg/dashboard"
 	"efctl/pkg/env"
+	"efctl/pkg/sui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -492,22 +493,14 @@ func fetchWorldEvents(client *http.Client, pkgID string, admin string) []worldEv
 	return events
 }
 
-// deriveAddress uses sui keytool to derive an address from a bech32 private key.
-// The private key is passed via stdin to avoid exposure in process arguments.
+// deriveAddress derives a Sui address from a bech32 private key without
+// shelling out to the sui CLI.
 func deriveAddress(privkey string) string {
-	cmd := exec.Command("sui", "keytool", "import", "ed25519", "--json") // #nosec G204
-	cmd.Stdin = strings.NewReader(privkey + "\n")
-	out, err := cmd.Output()
+	addr, err := sui.DeriveAddressFromPrivateKey(privkey)
 	if err != nil {
 		return ""
 	}
-	var res struct {
-		SuiAddress string `json:"suiAddress"`
-	}
-	if json.Unmarshal(out, &res) == nil {
-		return res.SuiAddress
-	}
-	return ""
+	return addr
 }
 
 // streamContainerLogs starts tailing a container's logs and sends lines with the given prefix.
@@ -1282,7 +1275,10 @@ func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 	if m.worldPkgID != "" {
 		items = append(items, item{label: "World Pkg:", value: shorten(m.worldPkgID)})
 	}
-	if m.feStat.Status == "Running" {
+	if m.isGraphQLEnabled() {
+		items = append(items, item{label: "GraphQL:", value: "http://localhost:9125/graphql"})
+	}
+	if m.isFrontendEnabled() {
 		items = append(items, item{label: "Frontend:", value: "http://localhost:5173"})
 	}
 
