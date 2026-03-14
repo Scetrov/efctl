@@ -112,16 +112,21 @@ func CloneRepositories(g git.GitClient, workspace string) error {
 	}
 
 	// Correct line ending drift for critical shell scripts
-	scriptsToNormalize := []string{
-		filepath.Join(builderScaffoldPath, "docker/scripts/generate-world-env.sh"),
+	normalizeScripts := func(root string) {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".sh") {
+				ui.Debug.Printfln("Normalizing line endings for %s", path)
+				git.NormalizeLineEndings(path)
+			}
+			return nil
+		})
 	}
 
-	for _, script := range scriptsToNormalize {
-		if _, err := os.Stat(script); err == nil {
-			ui.Debug.Printfln("Normalizing line endings for %s", script)
-			git.NormalizeLineEndings(script)
-		}
-	}
+	normalizeScripts(builderScaffoldPath)
+	normalizeScripts(worldContractsPath)
 
 	return nil
 }

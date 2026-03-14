@@ -131,6 +131,12 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		return fmt.Errorf("failed to start sui-playground container: %w", err)
 	}
 
+	// 0. Ensure all scripts in the container have LF line endings.
+	// This protects against Windows host-side drift (CRLF).
+	if err := NormalizeContainerScripts(c, container.ContainerSuiPlayground); err != nil {
+		ui.Warn.Println(fmt.Sprintf("Script normalization failed (continuing): %v", err))
+	}
+
 	// Give the container a moment to start, then verify it is still running
 	// before entering the (potentially long) log-wait loop.
 	time.Sleep(10 * time.Second)

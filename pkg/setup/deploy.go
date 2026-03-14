@@ -28,6 +28,12 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 		return fmt.Errorf("sui-playground container is not running (ExitCode: %d, ExitErr: %v). Last 50 lines of logs:\n%s", exitCode, exitErr, lastLogs)
 	}
 
+	// 0. Ensure all scripts in the container have LF line endings.
+	// This protects against Windows host-side drift (CRLF).
+	if err := NormalizeContainerScripts(c, container.ContainerSuiPlayground); err != nil {
+		ui.Warn.Println(fmt.Sprintf("Script normalization failed (continuing): %v", err))
+	}
+
 	// 0. Remove stale Move.lock files so the Sui CLI resolves framework
 	//    dependencies from the installed binary instead of pinned git revisions
 	//    that may no longer exist upstream.
@@ -87,4 +93,20 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	}
 
 	return nil
+}
+
+// NormalizeContainerScripts ensures all .sh files in the /workspace directory
+// inside the container have LF line endings. This is a critical safety net
+// for Windows users where bind-mounted scripts might drift to CRLF.
+func NormalizeContainerScripts(c container.ContainerClient, containerName string) error {
+	ui.Debug.Println(fmt.Sprintf("Normalizing script line endings in container %s...", containerName))
+
+	// Find all .sh files and use sed to strip all \r characters.
+	// This ensures scripts are safe for execution regardless of host OS.
+	cmd := []string{
+		"/bin/bash", "-c",
+		"find /workspace -name '*.sh' -exec sed -i 's/\\r//g' {} +",
+	}
+
+	return c.Exec(context.Background(), containerName, cmd)
 }

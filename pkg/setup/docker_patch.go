@@ -62,9 +62,7 @@ func patchDockerfile(dockerDir string) {
 	if !strings.Contains(content, "postgresql-client") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
 	}
-	if strings.Contains(content, "ENV SUI_CONFIG_DIR=/root/.sui") {
-		content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
-	}
+	content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
 	// at build time.  This uses a broad global replacement (not just the

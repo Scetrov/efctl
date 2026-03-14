@@ -246,8 +246,9 @@ func NormalizeLineEndings(path string) error {
 		return err
 	}
 
-	// Simple CRLF to LF replacement
-	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+	// Robust line ending normalization: strip all \r characters and
+	// then ensure the file uses LF (\n) correctly.
+	normalized := strings.ReplaceAll(string(data), "\r", "")
 
 	if normalized == string(data) {
 		return nil // No change needed
