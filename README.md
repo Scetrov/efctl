@@ -54,6 +54,11 @@ cd ~ && curl -fsSL "https://github.com/Scetrov/efctl/releases/latest/download/ef
 
 ```powershell
 & {
+  $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isAdmin){
+    throw "Please run this script as a non-administrator."
+  }
+  cd ~
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
   $url = "https://github.com/Scetrov/efctl/releases/latest/download/efctl-windows-$arch.exe"
   $dest = Join-Path $HOME "bin\scetrov\efctl\efctl.exe"
