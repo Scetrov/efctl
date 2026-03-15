@@ -1,12 +1,14 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
-	"text/tabwriter"
+	"path/filepath"
+	"strings"
 
 	"efctl/pkg/builder"
 	"efctl/pkg/ui"
+
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 )
 
@@ -33,13 +35,25 @@ var extensionListCmd = &cobra.Command{
 			return
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-		fmt.Fprintln(w, "CONTAINER PATH\tLOCAL PATH")
+		t := table.NewWriter()
+		t.SetOutputMirror(os.Stdout)
+		t.AppendHeader(table.Row{"Container Path", "Local Path"})
+		t.SetStyle(table.StyleRounded)
 
 		for _, candidate := range candidates {
-			fmt.Fprintf(w, "%s\t%s\n", candidate.ContainerPath, candidate.HostPath)
+			// Container path: relative to /workspace
+			relContainer := strings.TrimPrefix(candidate.ContainerPath, "/workspace/")
+
+			// Local path: relative to workspacePath
+			relLocal, err := filepath.Rel(workspacePath, candidate.HostPath)
+			if err != nil {
+				relLocal = candidate.HostPath
+			}
+
+			t.AppendRow(table.Row{relContainer, relLocal})
 		}
-		w.Flush()
+
+		t.Render()
 	},
 }
 

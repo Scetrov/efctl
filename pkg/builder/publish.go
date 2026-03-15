@@ -14,6 +14,7 @@ import (
 	"efctl/pkg/container"
 	"efctl/pkg/setup"
 	"efctl/pkg/ui"
+	"github.com/lithammer/fuzzysearch/fuzzy"
 )
 
 // publishOutput represents the relevant parts of the JSON from `sui client publish --json`.
@@ -320,7 +321,12 @@ func GetCandidate(workspace, containerPath string) (PublishCandidate, error) {
 	}
 
 	for _, c := range candidates {
+		// Check for absolute match
 		if c.ContainerPath == containerPath {
+			return c, nil
+		}
+		// Check for relative match (relative to /workspace)
+		if strings.TrimPrefix(c.ContainerPath, "/workspace/") == containerPath {
 			return c, nil
 		}
 	}
@@ -328,7 +334,7 @@ func GetCandidate(workspace, containerPath string) (PublishCandidate, error) {
 	return PublishCandidate{}, fmt.Errorf("extension %q not found", containerPath)
 }
 
-// FindClosestMatch returns a list of candidates sorted by Levenshtein distance to the target.
+// FindClosestMatch returns a list of candidates (relative to /workspace) sorted by Levenshtein distance to the target.
 func FindClosestMatch(workspace, target string) []string {
 	searchRoots, err := GetPublishSearchRoots(workspace)
 	if err != nil {
@@ -346,8 +352,17 @@ func FindClosestMatch(workspace, target string) []string {
 	}
 	var matches []match
 	for _, c := range candidates {
-		dist := Levenshtein(target, c.ContainerPath)
-		matches = append(matches, match{c.ContainerPath, dist})
+		rel := strings.TrimPrefix(c.ContainerPath, "/workspace/")
+		// Calculate distance against both absolute and relative paths
+		distAbs := fuzzy.LevenshteinDistance(target, c.ContainerPath)
+		distRel := fuzzy.LevenshteinDistance(target, rel)
+
+		minDist := distAbs
+		if distRel < minDist {
+			minDist = distRel
+		}
+
+		matches = append(matches, match{rel, minDist})
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
@@ -362,36 +377,4 @@ func FindClosestMatch(workspace, target string) []string {
 		result = append(result, matches[i].name)
 	}
 	return result
-}
-
-// Levenshtein calculates the Levenshtein distance between two strings.
-func Levenshtein(a, b string) int {
-	f := make([]int, len(b)+1)
-	for j := range f {
-		f[j] = j
-	}
-
-	for _, ca := range a {
-		j := 1
-		nw := f[0]
-		f[0]++
-		for _, cb := range b {
-			cur := f[j]
-			if ca == cb {
-				f[j] = nw
-			} else {
-				f[j] = 1 + min(nw, min(f[j], f[j-1]))
-			}
-			nw = cur
-			j++
-		}
-	}
-	return f[len(b)]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

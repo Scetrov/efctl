@@ -9,7 +9,6 @@ Feature ideas and improvements for `efctl`.
 - [x] **`efctl env status`** — Lightweight check showing which containers are running, port availability, and chain health without the full TUI dashboard overhead.
 - [ ] **`efctl env restart`** — Currently only available via the dashboard's `r` hotkey. A standalone command would be useful for scripting and CI.
 - [ ] **`efctl env logs [container]`** — Stream or tail logs from a specific container (sui-playground, postgres, frontend) without entering the TUI.
-- [ ] **`efctl env snapshot` / `efctl env restore`** — Save and restore chain state snapshots (addresses, deployed packages, volumes), enabling quick iteration without full teardown/redeploy cycles.
 
 ## Builder Flow
 

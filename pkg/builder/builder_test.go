@@ -317,24 +317,6 @@ func TestCopyDir(t *testing.T) {
 	assert.Equal(t, "bbb", string(content))
 }
 
-func TestLevenshtein(t *testing.T) {
-	tests := []struct {
-		a, b     string
-		distance int
-	}{
-		{"", "", 0},
-		{"a", "", 1},
-		{"", "a", 1},
-		{"abc", "abc", 0},
-		{"abc", "abd", 1},
-		{"kitten", "sitting", 3},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.distance, Levenshtein(tt.a, tt.b), "%s -> %s", tt.a, tt.b)
-	}
-}
-
 func TestFindClosestMatch(t *testing.T) {
 	workspace := t.TempDir()
 	contractDir1 := filepath.Join(workspace, "builder-scaffold", "move-contracts", "turret_aggressor_first")
@@ -346,6 +328,6 @@ func TestFindClosestMatch(t *testing.T) {
 
 	matches := FindClosestMatch(workspace, "/workspace/builder-scaffold/move-contracts/turret_aggressor")
 	require.Len(t, matches, 2)
-	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/turret_aggressor_first", matches[0])
-	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/turret_player_screen", matches[1])
+	assert.Equal(t, "builder-scaffold/move-contracts/turret_aggressor_first", matches[0])
+	assert.Equal(t, "builder-scaffold/move-contracts/turret_player_screen", matches[1])
 }
