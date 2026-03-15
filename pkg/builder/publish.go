@@ -15,6 +15,7 @@ import (
 	"efctl/pkg/setup"
 	"efctl/pkg/ui"
 	"github.com/lithammer/fuzzysearch/fuzzy"
+	"regexp"
 )
 
 // publishOutput represents the relevant parts of the JSON from `sui client publish --json`.
@@ -55,7 +56,7 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
 
-	publishCmd, err := buildPublishCmd(workspace, network, candidate.ContainerPath)
+	publishCmd, err := buildPublishCmd(c, workspace, network, candidate.ContainerPath)
 	if err != nil {
 		return err
 	}
@@ -212,18 +213,32 @@ func isExtensionManifest(manifestPath string) (bool, error) {
 
 // buildPublishCmd constructs the sui publish command and, for localnet, deletes any
 // stale ephemeral publication file so that re-running is idempotent.
-func buildPublishCmd(workspace, network, containerContractDir string) (string, error) {
+func buildPublishCmd(c container.ContainerClient, workspace, network, containerContractDir string) (string, error) {
 	switch network {
 	case "localnet":
 		// Check if we have an existing world publication file to use as a dependency.
 		// We try both names because DeployWorld might have renamed it to fix testnet builds.
 		pubCandidates := []string{"Pub.localnet.toml", "Pub.testnet.toml"}
 		var foundPub string
+		var foundPath string
 		for _, pub := range pubCandidates {
 			fullPath := filepath.Join(workspace, "builder-scaffold", "deployments", network, pub)
 			if exists, _ := pathExists(fullPath); exists {
 				foundPub = pub
+				foundPath = fullPath
 				break
+			}
+		}
+
+		if foundPub != "" && c != nil {
+			// Validate chain-id to catch cases where the container was restarted but Pub.toml is stale.
+			pubChainID, _ := getPubfileChainID(foundPath)
+			containerChainID, _ := getContainerChainID(c)
+
+			if pubChainID != "" && containerChainID != "" && pubChainID != containerChainID {
+				ui.Warn.Printf("Publication artifact chain-id mismatch (artifact: %s, container: %s).\n", pubChainID, containerChainID)
+				ui.Warn.Println("Falling back to full publish with unpublished dependencies.")
+				foundPub = "" // Trigger fallback
 			}
 		}
 
@@ -423,4 +438,26 @@ func FindClosestMatch(workspace, target string) []string {
 		result = append(result, matches[i].name)
 	}
 	return result
+}
+
+func getContainerChainID(c container.ContainerClient) (string, error) {
+	output, err := c.ExecCapture(context.Background(), container.ContainerSuiPlayground, []string{"sui", "client", "chain-identifier"})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}
+
+func getPubfileChainID(pubfilePath string) (string, error) {
+	content, err := os.ReadFile(pubfilePath) // #nosec G304 -- path is constructed in caller from workspace-local paths
+	if err != nil {
+		return "", err
+	}
+	// chain-id = "dbc50824"
+	re := regexp.MustCompile(`chain-id\s*=\s*"([^"]+)"`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+	return "", fmt.Errorf("chain-id not found in %s", pubfilePath)
 }

@@ -163,7 +163,7 @@ func TestBuildPublishCmd_Localnet(t *testing.T) {
 	pubFile := filepath.Join(pubDir, "Pub.extension.toml")
 	require.NoError(t, os.WriteFile(pubFile, []byte("old"), 0600))
 
-	cmd, err := buildPublishCmd(tmp, "localnet", "/workspace/contracts/my_ext")
+	cmd, err := buildPublishCmd(nil, tmp, "localnet", "/workspace/contracts/my_ext")
 	require.NoError(t, err)
 	assert.Contains(t, cmd, "test-publish")
 	assert.Contains(t, cmd, "/workspace/contracts/my_ext")
@@ -173,14 +173,14 @@ func TestBuildPublishCmd_Localnet(t *testing.T) {
 }
 
 func TestBuildPublishCmd_Testnet(t *testing.T) {
-	cmd, err := buildPublishCmd("/ws", "testnet", "/workspace/contracts/ext")
+	cmd, err := buildPublishCmd(nil, "/ws", "testnet", "/workspace/contracts/ext")
 	require.NoError(t, err)
 	assert.Contains(t, cmd, "sui client publish")
 	assert.Contains(t, cmd, "--json")
 }
 
 func TestBuildPublishCmd_UnsupportedNetwork(t *testing.T) {
-	_, err := buildPublishCmd("/ws", "mainnet", "/dir")
+	_, err := buildPublishCmd(nil, "/ws", "mainnet", "/dir")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported network")
 }
