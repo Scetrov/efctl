@@ -299,7 +299,7 @@ func publishCandidateDirs(workspace string) ([]string, error) {
 	return candidates, nil
 }
 
-func prepareSinglePublishCandidate(t *testing.T, workspace string) {
+func prepareSinglePublishCandidate(t *testing.T, workspace string) string {
 	t.Helper()
 
 	candidates, err := publishCandidateDirs(workspace)
@@ -323,6 +323,13 @@ func prepareSinglePublishCandidate(t *testing.T, workspace string) {
 	}
 
 	t.Logf("kept publish candidate %s and removed %d other candidates", keepCandidate, len(candidates)-1)
+
+	// Return the container path (relative to /workspace)
+	relPath, err := filepath.Rel(workspace, keepCandidate)
+	if err != nil {
+		t.Fatalf("failed to get relative path for candidate: %v", err)
+	}
+	return filepath.Join("/workspace", relPath)
 }
 
 type e2eLifecycleTester struct {
@@ -331,6 +338,7 @@ type e2eLifecycleTester struct {
 	envUpPassed            bool
 	extensionInitPassed    bool
 	extensionPublishPassed bool
+	extensionPath          string
 }
 
 func (tester *e2eLifecycleTester) testVersion(t *testing.T) {
@@ -391,9 +399,9 @@ func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
 		t.Skip("skipping: extension_init did not pass")
 	}
 
-	prepareSinglePublishCandidate(t, tester.workspace)
+	tester.extensionPath = prepareSinglePublishCandidate(t, tester.workspace)
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish")
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", tester.extensionPath)
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: extension publish hit a known infra/drift issue:\n%s", out)
@@ -415,7 +423,7 @@ func (tester *e2eLifecycleTester) testExtensionPublishIdempotent(t *testing.T) {
 		t.Skip("skipping: extension_publish did not pass")
 	}
 
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish")
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", tester.extensionPath)
 	if err != nil {
 		if isKnownInfraOrDriftIssue(out) {
 			t.Skipf("skipping: idempotent publish hit a known infra/drift issue:\n%s", out)
