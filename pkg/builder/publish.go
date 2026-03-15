@@ -214,13 +214,23 @@ func isExtensionManifest(manifestPath string) (bool, error) {
 func buildPublishCmd(workspace, network, containerContractDir string) (string, error) {
 	switch network {
 	case "localnet":
-		// Check if we have an existing world publication file to use as a dependency
-		pubLocalnet := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.localnet.toml")
-		if exists, _ := pathExists(pubLocalnet); exists {
-			ui.Info.Println("Found existing world publication; using it as a dependency.")
+		// Check if we have an existing world publication file to use as a dependency.
+		// We try both names because DeployWorld might have renamed it to fix testnet builds.
+		pubCandidates := []string{"Pub.localnet.toml", "Pub.testnet.toml"}
+		var foundPub string
+		for _, pub := range pubCandidates {
+			fullPath := filepath.Join(workspace, "builder-scaffold", "deployments", network, pub)
+			if exists, _ := pathExists(fullPath); exists {
+				foundPub = pub
+				break
+			}
+		}
+
+		if foundPub != "" {
+			ui.Info.Printf("Found existing world publication (%s); using it as a dependency.\n", foundPub)
 			return fmt.Sprintf(
-				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.localnet.toml --build-env testnet --json",
-				containerContractDir,
+				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
+				containerContractDir, foundPub,
 			), nil
 		}
 

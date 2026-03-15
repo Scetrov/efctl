@@ -40,12 +40,32 @@ func InitExtensionEnv(workspace string, network string) error {
 		return fmt.Errorf("failed to copy test-resources.json: %w", err)
 	}
 
-	// cp "contracts/world/Pub.localnet.toml" "/workspace/builder-scaffold/deployments/localnet/Pub.localnet.toml"
-	pubTomlFile := fmt.Sprintf("Pub.%s.toml", network)
-	srcPubToml := filepath.Join(worldContractsDir, "contracts", "world", pubTomlFile)
-	dstPubToml := filepath.Join(builderDeploymentsDir, pubTomlFile)
-	if err := copyFile(srcPubToml, dstPubToml); err != nil {
-		ui.Warn.Printf("Could not copy %s (may not exist): %v\n", pubTomlFile, err)
+	// Copy publication artifacts (Pub.*.toml)
+	// Note: DeployWorld renames Pub.localnet.toml to Pub.testnet.toml to fix dependency resolution
+	// during --build-env testnet. We try both to be safe.
+	pubCandidates := []string{
+		fmt.Sprintf("Pub.%s.toml", network),
+	}
+	if network == "localnet" {
+		pubCandidates = append(pubCandidates, "Pub.testnet.toml")
+	}
+
+	foundPub := false
+	for _, pubFile := range pubCandidates {
+		srcPubToml := filepath.Join(worldContractsDir, "contracts", "world", pubFile)
+		dstPubToml := filepath.Join(builderDeploymentsDir, pubFile)
+		if _, err := os.Stat(srcPubToml); err == nil {
+			if err := copyFile(srcPubToml, dstPubToml); err != nil {
+				ui.Warn.Printf("Could not copy %s: %v\n", pubFile, err)
+			} else {
+				ui.Debug.Printfln("Copied world publication artifact: %s", pubFile)
+				foundPub = true
+			}
+		}
+	}
+
+	if !foundPub {
+		ui.Warn.Printf("No world publication artifacts found in %s\n", filepath.Join("world-contracts", "contracts", "world"))
 	}
 
 	ui.Info.Println("Copied world artifacts into builder-scaffold deployments.")
