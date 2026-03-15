@@ -50,6 +50,13 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
 
+	// Ensure standard dependencies are available via symlinks if we are publishing from /workspace/mounts
+	if strings.HasPrefix(candidate.ContainerPath, "/workspace/mounts/") {
+		if err := ensureMountDependencies(c); err != nil {
+			return fmt.Errorf("failed to setup mount dependencies: %w", err)
+		}
+	}
+
 	publishCmd, err := buildPublishCmd(workspace, network, candidate.ContainerPath)
 	if err != nil {
 		return err
@@ -228,6 +235,16 @@ func buildPublishCmd(workspace, network, containerContractDir string) (string, e
 	default:
 		return "", fmt.Errorf("unsupported network %s", network)
 	}
+}
+
+// ensureMountDependencies creates symlinks in /workspace/mounts so that extensions
+// can resolve relative dependencies like ../../world-contracts.
+func ensureMountDependencies(c container.ContainerClient) error {
+	setupCmd := "mkdir -p /workspace/mounts && " +
+		"ln -sf /workspace/world-contracts /workspace/mounts/world-contracts && " +
+		"ln -sf /workspace/builder-scaffold /workspace/mounts/builder-scaffold"
+
+	return c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", setupCmd})
 }
 
 // writePublishedIDs parses the publish command JSON output and writes the discovered
