@@ -316,3 +316,36 @@ func TestCopyDir(t *testing.T) {
 	content, _ = os.ReadFile(filepath.Join(dst, "sub", "b.txt"))
 	assert.Equal(t, "bbb", string(content))
 }
+
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		a, b     string
+		distance int
+	}{
+		{"", "", 0},
+		{"a", "", 1},
+		{"", "a", 1},
+		{"abc", "abc", 0},
+		{"abc", "abd", 1},
+		{"kitten", "sitting", 3},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.distance, Levenshtein(tt.a, tt.b), "%s -> %s", tt.a, tt.b)
+	}
+}
+
+func TestFindClosestMatch(t *testing.T) {
+	workspace := t.TempDir()
+	contractDir1 := filepath.Join(workspace, "builder-scaffold", "move-contracts", "turret_aggressor_first")
+	contractDir2 := filepath.Join(workspace, "builder-scaffold", "move-contracts", "turret_player_screen")
+	require.NoError(t, os.MkdirAll(contractDir1, 0750))
+	require.NoError(t, os.MkdirAll(contractDir2, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir1, "Move.toml"), []byte("[package]\nname = \"turret_aggressor_first\"\n\n[dependencies]\nworld = { local = \"../../../world-contracts/contracts/world\" }\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(contractDir2, "Move.toml"), []byte("[package]\nname = \"turret_player_screen\"\n\n[dependencies]\nworld = { local = \"../../../world-contracts/contracts/world\" }\n"), 0600))
+
+	matches := FindClosestMatch(workspace, "/workspace/builder-scaffold/move-contracts/turret_aggressor")
+	require.Len(t, matches, 2)
+	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/turret_aggressor_first", matches[0])
+	assert.Equal(t, "/workspace/builder-scaffold/move-contracts/turret_player_screen", matches[1])
+}

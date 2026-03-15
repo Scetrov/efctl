@@ -25,5 +25,6 @@ The extension command groups operations defined in the EVE Frontier Builder Flow
 
 * [efctl env](efctl_env.md)	 - Manage the local Sui development environment
 * [efctl env extension init](efctl_env_extension_init.md)	 - Initialize the builder-scaffold by copying world artifacts
+* [efctl env extension list](efctl_env_extension_list.md)	 - List all available extensions in the workspace
 * [efctl env extension publish](efctl_env_extension_publish.md)	 - Publish a custom extension contract
 

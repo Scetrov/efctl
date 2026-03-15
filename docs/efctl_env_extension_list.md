@@ -1,20 +1,19 @@
-## efctl env extension publish
+## efctl env extension list
 
-Publish a custom extension contract
+List all available extensions in the workspace
 
 ### Synopsis
 
-Publishes the specified extension contract (path relative to /workspace) locally via the container and updates BUILDER_PACKAGE_ID and EXTENSION_CONFIG_ID in .env
+Scans the current configured workspace for extensions and displays them in a table format showing their container and local paths.
 
 ```
-efctl env extension publish [extension-path] [flags]
+efctl env extension list [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help             help for publish
-  -n, --network string   The network to publish to (localnet or testnet) (default "localnet")
+  -h, --help   help for list
 ```
 
 ### Options inherited from parent commands

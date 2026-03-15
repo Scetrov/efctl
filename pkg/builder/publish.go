@@ -28,12 +28,12 @@ type objectChange struct {
 	ObjectType string `json:"objectType"`
 }
 
-type publishSearchRoot struct {
+type PublishSearchRoot struct {
 	HostPath      string
 	ContainerPath string
 }
 
-type publishCandidate struct {
+type PublishCandidate struct {
 	Name          string
 	HostPath      string
 	ContainerPath string
@@ -43,11 +43,7 @@ const worldDependencyMarker = "world = {"
 
 // PublishExtension publishes the custom extension to the smart assembly testnet
 // and updates the builder-scaffold/.env with the extracted package IDs.
-func PublishExtension(c container.ContainerClient, workspace string, network string) error {
-	candidate, err := resolvePublishContractDir(workspace)
-	if err != nil {
-		return err
-	}
+func PublishExtension(c container.ContainerClient, workspace string, network string, candidate PublishCandidate) error {
 
 	ui.Info.Printf("Publishing extension contract from %s...\n", candidate.HostPath)
 
@@ -77,15 +73,15 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 	return writePublishedIDs(workspace, output)
 }
 
-func resolvePublishContractDir(workspace string) (publishCandidate, error) {
-	searchRoots, err := publishSearchRoots(workspace)
+func resolvePublishContractDir(workspace string) (PublishCandidate, error) {
+	searchRoots, err := GetPublishSearchRoots(workspace)
 	if err != nil {
-		return publishCandidate{}, err
+		return PublishCandidate{}, err
 	}
 
-	candidates, err := discoverPublishCandidates(searchRoots)
+	candidates, err := DiscoverPublishCandidates(searchRoots)
 	if err != nil {
-		return publishCandidate{}, err
+		return PublishCandidate{}, err
 	}
 
 	if len(candidates) == 0 {
@@ -93,7 +89,7 @@ func resolvePublishContractDir(workspace string) (publishCandidate, error) {
 		for _, root := range searchRoots {
 			searchedRoots = append(searchedRoots, root.HostPath)
 		}
-		return publishCandidate{}, fmt.Errorf("no publishable extension found; searched immediate child directories under: %s", strings.Join(searchedRoots, ", "))
+		return PublishCandidate{}, fmt.Errorf("no publishable extension found; searched immediate child directories under: %s", strings.Join(searchedRoots, ", "))
 	}
 
 	if len(candidates) > 1 {
@@ -101,7 +97,7 @@ func resolvePublishContractDir(workspace string) (publishCandidate, error) {
 		for _, candidate := range candidates {
 			matchingPaths = append(matchingPaths, candidate.HostPath)
 		}
-		return publishCandidate{}, fmt.Errorf("multiple publishable extensions found; aborting: %s", strings.Join(matchingPaths, ", "))
+		return PublishCandidate{}, fmt.Errorf("multiple publishable extensions found; aborting: %s", strings.Join(matchingPaths, ", "))
 	}
 
 	return candidates[0], nil
@@ -118,8 +114,8 @@ func pathExists(filePath string) (bool, error) {
 	return true, nil
 }
 
-func publishSearchRoots(workspace string) ([]publishSearchRoot, error) {
-	roots := []publishSearchRoot{
+func GetPublishSearchRoots(workspace string) ([]PublishSearchRoot, error) {
+	roots := []PublishSearchRoot{
 		{
 			HostPath:      filepath.Join(workspace, "builder-scaffold", "move-contracts"),
 			ContainerPath: "/workspace/builder-scaffold/move-contracts",
@@ -140,7 +136,7 @@ func publishSearchRoots(workspace string) ([]publishSearchRoot, error) {
 	}
 
 	for _, mount := range resolvedMounts {
-		roots = append(roots, publishSearchRoot{
+		roots = append(roots, PublishSearchRoot{
 			HostPath:      mount.HostPath,
 			ContainerPath: path.Join("/workspace/mounts", mount.Identifier),
 		})
@@ -149,8 +145,8 @@ func publishSearchRoots(workspace string) ([]publishSearchRoot, error) {
 	return roots, nil
 }
 
-func discoverPublishCandidates(searchRoots []publishSearchRoot) ([]publishCandidate, error) {
-	var candidates []publishCandidate
+func DiscoverPublishCandidates(searchRoots []PublishSearchRoot) ([]PublishCandidate, error) {
+	var candidates []PublishCandidate
 
 	for _, root := range searchRoots {
 		entries, err := os.ReadDir(root.HostPath)
@@ -184,7 +180,7 @@ func discoverPublishCandidates(searchRoots []publishSearchRoot) ([]publishCandid
 				continue
 			}
 
-			candidates = append(candidates, publishCandidate{
+			candidates = append(candidates, PublishCandidate{
 				Name:          entry.Name(),
 				HostPath:      hostCandidatePath,
 				ContainerPath: path.Join(root.ContainerPath, entry.Name()),
@@ -309,4 +305,93 @@ func extractPublishIDs(output string) (builderPackageID, extensionConfigID strin
 	}
 
 	return builderPackageID, extensionConfigID, nil
+}
+
+// GetCandidate finds a candidate by its container path.
+func GetCandidate(workspace, containerPath string) (PublishCandidate, error) {
+	searchRoots, err := GetPublishSearchRoots(workspace)
+	if err != nil {
+		return PublishCandidate{}, err
+	}
+
+	candidates, err := DiscoverPublishCandidates(searchRoots)
+	if err != nil {
+		return PublishCandidate{}, err
+	}
+
+	for _, c := range candidates {
+		if c.ContainerPath == containerPath {
+			return c, nil
+		}
+	}
+
+	return PublishCandidate{}, fmt.Errorf("extension %q not found", containerPath)
+}
+
+// FindClosestMatch returns a list of candidates sorted by Levenshtein distance to the target.
+func FindClosestMatch(workspace, target string) []string {
+	searchRoots, err := GetPublishSearchRoots(workspace)
+	if err != nil {
+		return nil
+	}
+
+	candidates, err := DiscoverPublishCandidates(searchRoots)
+	if err != nil {
+		return nil
+	}
+
+	type match struct {
+		name     string
+		distance int
+	}
+	var matches []match
+	for _, c := range candidates {
+		dist := Levenshtein(target, c.ContainerPath)
+		matches = append(matches, match{c.ContainerPath, dist})
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].distance == matches[j].distance {
+			return matches[i].name < matches[j].name
+		}
+		return matches[i].distance < matches[j].distance
+	})
+
+	var result []string
+	for i := 0; i < len(matches) && i < 3; i++ {
+		result = append(result, matches[i].name)
+	}
+	return result
+}
+
+// Levenshtein calculates the Levenshtein distance between two strings.
+func Levenshtein(a, b string) int {
+	f := make([]int, len(b)+1)
+	for j := range f {
+		f[j] = j
+	}
+
+	for _, ca := range a {
+		j := 1
+		nw := f[0]
+		f[0]++
+		for _, cb := range b {
+			cur := f[j]
+			if ca == cb {
+				f[j] = nw
+			} else {
+				f[j] = 1 + min(nw, min(f[j], f[j-1]))
+			}
+			nw = cur
+			j++
+		}
+	}
+	return f[len(b)]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
