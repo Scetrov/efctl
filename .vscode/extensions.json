@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "golang.go",
+        "yzhang.markdown-all-in-one",
+        "esbenp.prettier-vscode",
+        "ms-vscode.makefile-tools"
+    ]
+}

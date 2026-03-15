@@ -11,103 +11,123 @@
 
 ---
 
-## Configuration File
+## ⚙️ Configuration File
 
-`efctl` supports optional `efctl.yaml` and `efctl.yml` configuration files. By default it starts in the **current working directory** (the directory from which you run the `efctl` command) and recursively searches parent directories until it finds one.
+`efctl` looks for `efctl.yaml` or `efctl.yml` in the current directory and its parents.
 
-If both `efctl.yaml` and `efctl.yml` exist in the same directory, `efctl.yaml` is preferred.
+> [!TIP]
+> Run `efctl init` to scaffold a config file with the current recommended defaults.
 
-**Important:** Config discovery is independent of the `--workspace` flag. Use `--config-file` to bypass discovery and load an explicit config path.
+### Configuration Fields
 
-To see which config file is loaded (or if none was found), use the `--debug` flag:
-```bash
-efctl --debug env up
-```
+| Field | Description | Default |
+| :--- | :--- | :--- |
+| `with-frontend` | Enable builder-scaffold web frontend (Vite) | `false` |
+| `with-graphql` | Enable SQL Indexer and GraphQL API | `false` |
+| `world-contracts-url` | Git URL for world contracts | `https://github.com/evefrontier/world-contracts.git` |
+| `world-contracts-ref` | Branch, tag, or commit for world contracts | `main` |
+| `builder-scaffold-url` | Git URL for builder-scaffold | `https://github.com/evefrontier/builder-scaffold.git` |
+| `builder-scaffold-ref` | Branch, tag, or commit for builder-scaffold | `main` |
+| `git-autocrlf` | Enable Git `core.autocrlf` for clones | `false` |
+| `container-engine` | Container engine to use (`docker`, `podman`) | `auto-detect` |
+| `additional-bind-mounts` | List of custom host paths to mount | `[]` |
 
-All properties are optional. CLI flags override values from the config file.
-
-Run `efctl init` to scaffold a config file with the current recommended defaults.
+#### Example `efctl.yaml`
 
 ```yaml
-# Enable the builder-scaffold web frontend (Vite dev server on port 5173)
+# Enable components
 with-frontend: true
-
-# Enable the SQL Indexer and GraphQL API
 with-graphql: true
 
-# Git clone URL for the world-contracts repository
-world-contracts-url: "https://github.com/evefrontier/world-contracts.git"
-
-# Ref (branch, tag, or commit) to checkout for world-contracts (default: main)
+# Control versions
 world-contracts-ref: "v0.0.18"
-
-# Git clone URL for the builder-scaffold repository
-builder-scaffold-url: "https://github.com/evefrontier/builder-scaffold.git"
-
-# Ref (branch, tag, or commit) to checkout for builder-scaffold (default: main)
 builder-scaffold-ref: "v0.0.2"
+
+# Custom mounts
+additional-bind-mounts:
+  - hostPath: ./my-assets
+    identifier: assets
 ```
 
-### `efctl init`
-
-Creates an `efctl.yaml` file in the current directory. Use `--config-file` to target a different path and `--force` to overwrite an existing file.
+> [!IMPORTANT]
+> Config discovery is independent of the `--workspace` flag. CLI flags always override values from the config file.
 
 ---
 
-## Environment Management
+## 🏗️ Environment Management
 
-The `env` command groups operations to bring up, manage, and tear down the EVE Frontier local development environment.
+The `env` command groups operations to manage the EVE Frontier local development environment.
 
 ### `efctl env up`
 
-Brings up the local environment. It sequentially runs checks, setup, start, and deployment instructions to spin up a fully working EVE Frontier Smart Assembly testing environment.
+Brings up the local environment. It sequentially runs checks, setup, start, and deployment instructions.
 
-**Options:**
+**Common Options:**
 
-- `--with-frontend`: Enable the builder-scaffold web frontend (Vite dev server on port 5173).
-- `--with-graphql`: Enable the SQL Indexer and GraphQL API.
-- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+- `--with-frontend`: Enable the web frontend.
+- `--with-graphql`: Enable the GraphQL API.
+- `-w, --workspace PATH`: Path to the workspace directory (default: `.`).
 
 ### `efctl env down`
 
 Tears down the local environment, stopping containers and cleaning up images/volumes.
 
-**Options:**
-
-- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
-
 ### `efctl env status`
 
-Displays the current status of the local environment containers.
-
-**Options:**
-
-- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
-
-### `efctl env shell`
-
-Drops you into an interactive `/bin/bash` shell inside the `builder-scaffold` container.
-
-**Options:**
-
-- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+Displays the current status of the local environment containers. Perfect for verifying if services are running.
 
 ### `efctl env dash`
 
-Opens an interactive terminal dashboard for inspecting and managing the local environment.
+Opens a high-performance interactive terminal dashboard.
 
-**Options:**
+---
 
-- `-w, --workspace string`: Path to the workspace directory. (default: `.`)
+## 🚀 Extension Flow
+
+Automate the setup and publishing of custom extensions within the EVE Frontier ecosystem.
+
+### `efctl env extension init`
+
+Initializes the builder-scaffold by synchronizing world artifacts and configuring the environment.
+
+### `efctl env extension publish`
+
+Publishes your extension to the localnet/testnet.
+
+> [!NOTE]
+> `efctl` auto-discovers extensions by looking for `Move.toml` files that declare a `world` dependency.
+
+**Publish Workflow:**
+1. Scan `builder-scaffold/move-contracts` and `world-contracts/contracts`.
+2. Verify exactly one publish candidate is found.
+3. Build and publish the package to the target network.
+
+---
+
+## 📜 Script & Tool Interactions
+
+### `efctl env run [command]`
+
+Execute commands directly inside the `builder-scaffold` container.
+
+**Examples:**
+
+```bash
+# Run a package.json script
+efctl env run npm run dev
+
+# Run a custom move command
+efctl env run sui client objects
+```
 
 ### `efctl env faucet`
 
-Request gas coins from the local Sui faucet for a specific address. This is useful when the standard `sui client faucet` command fails against the local node.
+Request gas coins from the local Sui faucet.
 
-**Options:**
-
-- `-a, --address string`: The address to receive gas (required).
-- `--faucet-url string`: The URL of the faucet (default: `http://localhost:9123`).
+```bash
+# Fund a specific address
+efctl env faucet --address 0x...
+```
 
 ---
 

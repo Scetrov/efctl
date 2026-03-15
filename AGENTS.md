@@ -56,6 +56,7 @@ Quick reference for common `efctl` operations:
   - Up: `efctl env up`
   - Down: `efctl env down`
 - **Status Check**: `efctl env status`
+- **Dash**: `efctl env dash`
 - **Deploy Extension**: `efctl env extension publish [contract-path]` (path defaults to `./my-extension`)
 - **Query World**: `efctl world query [object_id]` (queries the Sui GraphQL RPC)
 <!-- EFCTL_INSTRUCTIONS_START -->
