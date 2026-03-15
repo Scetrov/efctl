@@ -67,7 +67,7 @@ func additionalBindMountDefs(additionalMounts []AdditionalBindMount) []MountDef 
 		mounts = append(mounts, MountDef{
 			Type:    "bind",
 			Source:  mount.Source,
-			Target:  filepath.ToSlash(filepath.Join("/workspace/mounts", mount.Identifier)),
+			Target:  filepath.ToSlash(filepath.Join("/workspace", mount.Identifier)),
 			SELinux: true,
 		})
 	}

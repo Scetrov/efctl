@@ -94,7 +94,7 @@ func TestSuiDevConfig_AdditionalBindMounts(t *testing.T) {
 
 	require.Len(t, cfg.Mounts, 4)
 	assert.Equal(t, "/tmp/contracts", cfg.Mounts[3].Source)
-	assert.Equal(t, "/workspace/mounts/contracts_mount", cfg.Mounts[3].Target)
+	assert.Equal(t, "/workspace/contracts_mount", cfg.Mounts[3].Target)
 	assert.True(t, cfg.Mounts[3].SELinux)
 }
 

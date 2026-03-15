@@ -52,7 +52,7 @@ func TestResolvePublishContractDir_UsesSingleAdditionalBindMountCandidate(t *tes
 
 	candidate, err := resolvePublishContractDir(workspace)
 	require.NoError(t, err)
-	assert.Equal(t, "/workspace/mounts/external_contracts/smart_gate_extension", candidate.ContainerPath)
+	assert.Equal(t, "/workspace/external_contracts/smart_gate_extension", candidate.ContainerPath)
 	assert.Equal(t, contractDir, candidate.HostPath)
 }
 
