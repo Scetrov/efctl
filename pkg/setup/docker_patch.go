@@ -99,7 +99,7 @@ func patchDockerfile(dockerDir string) {
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
 			1)
 	}
-	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G703 -- path validated by safePath
+	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
 		log.Printf("patch: failed to write Dockerfile: %v", err)
 	}
 }
@@ -130,7 +130,7 @@ func patchEntrypoint(dockerDir string) {
 		content = strings.ReplaceAll(content, bindMountEnvPath, "/workspace/.sui/.env.sui")
 	}
 
-	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath
+	if err := os.WriteFile(entrypointPath, []byte(content), 0700); err != nil { // #nosec G302 G306 G703 -- entrypoint.sh must be executable; path validated by safePath; error is handled via log.Printf below
 		log.Printf("patch: failed to write entrypoint.sh: %v", err)
 	}
 }

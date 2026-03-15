@@ -13,7 +13,7 @@ import (
 )
 
 func ensureGitRepository(path string) error {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree") // #nosec G204
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree") // #nosec G204 -- "git" is a hardcoded binary; path is a -C directory argument, not a shell command
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("path %s is not a git repository: %v\n%s", path, err, string(output))
@@ -105,7 +105,7 @@ func cloneNewRepository(url string, dest string) error {
 	var lastErr error
 	var output []byte
 	for attempt := 1; attempt <= 3; attempt++ {
-		cmd := exec.Command("git", "clone", "-c", "core.autocrlf="+autocrlf, url, dest) // #nosec G204
+		cmd := exec.Command("git", "clone", "-c", "core.autocrlf="+autocrlf, url, dest) // #nosec G204 -- "git" is a hardcoded binary; url/dest come from validated config, autocrlf is "true" or "false"
 		output, lastErr = cmd.CombinedOutput()
 		if lastErr == nil {
 			spinner.Success(fmt.Sprintf("Cloned %s", dest))
@@ -127,9 +127,9 @@ func cloneNewRepository(url string, dest string) error {
 }
 
 func setOrAddRemote(dest, url string) error {
-	cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url) // #nosec G204
+	cmd := exec.Command("git", "-C", dest, "remote", "set-url", "origin", url) // #nosec G204 -- "git" is a hardcoded binary; dest/url come from validated config
 	if err := cmd.Run(); err != nil {
-		cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url) // #nosec G204
+		cmd = exec.Command("git", "-C", dest, "remote", "add", "origin", url) // #nosec G204 -- "git" is a hardcoded binary; dest/url come from validated config
 		if err := cmd.Run(); err != nil {
 			ui.Debug.Printf("failed to set or add remote origin %s: %v", url, err)
 			return fmt.Errorf("failed to configure remote origin for %s: %w", dest, err)
@@ -142,7 +142,7 @@ func fetchWithRetry(dest, url string) error {
 	var fetchErr error
 	var fetchOutput []byte
 	for attempt := 1; attempt <= 3; attempt++ {
-		cmd := exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204
+		cmd := exec.Command("git", "-C", dest, "fetch", "origin") // #nosec G204 -- "git" is a hardcoded binary; dest comes from validated config
 		fetchOutput, fetchErr = cmd.CombinedOutput()
 		if fetchErr == nil {
 			return nil
@@ -165,7 +165,7 @@ func ensureAutocrlf(dest string) {
 	if config.Loaded.GetGitAutoCRLF() {
 		autocrlf = "true"
 	}
-	_ = exec.Command("git", "-C", dest, "config", "core.autocrlf", autocrlf).Run() // #nosec G204
+	_ = exec.Command("git", "-C", dest, "config", "core.autocrlf", autocrlf).Run() // #nosec G204 -- "git" is a hardcoded binary; autocrlf is "true" or "false" only
 }
 
 // isRetriableGitError checks if a git error is worth retrying (transient network issues)
@@ -210,10 +210,10 @@ func CheckoutRef(repoPath string, ref string) error {
 	if config.Loaded.GetGitAutoCRLF() {
 		autocrlf = "true"
 	}
-	cmdConfig := exec.Command("git", "-C", repoPath, "config", "core.autocrlf", autocrlf) // #nosec G204
+	cmdConfig := exec.Command("git", "-C", repoPath, "config", "core.autocrlf", autocrlf) // #nosec G204 -- "git" is a hardcoded binary; autocrlf is "true" or "false" only
 	cmdConfig.Run()
 
-	cmd := exec.Command("git", "-C", repoPath, "checkout", ref) // #nosec G204
+	cmd := exec.Command("git", "-C", repoPath, "checkout", ref) // #nosec G204 -- "git" is a hardcoded binary; ref comes from validated config
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to checkout ref '%s'", ref))
@@ -225,7 +225,7 @@ func CheckoutRef(repoPath string, ref string) error {
 	// Tags will fail the pull but we ignore errors anyway.
 	isCommit, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, ref)
 	if !isCommit {
-		cmd = exec.Command("git", "-C", repoPath, "pull", "origin", ref) // #nosec G204
+		cmd = exec.Command("git", "-C", repoPath, "pull", "origin", ref) // #nosec G204 -- "git" is a hardcoded binary; ref comes from validated config
 		// We ignore pull errors since the ref might be local-only or already up-to-date
 		cmd.Run()
 	}
@@ -241,7 +241,7 @@ func NormalizeLineEndings(path string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(path) // #nosec G304
+	data, err := os.ReadFile(path) // #nosec G304 -- path is validated to be an existing file before this call (Stat succeeds on line 239)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func NormalizeLineEndings(path string) error {
 		return nil // No change needed
 	}
 
-	return os.WriteFile(path, []byte(normalized), info.Mode()) // #nosec G703 G304
+	return os.WriteFile(path, []byte(normalized), info.Mode()) // #nosec G304 G703 -- path is the same file successfully Stat'd and read above; error is returned to caller
 }
 
 // SetupWorkDir creates the workspace directory if it doesn't exist

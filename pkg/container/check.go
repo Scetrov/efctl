@@ -21,7 +21,7 @@ func CheckPodmanConfig() {
 	}
 
 	configPath := filepath.Join(home, ".config/containers/containers.conf")
-	data, err := os.ReadFile(configPath) // #nosec G304
+	data, err := os.ReadFile(configPath) // #nosec G304 -- configPath is filepath.Join(userHomeDir, ".config/containers/containers.conf"), a fully hardcoded suffix with no user input
 	if err != nil {
 		// File does not exist or cannot be read, which is common if user is using defaults.
 		// The prompt says: "If the engine is podman, check for the existence of the file ~/.config/containers/containers.conf."

@@ -71,7 +71,7 @@ func GatherContainerStats(engine string) []ContainerStat {
 		return []ContainerStat{sui, pg, fe}
 	}
 
-	out, err := exec.Command(engine, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output() // #nosec G204
+	out, err := exec.Command(engine, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output() // #nosec G204 -- engine is validated by env.CheckPrerequisites().Engine() to be "docker" or "podman"
 	if err == nil {
 		sui, pg, fe = parseStatsOutput(string(out), sui, pg, fe)
 	}
@@ -118,7 +118,7 @@ func parseStatsOutput(out string, sui, pg, fe ContainerStat) (ContainerStat, Con
 }
 
 func containerRunning(engine, name string) bool {
-	out, err := exec.Command(engine, "inspect", "--format", "{{.State.Running}}", name).Output() // #nosec G204
+	out, err := exec.Command(engine, "inspect", "--format", "{{.State.Running}}", name).Output() // #nosec G204 -- engine is validated by env.CheckPrerequisites().Engine() to be "docker" or "podman"
 	if err != nil {
 		return false
 	}

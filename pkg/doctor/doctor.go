@@ -294,7 +294,7 @@ func gatherPodmanConfig(info *ContainerRuntimeInfo) {
 	}
 
 	configPath := filepath.Join(home, ".config/containers/containers.conf")
-	data, err := os.ReadFile(configPath) // #nosec G304
+	data, err := os.ReadFile(configPath) // #nosec G304 -- configPath is filepath.Join(userHomeDir, ".config/containers/containers.conf"), a fully hardcoded suffix with no user input
 	if err != nil {
 		// Try system-wide as fallback
 		data, err = os.ReadFile("/etc/containers/containers.conf")
@@ -505,12 +505,12 @@ func gatherRepo(name, path string) RepoInfo {
 	}
 
 	// Dirty status: any output means uncommitted changes exist.
-	if out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output(); err == nil { // #nosec G204
+	if out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output(); err == nil { // #nosec G204 -- path is a directory argument to git -C, not a shell command
 		info.IsDirty = len(strings.TrimSpace(string(out))) > 0
 	}
 
 	// Remote URL.
-	if out, err := exec.Command("git", "-C", path, "remote", "get-url", "origin").Output(); err == nil { // #nosec G204
+	if out, err := exec.Command("git", "-C", path, "remote", "get-url", "origin").Output(); err == nil { // #nosec G204 -- path is a directory argument to git -C, not a shell command
 		info.Remote = strings.TrimSpace(string(out))
 	}
 

@@ -96,7 +96,7 @@ func PrintDeploymentSummary(workspace string) {
 
 	// Check if optional services are enabled by looking at the override file
 	overridePath := filepath.Join(workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
-	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304
+	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304 -- path is filepath.Join(workspace, hardcoded-sub-path); workspace is set by the user's own config
 		content := string(data)
 		if strings.Contains(content, "postgres:") || strings.Contains(content, "SUI_GRAPHQL_ENABLED") {
 			fmt.Println("📊 GraphQL API:   http://localhost:9125/graphql")
@@ -111,7 +111,7 @@ func PrintDeploymentSummary(workspace string) {
 
 func extractWorldIds(workspace string, tPackages, tObjects table.Writer) {
 	jsonPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
-	bytes, err := os.ReadFile(jsonPath) // #nosec G304
+	bytes, err := os.ReadFile(jsonPath) // #nosec G304 -- path is filepath.Join(workspace, hardcoded-sub-path); workspace is set by the user's own config
 	if err != nil {
 		ui.Warn.Println("Could not read extracted-object-ids.json, skipping core world IDs...")
 		return
@@ -192,7 +192,7 @@ func extractDynamicIds(workspace string, tObjects table.Writer) []AddressInfo {
 
 func extractDeployLogIds(workspace string, tObjects table.Writer) {
 	logPath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "deploy.log")
-	file, err := os.Open(logPath) // #nosec G304
+	file, err := os.Open(logPath) // #nosec G304 -- path is filepath.Join(workspace, hardcoded-sub-path); workspace is set by the user's own config
 	if err == nil {
 		defer file.Close()
 		ids := parseDeployLog(bufio.NewScanner(file))
@@ -223,7 +223,7 @@ type AddressInfo struct {
 func extractEnvAddresses(workspace string) []AddressInfo {
 	var addresses []AddressInfo
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
-	envFile, err := os.Open(envPath) // #nosec G304
+	envFile, err := os.Open(envPath) // #nosec G304 -- path is filepath.Join(workspace, hardcoded-sub-path); workspace is set by the user's own config
 	if err == nil {
 		defer envFile.Close()
 		env := parseEnvLog(bufio.NewScanner(envFile))
