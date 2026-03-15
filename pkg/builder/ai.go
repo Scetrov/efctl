@@ -20,17 +20,20 @@ func SetupAIInstructions(agentName string, workspace string) error {
 	agentName = strings.ToLower(agentName)
 
 	switch agentName {
-	case "copilot", "cursor":
-		targetFile = ".cursorrules"
+	case "copilot":
+		targetFile = filepath.Join(".github", "copilot-instructions.md")
 		instructions = getCopilotInstructions()
+	case "cursor":
+		targetFile = filepath.Join(".cursor", "rules", "efctl.md")
+		instructions = getCursorInstructions()
 	case "claude":
-		targetFile = ".clauderules"
+		targetFile = "CLAUDE.md"
 		instructions = getClaudeInstructions()
 	case "gemini":
 		targetFile = filepath.Join(".agents", "instructions.md")
 		instructions = getGeminiInstructions()
 	default:
-		return fmt.Errorf("unsupported agent: %s; supported agents are: copilot, claude, gemini", agentName)
+		return fmt.Errorf("unsupported agent: %s; supported agents are: copilot, cursor, claude, gemini", agentName)
 	}
 
 	absPath := filepath.Join(workspace, targetFile)
@@ -64,7 +67,7 @@ func SetupAIInstructions(agentName string, workspace string) error {
 	return os.WriteFile(absPath, []byte(newContent), 0600) // #nosec G306 G703
 }
 
-func getCopilotInstructions() string {
+func getSharedInstructions() string {
 	return `
 # efctl Context
 You are working on a project using 'efctl', the EVE Frontier CLI.
@@ -80,10 +83,22 @@ Reference AGENTS.md for core principles.
 `
 }
 
+func getCopilotInstructions() string {
+	return getSharedInstructions()
+}
+
+func getCursorInstructions() string {
+	return `---
+description: efctl usage instructions
+globs: **/*
+---
+` + getSharedInstructions()
+}
+
 func getClaudeInstructions() string {
-	return getCopilotInstructions()
+	return getSharedInstructions()
 }
 
 func getGeminiInstructions() string {
-	return getCopilotInstructions()
+	return getSharedInstructions()
 }

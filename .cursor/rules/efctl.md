@@ -1,4 +1,9 @@
 <!-- EFCTL_INSTRUCTIONS_START -->
+---
+description: efctl usage instructions
+globs: **/*
+---
+
 # efctl Context
 You are working on a project using 'efctl', the EVE Frontier CLI.
 Reference AGENTS.md for core principles.
@@ -11,4 +16,3 @@ Reference AGENTS.md for core principles.
 - Publish Extension: efctl env extension publish [contract-path]
 - Query World: efctl world query [object_id]
 <!-- EFCTL_INSTRUCTIONS_END -->
-Extra text

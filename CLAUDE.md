@@ -11,4 +11,3 @@ Reference AGENTS.md for core principles.
 - Publish Extension: efctl env extension publish [contract-path]
 - Query World: efctl world query [object_id]
 <!-- EFCTL_INSTRUCTIONS_END -->
-Extra text
