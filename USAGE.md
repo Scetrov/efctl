@@ -140,7 +140,7 @@ additional-bind-mounts:
 		identifier: some_path
 ```
 
-Each configured mount is exposed to the Sui container at `/workspace/mounts/{identifier}`.
+Each configured mount is exposed to the Sui container at `/workspace/{identifier}`.
 
 **Options:**
 
