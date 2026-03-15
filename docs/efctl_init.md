@@ -13,8 +13,9 @@ efctl init [flags]
 ### Options
 
 ```
-      --force   Overwrite an existing config file
-  -h, --help    help for init
+      --ai string   Setup AI instructions for a specific agent (copilot, claude, gemini)
+      --force       Overwrite an existing config file
+  -h, --help        help for init
 ```
 
 ### Options inherited from parent commands

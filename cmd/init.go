@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"efctl/pkg/builder"
 	"efctl/pkg/config"
 	"efctl/pkg/ui"
 	"github.com/spf13/cobra"
 )
 
 var initForce bool
+var initAiAgent string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -72,6 +74,15 @@ var initCmd = &cobra.Command{
 			ui.Warn.Printf("Failed to create example extension directory: %v\n", err)
 		} else {
 			ui.Success.Println("Created example extension directory")
+		}
+
+		// 4. AI Instructions
+		if initAiAgent != "" {
+			if err := builder.SetupAIInstructions(initAiAgent, targetDir); err != nil {
+				ui.Warn.Printf("Failed to setup AI instructions: %v\n", err)
+			} else {
+				ui.Success.Printf("Setup AI instructions for %s\n", initAiAgent)
+			}
 		}
 
 		return nil
@@ -137,5 +148,6 @@ func readGitignore(path string) (map[string]bool, error) {
 
 func init() {
 	initCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite an existing config file")
+	initCmd.Flags().StringVar(&initAiAgent, "ai", "", "Setup AI instructions for a specific agent (copilot, claude, gemini)")
 	rootCmd.AddCommand(initCmd)
 }

@@ -46,3 +46,15 @@ To maintain a non-breaking flow and avoid permission requests:
 - Keep terminal usage limited to short operational commands such as `git`, `mkdir`, `rm`, `mv`, `cd`, `ls`, and install commands.
 - Keep responses concise and write substantial artifacts to files instead of long inline output.
 - Utility commands: `ctx stats`, `ctx doctor`, `ctx upgrade`.
+
+## 8. Development Cheat Sheet
+
+Quick reference for common `efctl` operations:
+
+- **Initialize configuration**: `efctl init` (or `efctl init --ai [agent]`)
+- **Environment Lifecycle**:
+  - Up: `efctl env up`
+  - Down: `efctl env down`
+- **Status Check**: `efctl env status`
+- **Deploy Extension**: `efctl env extension publish [contract-path]` (path defaults to `./my-extension`)
+- **Query World**: `efctl world query [object_id]` (queries the Sui GraphQL RPC)
