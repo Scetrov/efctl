@@ -52,6 +52,10 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 		return fmt.Errorf("failed to initialize extension environment: %w", err)
 	}
 
+	if err := repairEnvironmentIfMismatched(c, workspace, network); err != nil {
+		return err
+	}
+
 	ui.Info.Printf("Publishing extension contract from %s...\n", candidate.HostPath)
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
@@ -236,9 +240,7 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 			containerChainID, _ := getContainerChainID(c)
 
 			if pubChainID != "" && containerChainID != "" && pubChainID != containerChainID {
-				ui.Warn.Printf("Publication artifact chain-id mismatch (artifact: %s, container: %s).\n", pubChainID, containerChainID)
-				ui.Warn.Println("Falling back to full publish with unpublished dependencies.")
-				foundPub = "" // Trigger fallback
+				foundPub = "" // Trigger fallback; mismatch is now handled in PublishExtension
 			}
 		}
 
@@ -443,6 +445,56 @@ func getContainerChainID(c container.ContainerClient) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(output), nil
+}
+
+func repairEnvironmentIfMismatched(c container.ContainerClient, workspace, network string) error {
+	if network != "localnet" || c == nil {
+		return nil
+	}
+
+	// Validate chain-id to catch cases where the container was restarted but Pub.toml is stale.
+	// We try both names because older versions might have renamed it.
+	pubCandidates := []string{"Pub.localnet.toml", "Pub.testnet.toml"}
+	var bestPath string
+	var bestChainID string
+	containerChainID, _ := getContainerChainID(c)
+
+	for _, pub := range pubCandidates {
+		fullPath := filepath.Join(workspace, "builder-scaffold", "deployments", network, pub)
+		if exists, _ := pathExists(fullPath); exists {
+			pubChainID, _ := getPubfileChainID(fullPath)
+			if bestPath == "" {
+				bestPath = fullPath
+				bestChainID = pubChainID
+			}
+			// If we find one that matches exactly, use it and stop searching.
+			if pubChainID != "" && containerChainID != "" && pubChainID == containerChainID {
+				bestPath = fullPath
+				bestChainID = pubChainID
+				break
+			}
+		}
+	}
+
+	if bestPath == "" || containerChainID == "" {
+		return nil
+	}
+
+	if bestChainID != "" && bestChainID != containerChainID {
+		ui.Warn.Printf("Publication artifact chain-id mismatch (artifact: %s, container: %s).\n", bestChainID, containerChainID)
+		ui.Info.Println("Automatically redeploying world contracts to sync state...")
+
+		if err := setup.DeployWorld(c, workspace); err != nil {
+			return fmt.Errorf("failed to redeploy world: %w", err)
+		}
+
+		// Re-sync artifacts to host after redeploy
+		if err := InitExtensionEnv(workspace, network); err != nil {
+			return fmt.Errorf("failed to re-initialize extension environment: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func getPubfileChainID(pubfilePath string) (string, error) {

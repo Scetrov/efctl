@@ -22,6 +22,9 @@ func InitExtensionEnv(workspace string, network string) error {
 	// Step 6: Copy world artifacts
 	// mkdir -p /workspace/builder-scaffold/deployments/$NETWORK/
 	builderDeploymentsDir := filepath.Join(builderScaffoldDir, "deployments", network)
+	if err := os.RemoveAll(builderDeploymentsDir); err != nil {
+		return fmt.Errorf("failed to clean deployments dir: %w", err)
+	}
 	if err := os.MkdirAll(builderDeploymentsDir, 0750); err != nil { // #nosec G301
 		return fmt.Errorf("failed to create deployments dir: %w", err)
 	}
@@ -41,8 +44,6 @@ func InitExtensionEnv(workspace string, network string) error {
 	}
 
 	// Copy publication artifacts (Pub.*.toml)
-	// Note: DeployWorld renames Pub.localnet.toml to Pub.testnet.toml to fix dependency resolution
-	// during --build-env testnet. We try both to be safe.
 	pubCandidates := []string{
 		fmt.Sprintf("Pub.%s.toml", network),
 	}

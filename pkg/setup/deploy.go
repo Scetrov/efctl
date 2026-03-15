@@ -3,9 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 
 	"efctl/pkg/container"
 	"efctl/pkg/ui"
@@ -63,11 +61,8 @@ func DeployWorld(c container.ContainerClient, workspace string) error {
 	}
 
 	// 3. Fix dependency resolution
-	pubLocalnet := filepath.Join(workspace, "world-contracts", "contracts", "world", FilePubLocalnetToml)
-	pubTestnet := filepath.Join(workspace, "world-contracts", "contracts", "world", FilePubTestnetToml)
-	if err := os.Rename(pubLocalnet, pubTestnet); err != nil {
-		ui.Warn.Println(fmt.Sprintf("Could not rename %s (might already be renamed or missing): %v", FilePubLocalnetToml, err))
-	}
+	// No longer renaming Pub.localnet.toml to Pub.testnet.toml as it misaligns with documentation.
+	// We handle both names during publication detection instead.
 
 	// 4. Configure World State
 	if err := c.Exec(context.Background(), container.ContainerSuiPlayground, []string{"/bin/bash", "-c", CmdConfigureWorld}); err != nil {
