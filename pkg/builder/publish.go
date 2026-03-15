@@ -45,6 +45,10 @@ const worldDependencyMarker = "world = {"
 // PublishExtension publishes the custom extension to the smart assembly testnet
 // and updates the builder-scaffold/.env with the extracted package IDs.
 func PublishExtension(c container.ContainerClient, workspace string, network string, candidate PublishCandidate) error {
+	// Automatically initialize/sync the builder-scaffold environment with world artifacts
+	if err := InitExtensionEnv(workspace, network); err != nil {
+		return fmt.Errorf("failed to initialize extension environment: %w", err)
+	}
 
 	ui.Info.Printf("Publishing extension contract from %s...\n", candidate.HostPath)
 
@@ -210,6 +214,17 @@ func isExtensionManifest(manifestPath string) (bool, error) {
 func buildPublishCmd(workspace, network, containerContractDir string) (string, error) {
 	switch network {
 	case "localnet":
+		// Check if we have an existing world publication file to use as a dependency
+		pubLocalnet := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.localnet.toml")
+		if exists, _ := pathExists(pubLocalnet); exists {
+			ui.Info.Println("Found existing world publication; using it as a dependency.")
+			return fmt.Sprintf(
+				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.localnet.toml --build-env testnet --json",
+				containerContractDir,
+			), nil
+		}
+
+		// Fallback to full publish if no existing world publication is found
 		pubFile := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.extension.toml")
 		if err := os.Remove(pubFile); err != nil && !os.IsNotExist(err) {
 			return "", fmt.Errorf("failed to remove previous publish file: %w", err)

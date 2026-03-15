@@ -51,11 +51,15 @@ func InitExtensionEnv(workspace string, network string) error {
 	ui.Info.Println("Copied world artifacts into builder-scaffold deployments.")
 
 	// Step 7: Configure builder-scaffold .env
-	// cp .env.example .env
+	// cp .env.example .env (only if .env doesn't exist)
 	srcEnvExample := filepath.Join(builderScaffoldDir, ".env.example")
 	dstEnv := filepath.Join(builderScaffoldDir, ".env")
-	if err := copyFile(srcEnvExample, dstEnv); err != nil {
-		return fmt.Errorf("failed to copy .env.example to .env: %w", err)
+	if _, err := os.Stat(dstEnv); err == nil {
+		ui.Debug.Println("builder-scaffold/.env already exists, skipping initial copy from .env.example")
+	} else {
+		if err := copyFile(srcEnvExample, dstEnv); err != nil {
+			return fmt.Errorf("failed to copy .env.example to .env: %w", err)
+		}
 	}
 
 	// Read world-contracts/.env to fetch admin/player keys
