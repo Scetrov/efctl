@@ -10,9 +10,11 @@ import (
 )
 
 var extensionInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize the builder-scaffold by copying world artifacts",
-	Long:  `Runs Step 6 and 7 of the Builder flow. Copies world artifacts from world-contracts/deployments to builder-scaffold/deployments and configures the builder-scaffold .env file.`,
+	Use:        "init",
+	Short:      "Initialize the builder-scaffold by copying world artifacts",
+	Long:       `Runs Step 6 and 7 of the Builder flow. Copies world artifacts from world-contracts/deployments to builder-scaffold/deployments and configures the builder-scaffold .env file.`,
+	Hidden:     true,
+	Deprecated: "is redundant as it is now handled automatically by 'efctl env extension publish'",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := validate.Network(envNetwork); err != nil {
 			ui.Error.Println(err.Error())
