@@ -75,10 +75,13 @@ func TestInitCommand_GitignoreIdempotency(t *testing.T) {
 
 	// Should contain the new entry but not duplicate the existing one
 	assert.Contains(t, content, "node_modules/")
+	assert.Contains(t, content, ".pnpm-store/")
 	assert.Contains(t, content, "world-contracts/")
 	assert.Contains(t, content, "builder-scaffold/")
 
 	// Count occurrences
+	assert.Equal(t, 1, strings.Count(content, "node_modules/"))
+	assert.Equal(t, 1, strings.Count(content, ".pnpm-store/"))
 	assert.Equal(t, 1, strings.Count(content, "world-contracts/"))
 	assert.Equal(t, 1, strings.Count(content, "builder-scaffold/"))
 }

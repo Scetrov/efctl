@@ -59,7 +59,7 @@ var initCmd = &cobra.Command{
 
 		// 2. .gitignore Update
 		gitignorePath := filepath.Join(targetDir, ".gitignore")
-		entries := []string{"world-contracts/", "builder-scaffold/"}
+		entries := []string{".pnpm-store/", "world-contracts/", "builder-scaffold/"}
 		if err := appendToGitignore(gitignorePath, entries); err != nil {
 			ui.Warn.Printf("Failed to update .gitignore: %v\n", err)
 		} else {
