@@ -282,9 +282,6 @@ func writePublishedIDs(workspace, output string) error {
 	if builderPackageID == "" {
 		ui.Warn.Println("Could not automatically extract BUILDER_PACKAGE_ID. Please set it manually in builder-scaffold/.env")
 	}
-	if extensionConfigID == "" {
-		ui.Warn.Println("Could not automatically extract EXTENSION_CONFIG_ID. Please set it manually in builder-scaffold/.env")
-	}
 
 	if builderPackageID == "" && extensionConfigID == "" {
 		ui.Debug.Println("No published IDs found in output.")
