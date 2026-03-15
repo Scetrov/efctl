@@ -38,5 +38,10 @@ git-autocrlf: false
 # Preferred container engine: "docker", "podman", or "auto-detect" (default: auto-detect)
 # If Podman networking fails on WSL, try setting this to "docker".
 container-engine: auto-detect
+
+# Additional host directories to bind-mount into the container environment.
+# additional-bind-mounts:
+#   - hostPath: ./my-extension
+#     identifier: my-extension
 `, DefaultWorldContractsURL, RecommendedWorldContractsRef, RecommendedWorldContractsRef, DefaultBuilderScaffoldURL, RecommendedBuilderScaffoldRef, RecommendedBuilderScaffoldRef)
 }
