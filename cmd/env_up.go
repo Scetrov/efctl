@@ -65,6 +65,11 @@ var envUpCmd = &cobra.Command{
 			ui.Error.Println("Neither Docker nor Podman is installed. Please install one to continue.")
 			os.Exit(1)
 		}
+
+		if engine, _ := res.Engine(); engine == "podman" {
+			container.CheckPodmanConfig()
+		}
+
 		if !res.HasGit {
 			ui.Error.Println("Git is not installed.")
 			os.Exit(1)
