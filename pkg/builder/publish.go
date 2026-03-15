@@ -20,6 +20,7 @@ import (
 // publishOutput represents the relevant parts of the JSON from `sui client publish --json`.
 type publishOutput struct {
 	ObjectChanges []objectChange `json:"objectChanges"`
+	Error         string         `json:"error"`
 }
 
 type objectChange struct {
@@ -271,6 +272,7 @@ func writePublishedIDs(workspace, output string) error {
 	}
 
 	if builderPackageID == "" && extensionConfigID == "" {
+		ui.Debug.Println("No published IDs found in output.")
 		return nil
 	}
 
@@ -319,14 +321,33 @@ func extractPublishIDs(output string) (builderPackageID, extensionConfigID strin
 		return "", "", fmt.Errorf("failed to unmarshal publish output: %w", err)
 	}
 
+	if result.Error != "" {
+		return "", "", fmt.Errorf("sui client error: %s", result.Error)
+	}
+
 	for _, change := range result.ObjectChanges {
 		if change.Type == "published" && change.PackageID != "" {
+			// If we see multiple packages, we want the most recent one (usually the leaf extension).
 			builderPackageID = change.PackageID
 		}
-		if change.Type == "created" &&
+		// We look for any object that resembles ExtensionConfig.
+		// Some versions of Sui or specific build-envs might report this differently.
+		if (change.Type == "created" || change.Type == "mutated") &&
 			strings.Contains(strings.ToLower(change.ObjectType), "extensionconfig") &&
 			change.ObjectID != "" {
 			extensionConfigID = change.ObjectID
+		}
+	}
+
+	if builderPackageID == "" || extensionConfigID == "" {
+		ui.Debug.Println("Partial extraction results:")
+		ui.Debug.Printf("  BUILDER_PACKAGE_ID: %s\n", builderPackageID)
+		ui.Debug.Printf("  EXTENSION_CONFIG_ID: %s\n", extensionConfigID)
+		ui.Debug.Println("Object types found in changes:")
+		for _, change := range result.ObjectChanges {
+			if change.ObjectType != "" {
+				ui.Debug.Printf("  - [%s] %s\n", change.Type, change.ObjectType)
+			}
 		}
 	}
 
