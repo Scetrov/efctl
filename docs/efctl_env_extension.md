@@ -24,6 +24,8 @@ The extension command groups operations defined in the EVE Frontier Builder Flow
 ### SEE ALSO
 
 * [efctl env](efctl_env.md)	 - Manage the local Sui development environment
+* [efctl env extension build](efctl_env_extension_build.md)	 - Compile a Move contract without publishing
 * [efctl env extension list](efctl_env_extension_list.md)	 - List all available extensions in the workspace
 * [efctl env extension publish](efctl_env_extension_publish.md)	 - Publish a custom extension contract
+* [efctl env extension test](efctl_env_extension_test.md)	 - Run sui move test for a Move contract
 

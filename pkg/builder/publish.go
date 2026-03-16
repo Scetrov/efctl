@@ -44,9 +44,8 @@ type PublishCandidate struct {
 
 const worldDependencyMarker = "world = {"
 
-// PublishExtension publishes the custom extension to the smart assembly testnet
-// and updates the builder-scaffold/.env with the extracted package IDs.
-func PublishExtension(c container.ContainerClient, workspace string, network string, candidate PublishCandidate) error {
+// PrepareExtensionEnv initializes the environment, repairs it if mismatched, and cleans stale files.
+func PrepareExtensionEnv(c container.ContainerClient, workspace string, network string) error {
 	// Automatically initialize/sync the builder-scaffold environment with world artifacts
 	if err := InitExtensionEnv(workspace, network); err != nil {
 		return fmt.Errorf("failed to initialize extension environment: %w", err)
@@ -56,18 +55,28 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 		return err
 	}
 
+	// Clean stale Move.lock files before building/testing/publishing to avoid framework drift issues
+	setup.CleanStaleMoveLocks(workspace)
+	if err := setup.PatchBuilderExampleMoveTomls(workspace); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// PublishExtension publishes the custom extension to the smart assembly testnet
+// and updates the builder-scaffold/.env with the extracted package IDs.
+func PublishExtension(c container.ContainerClient, workspace string, network string, candidate PublishCandidate) error {
+	if err := PrepareExtensionEnv(c, workspace, network); err != nil {
+		return err
+	}
+
 	ui.Info.Printf("Publishing extension contract from %s...\n", candidate.HostPath)
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
 
 	publishCmd, err := buildPublishCmd(c, workspace, network, candidate.ContainerPath)
 	if err != nil {
-		return err
-	}
-
-	// Clean stale Move.lock files before publishing to avoid framework drift issues
-	setup.CleanStaleMoveLocks(workspace)
-	if err := setup.PatchBuilderExampleMoveTomls(workspace); err != nil {
 		return err
 	}
 

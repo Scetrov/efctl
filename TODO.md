@@ -12,9 +12,9 @@ Feature ideas and improvements for `efctl`.
 
 ## Builder Flow
 
-- [ ] **`efctl env extension test [contract-path]`** — Run `sui move test` for a Move contract inside the container, so developers don't need to `shell` in or use `env run`.
-- [ ] **`efctl env extension build [contract-path]`** — Compile a Move contract without publishing, catching errors earlier.
-- [ ] **`efctl env extension list`** — List published extensions with their package IDs, config IDs, and status from the `.env`.
+- [x] **`efctl env extension test [contract-path]`** — Run `sui move test` for a Move contract inside the container, so developers don't need to `shell` in or use `env run`.
+- [x] **`efctl env extension build [contract-path]`** — Compile a Move contract without publishing, catching errors earlier.
+- [x] **`efctl env extension list`** — List published extensions with their package IDs, config IDs, and status from the `.env`.
 
 ## GraphQL & Chain Interaction
 
@@ -24,14 +24,14 @@ Feature ideas and improvements for `efctl`.
 
 ## Developer Experience
 
-- [ ] **`efctl env init`** — Scaffold a new project directory with a starter `efctl.yaml`, Move contract template, and directory structure, reducing manual boilerplate for new builders.
-- [ ] **`efctl doctor`** — Comprehensive diagnostic that checks prerequisites, port conflicts, Docker daemon health, Sui client config, disk space, and version compatibility — then outputs a shareable report.
+- [x] **`efctl env init`** — Scaffold a new project directory with a starter `efctl.yaml`, Move contract template, and directory structure, reducing manual boilerplate for new builders. (Implemented as `efctl init`).
+- [x] **`efctl doctor`** — Comprehensive diagnostic that checks prerequisites, port conflicts, Docker daemon health, Sui client config, disk space, and version compatibility — then outputs a shareable report.
 - [x] **`efctl completion`** — Shell completion generation (bash/zsh/fish/powershell) via Cobra's built-in `GenBashCompletion` etc.
 
 ## Deployment & Networking
 
 - [ ] **Testnet/Devnet deployment flow** — Currently `env up` is localnet-only. A `--network testnet` flag (or `efctl env deploy --network testnet`) would bridge the gap for staging.
-- [ ] **`efctl sui faucet [address]`** — Request test tokens from the localnet or testnet faucet without leaving the CLI.
+- [x] **`efctl sui faucet [address]`** — Request test tokens from the localnet or testnet faucet without leaving the CLI. (Implemented as `efctl env faucet`).
 
 ## Operational
 

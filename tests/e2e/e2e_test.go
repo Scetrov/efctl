@@ -339,6 +339,8 @@ type e2eLifecycleTester struct {
 	extensionInitPassed    bool
 	extensionPublishPassed bool
 	extensionPath          string
+	extensionBuildPassed   bool
+	extensionTestPassed    bool
 }
 
 func (tester *e2eLifecycleTester) testVersion(t *testing.T) {
@@ -394,12 +396,52 @@ func (tester *e2eLifecycleTester) testExtensionInit(t *testing.T) {
 	tester.extensionInitPassed = true
 }
 
-func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
+func (tester *e2eLifecycleTester) testExtensionBuild(t *testing.T) {
 	if !tester.extensionInitPassed {
 		t.Skip("skipping: extension_init did not pass")
 	}
 
 	tester.extensionPath = prepareSinglePublishCandidate(t, tester.workspace)
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "build", tester.extensionPath)
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: extension build hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env extension build failed:\n%s", out)
+	}
+	assert.Contains(t, out, "Extension contract built successfully")
+	tester.extensionBuildPassed = true
+}
+
+func (tester *e2eLifecycleTester) testExtensionTest(t *testing.T) {
+	if !tester.extensionInitPassed {
+		t.Skip("skipping: extension_init did not pass")
+	}
+
+	if tester.extensionPath == "" {
+		tester.extensionPath = prepareSinglePublishCandidate(t, tester.workspace)
+	}
+
+	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "test", tester.extensionPath)
+	if err != nil {
+		if isKnownInfraOrDriftIssue(out) {
+			t.Skipf("skipping: extension test hit a known infra/drift issue:\n%s", out)
+		}
+		require.NoError(t, err, "efctl env extension test failed:\n%s", out)
+	}
+	assert.Contains(t, out, "Extension contract tests passed")
+	tester.extensionTestPassed = true
+}
+
+func (tester *e2eLifecycleTester) testExtensionPublish(t *testing.T) {
+	if !tester.extensionInitPassed {
+		t.Skip("skipping: extension_init did not pass")
+	}
+
+	if tester.extensionPath == "" {
+		tester.extensionPath = prepareSinglePublishCandidate(t, tester.workspace)
+	}
 
 	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "extension", "publish", tester.extensionPath)
 	if err != nil {
@@ -559,6 +601,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	t.Run("version", tester.testVersion)
 	t.Run("env_up", tester.testEnvUp)
 	t.Run("extension_init", tester.testExtensionInit)
+	t.Run("extension_build", tester.testExtensionBuild)
+	t.Run("extension_test", tester.testExtensionTest)
 	t.Run("extension_publish", tester.testExtensionPublish)
 	t.Run("extension_publish_idempotent", tester.testExtensionPublishIdempotent)
 	t.Run("env_run", tester.testEnvRun)
