@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"efctl/pkg/container"
 	"efctl/pkg/env"
+	"efctl/pkg/sui"
 )
 
 type ContainerStat struct {
@@ -35,10 +37,20 @@ type ChainStat struct {
 	TxCount    string
 }
 
+type DiscoveredObject struct {
+	ID   string
+	Type string
+	Name string
+}
+
 type WorldInfo struct {
-	PackageID string
-	Objects   map[string]string
-	Addresses map[string]string
+	PackageID      string
+	DiscoveredPkgs []DiscoveredPackage
+	Objects        map[string]string
+	Addresses      map[string]string
+	Assemblies     []DiscoveredObject
+	Extensions     []DiscoveredObject
+	DiscoveryErr   string
 }
 
 type EnvironmentStatus struct {
@@ -58,7 +70,7 @@ func Gather(engine, workspace, rpcURL string) EnvironmentStatus {
 			{Name: "Frontend", Port: 5173, InUse: !env.IsPortAvailable(5173)},
 		},
 		Chain: GatherChainHealth(rpcURL),
-		World: GatherWorldInfo(workspace),
+		World: GatherWorldInfo(workspace, rpcURL),
 	}
 }
 
@@ -181,20 +193,87 @@ func rpcCall(client *http.Client, rpcURL, payload string, result interface{}) er
 	return json.Unmarshal(envelope.Result, result)
 }
 
-func GatherWorldInfo(workspace string) WorldInfo {
+func GatherWorldInfo(workspace, rpcURL string) WorldInfo {
 	envVars := extractEnvVars(workspace)
 	addresses := extractAddresses(envVars)
 	objs, pkgID := extractWorldObjects(workspace)
-	return WorldInfo{
-		PackageID: pkgID,
-		Objects:   objs,
-		Addresses: addresses,
+
+	// Try to find builder package ID in multiple locations
+	builderPkgID := extractBuilderPackageID(workspace)
+
+	info := WorldInfo{
+		PackageID:      pkgID,
+		DiscoveredPkgs: []DiscoveredPackage{}, // Will be populated below
+		Objects:        objs,
+		Addresses:      addresses,
 	}
+
+	// Dynamic discovery via GraphQL if available
+	// Shift port from 9000 (RPC) to 9125 (GraphQL)
+	gqlURL := strings.Replace(rpcURL, ":9000", ":9125", 1)
+	if !strings.HasSuffix(gqlURL, "/graphql") {
+		gqlURL = strings.TrimSuffix(gqlURL, "/") + "/graphql"
+	}
+
+	assemblies, errA := DiscoverAssemblies(gqlURL, pkgID)
+	if errA != nil {
+		info.DiscoveryErr = fmt.Sprintf("Assemblies: %v", errA)
+	}
+	info.Assemblies = assemblies
+
+	// Discovered all packages owned by our registry addresses
+	ownerAddresses := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		ownerAddresses = append(ownerAddresses, addr)
+	}
+	discoveredPkgs, errP := DiscoverPackages(gqlURL, ownerAddresses)
+	if errP != nil {
+		if info.DiscoveryErr != "" {
+			info.DiscoveryErr += "; "
+		}
+		info.DiscoveryErr += fmt.Sprintf("Package discovery: %v", errP)
+	}
+
+	// Merge with builderPkgID from .env/Pub.toml as a fallback
+	pkgMap := make(map[string]bool)
+	var allPkgs []DiscoveredPackage
+	var allPkgIDs []string
+	for _, p := range discoveredPkgs {
+		pkgMap[p.ID] = true
+		allPkgs = append(allPkgs, p)
+		allPkgIDs = append(allPkgIDs, p.ID)
+	}
+	if builderPkgID != "" && !pkgMap[builderPkgID] {
+		allPkgs = append(allPkgs, DiscoveredPackage{
+			ID:      builderPkgID,
+			Version: "1",
+			Owner:   "local .env",
+		})
+		allPkgIDs = append(allPkgIDs, builderPkgID)
+	}
+
+	info.DiscoveredPkgs = allPkgs
+
+	extensions, errE := DiscoverExtensions(gqlURL, allPkgIDs)
+	if errE != nil {
+		if info.DiscoveryErr != "" {
+			info.DiscoveryErr += "; "
+		}
+		info.DiscoveryErr += fmt.Sprintf("Extensions: %v", errE)
+	}
+	info.Extensions = extensions
+
+	return info
 }
 
 func extractEnvVars(workspace string) map[string]string {
 	result := make(map[string]string)
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		// Fallback for test environments where contracts might be in a subfolder
+		envPath = filepath.Join(workspace, "test-env", "world-contracts", ".env")
+	}
+
 	data, err := os.ReadFile(envPath) // #nosec G304 -- path is workspace-relative by design
 	if err != nil {
 		return result
@@ -214,6 +293,39 @@ func extractEnvVars(workspace string) map[string]string {
 
 func extractAddresses(envVars map[string]string) map[string]string {
 	addresses := make(map[string]string)
+
+	// Well-known mappings
+	roleMap := map[string]string{
+		"ADMIN_ADDRESS":    "Admin",
+		"SPONSOR_ADDRESS":  "Sponsor",
+		"PLAYER_A_ADDRESS": "Player A",
+		"PLAYER_B_ADDRESS": "Player B",
+	}
+
+	// First pass: try to get explicit addresses
+	for envKey, role := range roleMap {
+		if addr, ok := envVars[envKey]; ok && addr != "" {
+			addresses[role] = addr
+		}
+	}
+
+	// Second pass: derive from private keys if missing
+	keyToRole := map[string]string{
+		"ADMIN_PRIVATE_KEY":    "Admin",
+		"PLAYER_A_PRIVATE_KEY": "Player A",
+		"PLAYER_B_PRIVATE_KEY": "Player B",
+	}
+	for keyVar, role := range keyToRole {
+		if _, exists := addresses[role]; !exists {
+			if privKey, ok := envVars[keyVar]; ok && privKey != "" {
+				if addr, err := sui.DeriveAddressFromPrivateKey(privKey); err == nil {
+					addresses[role] = addr
+				}
+			}
+		}
+	}
+
+	// Final pass: catch any other _ADDRESS variables
 	keys := make([]string, 0, len(envVars))
 	for key := range envVars {
 		if strings.HasSuffix(key, "_ADDRESS") {
@@ -222,14 +334,29 @@ func extractAddresses(envVars map[string]string) map[string]string {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		addresses[key] = envVars[key]
+		// Only add if not already mapped to a role
+		isMapped := false
+		for envKey := range roleMap {
+			if key == envKey {
+				isMapped = true
+				break
+			}
+		}
+		if !isMapped {
+			addresses[key] = envVars[key]
+		}
 	}
+
 	return addresses
 }
 
 func extractWorldObjects(workspace string) (map[string]string, string) {
 	objs := make(map[string]string)
 	filePath := filepath.Join(workspace, "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		filePath = filepath.Join(workspace, "test-env", "world-contracts", "deployments", "localnet", "extracted-object-ids.json")
+	}
+
 	data, err := os.ReadFile(filePath) // #nosec G304 -- path is workspace-relative by design
 	if err != nil {
 		return objs, ""
@@ -258,4 +385,45 @@ func extractWorldObjects(workspace string) (map[string]string, string) {
 		objs[key] = strValue
 	}
 	return objs, pkgID
+}
+func extractBuilderPackageID(workspace string) string {
+	// 1. Try builder-scaffold/.env
+	builderEnvPath := filepath.Join(workspace, "builder-scaffold", ".env")
+	if id := extractIDFromEnv(builderEnvPath, "BUILDER_PACKAGE_ID"); id != "" {
+		return id
+	}
+
+	// 2. Try world-contracts/.env
+	worldEnvPath := filepath.Join(workspace, "world-contracts", ".env")
+	if id := extractIDFromEnv(worldEnvPath, "BUILDER_PACKAGE_ID"); id != "" {
+		return id
+	}
+
+	// 3. Try Pub.extension.toml in builder-scaffold deployments
+	// We check both localnet and testnet based on what's available
+	for _, network := range []string{"localnet", "testnet"} {
+		pubPath := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.extension.toml")
+		if data, err := os.ReadFile(pubPath); err == nil { // #nosec G304 -- path constructed from known workspace prefix
+			re := regexp.MustCompile(`(?m)published-at\s*=\s*"(0x[a-fA-F0-9]+)"`)
+			if matches := re.FindStringSubmatch(string(data)); len(matches) > 1 {
+				return matches[1]
+			}
+		}
+	}
+
+	return ""
+}
+
+func extractIDFromEnv(path, key string) string {
+	data, err := os.ReadFile(path) // #nosec G304 -- path passed from internal discovery logic
+	if err != nil {
+		return ""
+	}
+	// Flexible regex: handle spaces, quotes, and optional prefix
+	pattern := fmt.Sprintf(`(?m)^\s*%s\s*=\s*["']?(0x[a-fA-F0-9]+)["']?`, key)
+	re := regexp.MustCompile(pattern)
+	if matches := re.FindStringSubmatch(string(data)); len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
 }

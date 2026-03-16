@@ -41,13 +41,27 @@ func TestGatherWorldInfo(t *testing.T) {
 	jsonContent := `{"world":{"packageId":"0x111","governorCap":"0x222","adminAcl":"0x333"}}`
 	require.NoError(t, os.WriteFile(filepath.Join(deployDir, "extracted-object-ids.json"), []byte(jsonContent), 0600))
 
-	info := GatherWorldInfo(workspace)
+	info := GatherWorldInfo(workspace, "http://localhost:9000")
 
 	assert.Equal(t, "0x111", info.PackageID)
 	assert.Equal(t, "0x222", info.Objects["governorCap"])
 	assert.Equal(t, "0x333", info.Objects["adminAcl"])
-	assert.Equal(t, "0xabc", info.Addresses["ADMIN_ADDRESS"])
-	assert.Equal(t, "0xdef", info.Addresses["PLAYER_A_ADDRESS"])
+	assert.Equal(t, "0xabc", info.Addresses["Admin"])
+	assert.Equal(t, "0xdef", info.Addresses["Player A"])
 	_, hasNonAddress := info.Addresses["UNRELATED_VAR"]
 	assert.False(t, hasNonAddress)
+}
+
+func TestExtractEnvVarsFallback(t *testing.T) {
+	workspace := t.TempDir()
+
+	// Place .env in test-env/world-contracts
+	worldDir := filepath.Join(workspace, "test-env", "world-contracts")
+	require.NoError(t, os.MkdirAll(worldDir, 0750))
+
+	envContent := "ADMIN_ADDRESS=0x999\n"
+	require.NoError(t, os.WriteFile(filepath.Join(worldDir, ".env"), []byte(envContent), 0600))
+
+	vars := extractEnvVars(workspace)
+	assert.Equal(t, "0x999", vars["ADMIN_ADDRESS"])
 }

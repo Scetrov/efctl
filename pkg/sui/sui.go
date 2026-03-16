@@ -24,6 +24,7 @@ type CommandExecutor interface {
 	LookPath(file string) (string, error)
 	Run(name string, args ...string) error
 	RunWithStdin(stdin string, name string, args ...string) error
+	ExecCapture(name string, args ...string) (string, error)
 }
 
 // DefaultExecutor uses os/exec to run real system commands.
@@ -47,6 +48,12 @@ func (e *DefaultExecutor) RunWithStdin(stdin string, name string, args ...string
 	cmd := exec.Command(name, args...) // #nosec G204
 	cmd.Stdin = strings.NewReader(stdin)
 	return cmd.Run()
+}
+
+func (e *DefaultExecutor) ExecCapture(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 var adminKeyRegex = regexp.MustCompile(`^ADMIN_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
@@ -192,4 +199,16 @@ func extractKeyConfigs(envPath string) ([]keyConfig, error) {
 		}
 	}
 	return configs, scanner.Err()
+}
+
+// CallMove executes a 'sui client call' and returns the output.
+func CallMove(args []string, gasBuddy string) (string, error) {
+	executor := &DefaultExecutor{}
+	fullArgs := []string{"client", "call", "--json"}
+	if gasBuddy != "" {
+		fullArgs = append(fullArgs, "--gas-budget", gasBuddy)
+	}
+	fullArgs = append(fullArgs, args...)
+
+	return executor.ExecCapture("sui", fullArgs...)
 }

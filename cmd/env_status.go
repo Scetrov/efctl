@@ -98,6 +98,19 @@ func renderWorldTable(world status.WorldInfo) {
 	tWorld.Render()
 	fmt.Println()
 
+	if len(world.DiscoveredPkgs) > 0 {
+		tPkgs := table.NewWriter()
+		tPkgs.SetOutputMirror(os.Stdout)
+		tPkgs.SetStyle(table.StyleRounded)
+		tPkgs.AppendHeader(table.Row{"ID", "Version", "Owner"})
+		for _, pkg := range world.DiscoveredPkgs {
+			tPkgs.AppendRow(table.Row{ui.ShortenAddress(pkg.ID), pkg.Version, ui.ShortenAddress(pkg.Owner)})
+		}
+		ui.Info.Println("Discovered Builder Packages")
+		tPkgs.Render()
+		fmt.Println()
+	}
+
 	tObjects := table.NewWriter()
 	tObjects.SetOutputMirror(os.Stdout)
 	tObjects.SetStyle(table.StyleRounded)
@@ -141,6 +154,37 @@ func renderWorldTable(world status.WorldInfo) {
 		tAddr.Render()
 	}
 	fmt.Println()
+
+	if world.DiscoveryErr != "" {
+		ui.Warn.Printf("Discovery Warning: %s\n", world.DiscoveryErr)
+		fmt.Println()
+	}
+
+	if len(world.Assemblies) > 0 {
+		tAsm := table.NewWriter()
+		tAsm.SetOutputMirror(os.Stdout)
+		tAsm.SetStyle(table.StyleRounded)
+		tAsm.AppendHeader(table.Row{"Assembly", "ID", "Type"})
+		for _, a := range world.Assemblies {
+			tAsm.AppendRow(table.Row{a.Name, a.ID, a.Type})
+		}
+		ui.Info.Println("Discovered Assemblies (Dynamic)")
+		tAsm.Render()
+		fmt.Println()
+	}
+
+	if len(world.Extensions) > 0 {
+		tExt := table.NewWriter()
+		tExt.SetOutputMirror(os.Stdout)
+		tExt.SetStyle(table.StyleRounded)
+		tExt.AppendHeader(table.Row{"Extension", "ID", "Type"})
+		for _, e := range world.Extensions {
+			tExt.AppendRow(table.Row{e.Name, e.ID, e.Type})
+		}
+		ui.Info.Println("Discovered Extensions (Dynamic)")
+		tExt.Render()
+		fmt.Println()
+	}
 }
 
 func init() {

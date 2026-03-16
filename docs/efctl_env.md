@@ -24,6 +24,7 @@ The env command groups operations to bring up and tear down the EVE Frontier loc
 ### SEE ALSO
 
 * [efctl](efctl.md)	 - efctl manages the local EVE Frontier Sui development environment
+* [efctl env assembly](efctl_env_assembly.md)	 - Manage Smart Assemblies
 * [efctl env dash](efctl_env_dash.md)	 - Launch the environment dashboard
 * [efctl env down](efctl_env_down.md)	 - Tear down the local environment
 * [efctl env extension](efctl_env_extension.md)	 - Manage the builder-scaffold extension flow

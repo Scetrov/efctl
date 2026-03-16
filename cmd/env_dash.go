@@ -18,7 +18,9 @@ import (
 	"efctl/pkg/container"
 	"efctl/pkg/dashboard"
 	"efctl/pkg/env"
+	"efctl/pkg/status"
 	"efctl/pkg/sui"
+	"efctl/pkg/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -136,17 +138,38 @@ type restartUpMsg struct {
 }
 
 type StatsMsg struct {
-	Sui        containerStat
-	Pg         containerStat
-	Fe         containerStat
-	Chain      chainStat
-	Objects    []string
-	Admin      string
-	EnvVars    map[string]string
-	WorldObjs  map[string]string // component → object ID from extracted-object-ids.json
-	Addresses  map[string]string // role → address (Admin, Player A, Player B, Sponsor)
-	WorldPkgID string
-	Events     []worldEvent
+	Sui            containerStat
+	Pg             containerStat
+	Fe             containerStat
+	Chain          chainStat
+	Objects        []string
+	Admin          string
+	EnvVars        map[string]string
+	WorldObjs      map[string]string // component → object ID from extracted-object-ids.json
+	Addresses      map[string]string // role → address (Admin, Player A, Player B, Sponsor)
+	WorldPkgID     string
+	DiscoveredPkgs []statPackage
+	Events         []worldEvent
+	Assemblies     []statAssembly
+	Extensions     []statExtension
+}
+
+type statPackage struct {
+	ID      string
+	Version string
+	Owner   string
+}
+
+type statAssembly struct {
+	Name string
+	ID   string
+	Type string
+}
+
+type statExtension struct {
+	Name string
+	ID   string
+	Type string
 }
 
 func tickCmd() tea.Cmd {
@@ -158,6 +181,9 @@ func tickCmd() tea.Cmd {
 // extractAdmin extracts ADMIN_ADDRESS from the .env file
 func extractAdmin(workspace string) string {
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		envPath = filepath.Join(workspace, "test-env", "world-contracts", ".env")
+	}
 	data, err := os.ReadFile(envPath) // #nosec G304 -- path constructed from known workspace prefix
 	if err != nil {
 		return "Unknown"
@@ -167,6 +193,14 @@ func extractAdmin(workspace string) string {
 	if len(matches) > 1 {
 		return matches[1]
 	}
+	// Fallback to derive from private key
+	reKey := regexp.MustCompile(`(?m)^ADMIN_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
+	keyMatches := reKey.FindStringSubmatch(string(data))
+	if len(keyMatches) > 1 {
+		if addr, err := sui.DeriveAddressFromPrivateKey(keyMatches[1]); err == nil {
+			return addr
+		}
+	}
 	return "Not Found"
 }
 
@@ -174,6 +208,9 @@ func extractAdmin(workspace string) string {
 func extractEnvVars(workspace string) map[string]string {
 	result := make(map[string]string)
 	envPath := filepath.Join(workspace, "world-contracts", ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		envPath = filepath.Join(workspace, "test-env", "world-contracts", ".env")
+	}
 	data, err := os.ReadFile(envPath) // #nosec G304 -- path constructed from known workspace prefix
 	if err != nil {
 		return result
@@ -418,10 +455,23 @@ func fetchStats(engine string, workspace string) StatsMsg {
 	client := &http.Client{Timeout: 1 * time.Second}
 	msg.Chain = fetchChainInfo(client)
 
-	msg.WorldObjs, msg.WorldPkgID = extractWorldObjects(workspace)
-	msg.Admin = extractAdmin(workspace)
+	// Use pkg/status logic for world info
+	st := status.Gather(engine, workspace, "http://localhost:9000")
+	msg.WorldObjs = st.World.Objects
+	msg.WorldPkgID = st.World.PackageID
+	for _, p := range st.World.DiscoveredPkgs {
+		msg.DiscoveredPkgs = append(msg.DiscoveredPkgs, statPackage{ID: p.ID, Version: p.Version, Owner: p.Owner})
+	}
+	msg.Addresses = st.World.Addresses
+	msg.Admin = msg.Addresses["Admin"]
 	msg.EnvVars = extractEnvVars(workspace)
-	msg.Addresses = buildAddresses(msg.Admin, msg.EnvVars)
+
+	for _, a := range st.World.Assemblies {
+		msg.Assemblies = append(msg.Assemblies, statAssembly{Name: a.Name, ID: a.ID, Type: a.Type})
+	}
+	for _, e := range st.World.Extensions {
+		msg.Extensions = append(msg.Extensions, statExtension{Name: e.Name, ID: e.ID, Type: e.Type})
+	}
 
 	if msg.WorldPkgID != "" && msg.Admin != "" && msg.Admin != "Unknown" && msg.Admin != "Not Found" {
 		msg.Events = fetchWorldEvents(client, msg.WorldPkgID, msg.Admin)
@@ -597,6 +647,9 @@ type model struct {
 	worldObjs      map[string]string
 	addresses      map[string]string
 	worldPkgID     string
+	discoveredPkgs []statPackage
+	assemblies     []statAssembly
+	extensions     []statExtension
 	logs           []string
 	logScroll      int          // lines scrolled up from the bottom (0 = tailing)
 	graphqlOn      bool         // whether GraphQL/Indexer is currently enabled
@@ -849,7 +902,10 @@ func (m *model) applyStats(msg StatsMsg) {
 	m.worldObjs = msg.WorldObjs
 	m.addresses = msg.Addresses
 	m.worldPkgID = msg.WorldPkgID
+	m.discoveredPkgs = msg.DiscoveredPkgs
 	m.worldEvents = msg.Events
+	m.assemblies = msg.Assemblies
+	m.extensions = msg.Extensions
 	overridePath := filepath.Join(m.workspace, "builder-scaffold", "docker", "docker-compose.override.yml")
 	if data, err := os.ReadFile(overridePath); err == nil { // #nosec G304
 		content := string(data)
@@ -1231,6 +1287,7 @@ func (m model) renderEnvContent() string {
 	m.writeEnvConfig(&b, shorten)
 	m.writeEnvAddresses(&b, shorten)
 	m.writeEnvObjects(&b, shorten)
+	m.writeDiscoveredEntities(&b, shorten)
 
 	return b.String()
 }
@@ -1347,6 +1404,34 @@ func (m model) writeEnvObjects(b *bytes.Buffer, shorten func(string) string) {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("  %-22s %s\n", labelStyle.Render(humanizeCamelCase(k)), grayStyle.Render(shorten(v))))
+	}
+}
+
+func (m model) writeDiscoveredEntities(b *bytes.Buffer, shorten func(string) string) {
+	if len(m.discoveredPkgs) > 0 {
+		b.WriteString(fmt.Sprintf("\n "+labelStyle.Render("Packages")+" %s\n", grayStyle.Render(fmt.Sprintf("(%d)", len(m.discoveredPkgs)))))
+		for _, pkg := range m.discoveredPkgs {
+			// Aggressively shortened for the packages list as requested
+			b.WriteString(fmt.Sprintf("  %s v%s (%s)\n", valueStyle.Render(ui.ShortenAddress(pkg.ID)), pkg.Version, grayStyle.Render(ui.ShortenAddress(pkg.Owner))))
+		}
+	}
+
+	if len(m.assemblies) == 0 && len(m.extensions) == 0 {
+		return
+	}
+
+	if len(m.assemblies) > 0 {
+		b.WriteString(fmt.Sprintf("\n "+labelStyle.Render("Assemblies")+" %s\n", grayStyle.Render(fmt.Sprintf("(%d)", len(m.assemblies)))))
+		for _, a := range m.assemblies {
+			b.WriteString(fmt.Sprintf("  %-14s %s %s\n", valueStyle.Render(a.Name), grayStyle.Render(shorten(a.ID)), grayStyle.Render(shorten(a.Type))))
+		}
+	}
+
+	if len(m.extensions) > 0 {
+		b.WriteString(fmt.Sprintf("\n "+labelStyle.Render("Extensions")+" %s\n", grayStyle.Render(fmt.Sprintf("(%d)", len(m.extensions)))))
+		for _, e := range m.extensions {
+			b.WriteString(fmt.Sprintf("  %-14s %s %s\n", valueStyle.Render(e.Name), grayStyle.Render(shorten(e.ID)), grayStyle.Render(shorten(e.Type))))
+		}
 	}
 }
 
