@@ -101,7 +101,7 @@ func NormalizeContainerScripts(c container.ContainerClient, containerName string
 	// no-op when files already have Unix line endings.
 	cmd := []string{
 		"/bin/bash", "-c",
-		"find /workspace -name '*.sh' -exec dos2unix {} + 2>/dev/null || true",
+		"find /workspace -type f \\( -name '*.sh' -o -name '.env*' \\) -exec dos2unix {} + 2>/dev/null || true",
 	}
 
 	return c.Exec(context.Background(), containerName, cmd)
