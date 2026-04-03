@@ -217,6 +217,44 @@ func TestConnectionCandidates_UsePodmanSocketWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestDockerAuthZVulnerabilityError_AllowsDaemonWithoutAuthZPlugins(t *testing.T) {
+	if err := dockerAuthZVulnerabilityError("28.5.2", nil); err != nil {
+		t.Fatalf("expected nil error without authz plugins, got %v", err)
+	}
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsVulnerableDaemon(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("28.5.2", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected vulnerable docker daemon to be rejected")
+	}
+	assert.ErrorContains(t, err, dockerAuthZAdvisoryID)
+	assert.ErrorContains(t, err, dockerAuthZPatchedVersion)
+	assert.ErrorContains(t, err, "opa")
+}
+
+func TestDockerAuthZVulnerabilityError_AllowsPatchedDaemon(t *testing.T) {
+	if err := dockerAuthZVulnerabilityError("29.3.1", []string{"opa"}); err != nil {
+		t.Fatalf("expected patched docker daemon to be allowed, got %v", err)
+	}
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsPreReleaseAtPatchedVersion(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("29.3.1-rc.1", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected pre-release docker daemon to be rejected")
+	}
+	assert.ErrorContains(t, err, dockerAuthZAdvisoryID)
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsUnknownVersionWithAuthZPlugins(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("dev-build", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected unverifiable docker daemon version to be rejected")
+	}
+	assert.ErrorContains(t, err, "could not be validated")
+}
+
 // ── execHealthProbe unit tests ─────────────────────────────────────
 
 func TestExecHealthProbe_NoHealthTests(t *testing.T) {

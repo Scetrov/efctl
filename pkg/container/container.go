@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,6 +116,12 @@ type clientConnectionCandidate struct {
 // Compile-time check that Client implements ContainerClient.
 var _ ContainerClient = (*Client)(nil)
 
+const (
+	dockerAuthZPatchedVersion = "29.3.1"
+	dockerAuthZAdvisoryID     = "GHSA-x744-4wpc-v9h2"
+	dockerAuthZCVEID          = "CVE-2026-34040"
+)
+
 // NewClient returns a new container client backed by the Docker SDK.
 // It auto-detects the engine (Docker or Podman) and connects to the
 // appropriate socket.
@@ -142,6 +149,15 @@ func NewClient() (*Client, error) {
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s ping failed: %v", describeCandidate(candidate), err))
+			_ = dc.Close()
+			continue
+		}
+
+		securityCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err = dockerDaemonSecurityError(securityCtx, candidate.engine, dc)
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s security check failed: %v", describeCandidate(candidate), err))
 			_ = dc.Close()
 			continue
 		}
@@ -245,6 +261,117 @@ func candidateDisplayHost(candidate clientConnectionCandidate) string {
 		return "from-env/default"
 	}
 	return "default"
+}
+
+func dockerDaemonSecurityError(ctx context.Context, engine string, dc *dockerclient.Client) error {
+	if engine != "docker" || dc == nil {
+		return nil
+	}
+
+	info, err := dc.Info(ctx)
+	if err != nil {
+		ui.Debug.Println(fmt.Sprintf("Docker security check skipped: failed to query daemon info: %v", err))
+		return nil
+	}
+
+	return dockerAuthZVulnerabilityError(info.ServerVersion, info.Plugins.Authorization)
+}
+
+func dockerAuthZVulnerabilityError(serverVersion string, authPlugins []string) error {
+	if len(authPlugins) == 0 {
+		return nil
+	}
+
+	isSafe, err := versionAtLeast(serverVersion, dockerAuthZPatchedVersion)
+	if err != nil {
+		return fmt.Errorf(
+			"docker daemon uses authorization plugins (%s), but its version %q could not be validated against the minimum safe version %s for %s / %s; upgrade Docker Engine or disable AuthZ plugins that inspect request bodies",
+			strings.Join(authPlugins, ", "),
+			serverVersion,
+			dockerAuthZPatchedVersion,
+			dockerAuthZAdvisoryID,
+			dockerAuthZCVEID,
+		)
+	}
+	if isSafe {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"docker daemon %q uses authorization plugins (%s) and is below the minimum safe version %s for %s / %s; upgrade Docker Engine, disable AuthZ plugins that inspect request bodies, or use Podman",
+		serverVersion,
+		strings.Join(authPlugins, ", "),
+		dockerAuthZPatchedVersion,
+		dockerAuthZAdvisoryID,
+		dockerAuthZCVEID,
+	)
+}
+
+func versionAtLeast(version string, minimum string) (bool, error) {
+	actualParts, actualHasSuffix, err := parseComparableVersion(version)
+	if err != nil {
+		return false, err
+	}
+	minimumParts, _, err := parseComparableVersion(minimum)
+	if err != nil {
+		return false, err
+	}
+
+	for i := 0; i < 3; i++ {
+		if actualParts[i] < minimumParts[i] {
+			return false, nil
+		}
+		if actualParts[i] > minimumParts[i] {
+			return true, nil
+		}
+	}
+
+	if actualHasSuffix {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func parseComparableVersion(raw string) ([3]int, bool, error) {
+	var parts [3]int
+	trimmed := strings.TrimSpace(strings.TrimPrefix(raw, "v"))
+	if trimmed == "" {
+		return parts, false, fmt.Errorf("empty version")
+	}
+
+	var builder strings.Builder
+	hasSuffix := false
+	for _, r := range trimmed {
+		if (r >= '0' && r <= '9') || r == '.' {
+			builder.WriteRune(r)
+			continue
+		}
+		hasSuffix = true
+		break
+	}
+
+	prefix := strings.Trim(builder.String(), ".")
+	if prefix == "" {
+		return parts, hasSuffix, fmt.Errorf("invalid version %q", raw)
+	}
+
+	segments := strings.Split(prefix, ".")
+	if len(segments) > len(parts) {
+		segments = segments[:len(parts)]
+	}
+	for i, segment := range segments {
+		if segment == "" {
+			return parts, hasSuffix, fmt.Errorf("invalid version %q", raw)
+		}
+		value, err := strconv.Atoi(segment)
+		if err != nil {
+			return parts, hasSuffix, fmt.Errorf("invalid version %q: %w", raw, err)
+		}
+		parts[i] = value
+	}
+
+	return parts, hasSuffix, nil
 }
 
 func looksLikePodmanHost(host string) bool {
