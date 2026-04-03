@@ -92,7 +92,7 @@ jobs:
           sbom-path: "binaries/efctl.sbom.spdx.json"
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.0
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign binaries
         run: |
