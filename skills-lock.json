@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "dependency-upgrade": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "48ee1ca8e94666736fe6f39723f091dca3b26487e9da4bd933cd3a8b3951ac46"
+    }
+  }
+}

@@ -1,29 +1,18 @@
 package container
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
-
-	dockertypes "github.com/docker/docker/api/types"
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerfilters "github.com/docker/docker/api/types/filters"
-	dockerimage "github.com/docker/docker/api/types/image"
-	dockermount "github.com/docker/docker/api/types/mount"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	dockervolume "github.com/docker/docker/api/types/volume"
-	dockerclient "github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
-	"github.com/moby/go-archive"
 
 	"efctl/pkg/env"
 	"efctl/pkg/ui"
@@ -98,10 +87,11 @@ type ContainerClient interface {
 
 // ── Client ─────────────────────────────────────────────────────────
 
-// Client wraps the Docker/Podman SDK and implements ContainerClient.
+// Client wraps the Docker/Podman CLI and implements ContainerClient.
 type Client struct {
 	Engine      string // "docker" or "podman"
-	docker      *dockerclient.Client
+	host        string
+	useFromEnv  bool
 	network     string              // dynamic network name
 	healthTests map[string][]string // container name → healthcheck Test (for exec fallback)
 }
@@ -115,9 +105,15 @@ type clientConnectionCandidate struct {
 // Compile-time check that Client implements ContainerClient.
 var _ ContainerClient = (*Client)(nil)
 
-// NewClient returns a new container client backed by the Docker SDK.
+const (
+	dockerAuthZPatchedVersion = "29.3.1"
+	dockerAuthZAdvisoryID     = "GHSA-x744-4wpc-v9h2"
+	dockerAuthZCVEID          = "CVE-2026-34040"
+)
+
+// NewClient returns a new container client backed by the Docker/Podman CLI.
 // It auto-detects the engine (Docker or Podman) and connects to the
-// appropriate socket.
+// appropriate daemon context.
 func NewClient() (*Client, error) {
 	res := env.CheckPrerequisites()
 	if !res.HasDocker && !res.HasPodman {
@@ -131,23 +127,16 @@ func NewClient() (*Client, error) {
 
 	var errs []string
 	for _, candidate := range candidates {
-		dc, err := dockerclient.NewClientWithOpts(dockerClientOpts(candidate)...)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s client init failed: %v", describeCandidate(candidate), err))
-			continue
-		}
-
-		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, err = dc.Ping(pingCtx)
+		probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := probeCandidate(probeCtx, candidate)
 		cancel()
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s ping failed: %v", describeCandidate(candidate), err))
-			_ = dc.Close()
+			errs = append(errs, fmt.Sprintf("%s probe failed: %v", describeCandidate(candidate), err))
 			continue
 		}
 
 		ui.Debug.Println(fmt.Sprintf("NewClient: using engine=%s host=%s", candidate.engine, candidateDisplayHost(candidate)))
-		return &Client{Engine: candidate.engine, docker: dc}, nil
+		return &Client{Engine: candidate.engine, host: candidate.host, useFromEnv: candidate.useFromEnv}, nil
 	}
 
 	return nil, fmt.Errorf("failed to connect to a reachable container daemon: %s", strings.Join(errs, "; "))
@@ -198,36 +187,23 @@ func connectionCandidates(res *env.CheckResult, goos string, uid int, dockerHost
 	for _, engine := range order {
 		switch engine {
 		case "podman":
-			if goos != "linux" {
-				add(clientConnectionCandidate{engine: "podman", useFromEnv: true, host: dockerHost})
-				continue
-			}
-
 			if looksLikePodmanHost(dockerHost) && hostExists(dockerHost) {
 				add(clientConnectionCandidate{engine: "podman", host: dockerHost})
 			}
-			for _, host := range podmanSocketHosts(uid) {
-				if hostExists(host) {
-					add(clientConnectionCandidate{engine: "podman", host: host})
+			if goos == "linux" {
+				for _, host := range podmanSocketHosts(uid) {
+					if hostExists(host) {
+						add(clientConnectionCandidate{engine: "podman", host: host})
+					}
 				}
 			}
+			add(clientConnectionCandidate{engine: "podman"})
 		case "docker":
 			add(clientConnectionCandidate{engine: "docker", useFromEnv: true, host: dockerHost})
 		}
 	}
 
 	return candidates
-}
-
-func dockerClientOpts(candidate clientConnectionCandidate) []dockerclient.Opt {
-	opts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
-	if candidate.useFromEnv {
-		opts = append(opts, dockerclient.FromEnv)
-	}
-	if candidate.host != "" {
-		opts = append(opts, dockerclient.WithHost(candidate.host))
-	}
-	return opts
 }
 
 func describeCandidate(candidate clientConnectionCandidate) string {
@@ -245,6 +221,247 @@ func candidateDisplayHost(candidate clientConnectionCandidate) string {
 		return "from-env/default"
 	}
 	return "default"
+}
+
+type dockerInfoSummary struct {
+	ServerVersion string `json:"ServerVersion"`
+	Plugins       struct {
+		Authorization []string `json:"Authorization"`
+	} `json:"Plugins"`
+}
+
+type containerInspectResult struct {
+	State      *containerState      `json:"State"`
+	HostConfig *containerHostConfig `json:"HostConfig"`
+}
+
+type containerState struct {
+	Running  bool             `json:"Running"`
+	ExitCode int              `json:"ExitCode"`
+	Health   *containerHealth `json:"Health"`
+}
+
+type containerHealth struct {
+	Status string `json:"Status"`
+}
+
+type containerHostConfig struct {
+	UsernsMode string `json:"UsernsMode"`
+}
+
+func probeCandidate(ctx context.Context, candidate clientConnectionCandidate) error {
+	if candidate.engine == "docker" {
+		info, err := dockerInfoForCandidate(ctx, candidate)
+		if err != nil {
+			return err
+		}
+		return dockerAuthZVulnerabilityError(info.ServerVersion, info.Plugins.Authorization)
+	}
+
+	output, err := candidateCommandOutput(ctx, candidate, "info")
+	if err != nil {
+		return fmt.Errorf("%w%s", err, trimmedCommandOutputSuffix(output))
+	}
+	if len(output) > 0 {
+		ui.Debug.Println(fmt.Sprintf("%s info probe succeeded", candidate.engine))
+	}
+	return nil
+}
+
+func dockerInfoForCandidate(ctx context.Context, candidate clientConnectionCandidate) (dockerInfoSummary, error) {
+	var info dockerInfoSummary
+	output, err := candidateCommandOutput(ctx, candidate, "info", "--format", "{{json .}}")
+	if err != nil {
+		return info, fmt.Errorf("docker info failed: %w%s", err, trimmedCommandOutputSuffix(output))
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		return info, fmt.Errorf("decode docker info: %w", err)
+	}
+	return info, nil
+}
+
+func dockerAuthZVulnerabilityError(serverVersion string, authPlugins []string) error {
+	if len(authPlugins) == 0 {
+		return nil
+	}
+
+	isSafe, err := versionAtLeast(serverVersion, dockerAuthZPatchedVersion)
+	if err != nil {
+		return fmt.Errorf(
+			"docker daemon uses authorization plugins (%s), but its version %q could not be validated against the minimum safe version %s for %s / %s; upgrade Docker Engine or disable AuthZ plugins that inspect request bodies",
+			strings.Join(authPlugins, ", "),
+			serverVersion,
+			dockerAuthZPatchedVersion,
+			dockerAuthZAdvisoryID,
+			dockerAuthZCVEID,
+		)
+	}
+	if isSafe {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"docker daemon %q uses authorization plugins (%s) and is below the minimum safe version %s for %s / %s; upgrade Docker Engine, disable AuthZ plugins that inspect request bodies, or use Podman",
+		serverVersion,
+		strings.Join(authPlugins, ", "),
+		dockerAuthZPatchedVersion,
+		dockerAuthZAdvisoryID,
+		dockerAuthZCVEID,
+	)
+}
+
+func versionAtLeast(version string, minimum string) (bool, error) {
+	actualParts, actualHasSuffix, err := parseComparableVersion(version)
+	if err != nil {
+		return false, err
+	}
+	minimumParts, _, err := parseComparableVersion(minimum)
+	if err != nil {
+		return false, err
+	}
+
+	for i := 0; i < 3; i++ {
+		if actualParts[i] < minimumParts[i] {
+			return false, nil
+		}
+		if actualParts[i] > minimumParts[i] {
+			return true, nil
+		}
+	}
+
+	if actualHasSuffix {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func parseComparableVersion(raw string) ([3]int, bool, error) {
+	var parts [3]int
+	trimmed := strings.TrimSpace(strings.TrimPrefix(raw, "v"))
+	if trimmed == "" {
+		return parts, false, fmt.Errorf("empty version")
+	}
+
+	var builder strings.Builder
+	hasSuffix := false
+	for _, r := range trimmed {
+		if (r >= '0' && r <= '9') || r == '.' {
+			builder.WriteRune(r)
+			continue
+		}
+		hasSuffix = true
+		break
+	}
+
+	prefix := strings.Trim(builder.String(), ".")
+	if prefix == "" {
+		return parts, hasSuffix, fmt.Errorf("invalid version %q", raw)
+	}
+
+	segments := strings.Split(prefix, ".")
+	if len(segments) > len(parts) {
+		segments = segments[:len(parts)]
+	}
+	for i, segment := range segments {
+		if segment == "" {
+			return parts, hasSuffix, fmt.Errorf("invalid version %q", raw)
+		}
+		value, err := strconv.Atoi(segment)
+		if err != nil {
+			return parts, hasSuffix, fmt.Errorf("invalid version %q: %w", raw, err)
+		}
+		parts[i] = value
+	}
+
+	return parts, hasSuffix, nil
+}
+
+func candidateCommandOutput(ctx context.Context, candidate clientConnectionCandidate, args ...string) ([]byte, error) {
+	cmd := commandForEngineContext(ctx, candidate.engine, candidate.host, candidate.useFromEnv, args...)
+	return cmd.CombinedOutput()
+}
+
+func (c *Client) engineCommandOutput(ctx context.Context, args ...string) ([]byte, error) {
+	if c == nil || c.Engine == "" {
+		return nil, fmt.Errorf("container engine not configured")
+	}
+	cmd := commandForEngineContext(ctx, c.Engine, c.host, c.useFromEnv, args...)
+	return cmd.CombinedOutput()
+}
+
+func commandForEngineContext(ctx context.Context, engine string, host string, useFromEnv bool, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, engine, args...) // #nosec G204 -- arguments are constructed programmatically without shell expansion
+	envVars := os.Environ()
+	if host != "" {
+		envVars = withEnvVar(envVars, "DOCKER_HOST", host)
+	} else if !useFromEnv {
+		envVars = withoutEnvVar(envVars, "DOCKER_HOST")
+	}
+	cmd.Env = envVars
+	return cmd
+}
+
+func withEnvVar(envVars []string, key string, value string) []string {
+	prefix := key + "="
+	filtered := make([]string, 0, len(envVars)+1)
+	for _, envVar := range envVars {
+		if strings.HasPrefix(envVar, prefix) {
+			continue
+		}
+		filtered = append(filtered, envVar)
+	}
+	filtered = append(filtered, prefix+value)
+	return filtered
+}
+
+func withoutEnvVar(envVars []string, key string) []string {
+	prefix := key + "="
+	filtered := make([]string, 0, len(envVars))
+	for _, envVar := range envVars {
+		if strings.HasPrefix(envVar, prefix) {
+			continue
+		}
+		filtered = append(filtered, envVar)
+	}
+	return filtered
+}
+
+func trimmedCommandOutputSuffix(output []byte) string {
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > 500 {
+		trimmed = trimmed[:500]
+	}
+	return ": " + trimmed
+}
+
+func (c *Client) inspectContainer(ctx context.Context, name string) (containerInspectResult, error) {
+	var result containerInspectResult
+	output, err := c.engineCommandOutput(ctx, "container", "inspect", name)
+	if err != nil {
+		return result, fmt.Errorf("inspect container %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
+	}
+	var items []containerInspectResult
+	if err := json.Unmarshal(output, &items); err != nil {
+		return result, fmt.Errorf("decode container inspect for %s: %w", name, err)
+	}
+	if len(items) == 0 {
+		return result, fmt.Errorf("container inspect for %s returned no results", name)
+	}
+	return items[0], nil
+}
+
+func isContainerNotFound(output []byte) bool {
+	text := strings.ToLower(string(output))
+	return strings.Contains(text, "no such container") || strings.Contains(text, "no container with name or id")
+}
+
+func isResourceMissing(output []byte) bool {
+	text := strings.ToLower(string(output))
+	return strings.Contains(text, "no such") || strings.Contains(text, "not found") || strings.Contains(text, "no container with name or id")
 }
 
 func looksLikePodmanHost(host string) bool {
@@ -317,51 +534,16 @@ func (c *Client) NetworkName() string {
 
 // ── Lifecycle primitives ───────────────────────────────────────────
 
-// BuildImage builds a Docker image from a Dockerfile in the given context
-// directory.
+// BuildImage builds an image from a Dockerfile in the given context directory.
 func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileName string, tag string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Building image %s...", tag))
-
-	tarReader, err := archive.TarWithOptions(contextDir, &archive.TarOptions{})
-	if err != nil {
-		spinner.Fail("Failed to create build context")
-		return fmt.Errorf("tar build context: %w", err)
-	}
-
-	resp, err := c.docker.ImageBuild(ctx, tarReader, dockertypes.ImageBuildOptions{
-		Tags:       []string{tag},
-		Dockerfile: dockerfileName,
-		NoCache:    true,
-		Remove:     true,
-	})
+	output, err := c.engineCommandOutput(ctx, "build", "--no-cache", "--rm", "-t", tag, "-f", dockerfileName, contextDir)
 	if err != nil {
 		spinner.Fail("Failed to build image")
-		return fmt.Errorf("image build: %w", err)
+		return fmt.Errorf("image build: %w%s", err, trimmedCommandOutputSuffix(output))
 	}
-	defer resp.Body.Close()
-
-	// Drain build output to completion — detect errors in the stream.
-	// We use a JSON decoder to parse the stream and detect failures.
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Error  string `json:"error"`
-		}
-		if err := decoder.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			spinner.Fail("Failed to parse build stream")
-			return fmt.Errorf("decode build stream: %w", err)
-		}
-		if msg.Error != "" {
-			spinner.Fail("Build failed")
-			return fmt.Errorf("image build error: %s", msg.Error)
-		}
-		if msg.Stream != "" {
-			ui.Debug.Print(msg.Stream)
-		}
+	if len(output) > 0 {
+		ui.Debug.Print(string(output))
 	}
 
 	spinner.Success(fmt.Sprintf("Image %s built successfully", tag))
@@ -371,40 +553,31 @@ func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileNa
 // CreateNetwork creates a bridge network with the given name.
 // It is a no-op if the network already exists.
 func (c *Client) CreateNetwork(ctx context.Context, name string) error {
-	// Check if it already exists.
-	list, err := c.docker.NetworkList(ctx, dockernetwork.ListOptions{
-		Filters: dockerfilters.NewArgs(dockerfilters.Arg("name", name)),
-	})
-	if err == nil {
-		for _, n := range list {
-			if n.Name == name {
-				return nil
-			}
-		}
+	if _, err := c.engineCommandOutput(ctx, "network", "inspect", name); err == nil {
+		return nil
 	}
 
-	_, err = c.docker.NetworkCreate(ctx, name, dockernetwork.CreateOptions{
-		Driver: "bridge",
-	})
+	output, err := c.engineCommandOutput(ctx, "network", "create", name)
 	if err != nil {
-		return fmt.Errorf("create network %s: %w", name, err)
+		return fmt.Errorf("create network %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
 	}
 	return nil
 }
 
 // RemoveNetwork removes a network by name, ignoring "not found" errors.
 func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
-	if err := c.docker.NetworkRemove(ctx, name); err != nil && !dockerclient.IsErrNotFound(err) {
-		return fmt.Errorf("remove network %s: %w", name, err)
+	output, err := c.engineCommandOutput(ctx, "network", "rm", name)
+	if err != nil && !isResourceMissing(output) {
+		return fmt.Errorf("remove network %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
 	}
 	return nil
 }
 
 // CreateVolume creates a named volume.  It is a no-op if it already exists.
 func (c *Client) CreateVolume(ctx context.Context, name string) error {
-	_, err := c.docker.VolumeCreate(ctx, dockervolume.CreateOptions{Name: name})
+	output, err := c.engineCommandOutput(ctx, "volume", "create", name)
 	if err != nil {
-		return fmt.Errorf("create volume %s: %w", name, err)
+		return fmt.Errorf("create volume %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
 	}
 	return nil
 }
@@ -412,151 +585,186 @@ func (c *Client) CreateVolume(ctx context.Context, name string) error {
 // CreateContainer creates (but does not start) a container from the given config.
 // Remote images (containing "/" or ":") are automatically pulled if not present locally.
 func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) error {
-	ui.Debug.Println(fmt.Sprintf("Creating container %s (image=%s)", cfg.Name, cfg.Image))
-	for _, m := range cfg.Mounts {
-		ui.Debug.Println(fmt.Sprintf("  mount: type=%s src=%s → %s", m.Type, m.Source, m.Target))
-	}
-	for _, e := range cfg.Env {
-		ui.Debug.Println(fmt.Sprintf("  env: %s", e))
+	c.logContainerConfig(cfg)
+	if err := c.ensureContainerImage(ctx, cfg.Image); err != nil {
+		return fmt.Errorf("pull image %s: %w", cfg.Image, err)
 	}
 
-	// --- pull remote images if needed ---
-	if strings.Contains(cfg.Image, "/") || strings.Contains(cfg.Image, ":") {
-		if err := c.ensureImage(ctx, cfg.Image); err != nil {
-			return fmt.Errorf("pull image %s: %w", cfg.Image, err)
-		}
-	}
-
-	exposedPorts, portBindings := c.preparePortConfig(cfg.Ports)
-	mounts := c.prepareMountConfig(cfg.Mounts)
-	hc := c.prepareHealthConfig(cfg.Healthcheck)
-	networkConfig, hostNetworkMode := c.prepareNetworkConfig(cfg.NetworkName, cfg.Aliases)
-
-	// --- userns mode (Podman keep-id) ---
-	usernsMode := dockercontainer.UsernsMode("")
-	if cfg.UsernsMode != "" {
-		usernsMode = dockercontainer.UsernsMode(cfg.UsernsMode)
-	}
-
-	containerCfg := &dockercontainer.Config{
-		Image:        cfg.Image,
-		Env:          cfg.Env,
-		Cmd:          cfg.Cmd,
-		Entrypoint:   cfg.Entrypoint,
-		WorkingDir:   cfg.WorkingDir,
-		Tty:          cfg.Tty,
-		OpenStdin:    cfg.OpenStdin,
-		ExposedPorts: exposedPorts,
-		Healthcheck:  hc,
-	}
-
-	hostCfg := &dockercontainer.HostConfig{
-		PortBindings: portBindings,
-		Mounts:       mounts,
-		UsernsMode:   usernsMode,
-		NetworkMode:  hostNetworkMode,
-		AutoRemove:   false,
-	}
-
-	_, err := c.docker.ContainerCreate(ctx, containerCfg, hostCfg, networkConfig, nil, cfg.Name)
+	args := c.buildCreateContainerArgs(cfg)
+	output, err := c.engineCommandOutput(ctx, args...)
 	if err != nil {
-		return fmt.Errorf("create container %s: %w", cfg.Name, err)
+		return fmt.Errorf("create container %s: %w%s", cfg.Name, err, trimmedCommandOutputSuffix(output))
 	}
 
-	// Store healthcheck test for the exec-based fallback probe (Podman compat).
-	if cfg.Healthcheck != nil && len(cfg.Healthcheck.Test) > 0 {
-		if c.healthTests == nil {
-			c.healthTests = make(map[string][]string)
-		}
-		c.healthTests[cfg.Name] = cfg.Healthcheck.Test
-	}
-
+	c.storeHealthTest(cfg)
 	return nil
 }
 
-func (c *Client) preparePortConfig(ports map[int]int) (nat.PortSet, nat.PortMap) {
-	exposedPorts := nat.PortSet{}
-	portBindings := nat.PortMap{}
-	for host, ctr := range ports {
-		cp := nat.Port(fmt.Sprintf("%d/tcp", ctr))
-		exposedPorts[cp] = struct{}{}
-		portBindings[cp] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", host)}}
+func (c *Client) logContainerConfig(cfg ContainerConfig) {
+	ui.Debug.Println(fmt.Sprintf("Creating container %s (image=%s)", cfg.Name, cfg.Image))
+	for _, mount := range cfg.Mounts {
+		ui.Debug.Println(fmt.Sprintf("  mount: type=%s src=%s → %s", mount.Type, mount.Source, mount.Target))
 	}
-	return exposedPorts, portBindings
+	for _, envVar := range cfg.Env {
+		ui.Debug.Println(fmt.Sprintf("  env: %s", envVar))
+	}
 }
 
-func (c *Client) prepareMountConfig(mountDefs []MountDef) []dockermount.Mount {
-	mounts := make([]dockermount.Mount, 0, len(mountDefs))
+func (c *Client) ensureContainerImage(ctx context.Context, image string) error {
+	if !strings.Contains(image, "/") && !strings.Contains(image, ":") {
+		return nil
+	}
+	return c.ensureImage(ctx, image)
+}
+
+func (c *Client) buildCreateContainerArgs(cfg ContainerConfig) []string {
+	args := []string{"create", "--name", cfg.Name}
+	args = append(args, c.preparePortConfig(cfg.Ports)...)
+	args = append(args, c.prepareMountConfig(cfg.Mounts)...)
+	args = append(args, c.prepareHealthConfig(cfg.Healthcheck)...)
+	args = append(args, c.prepareNetworkConfig(cfg.NetworkName, cfg.Aliases)...)
+	args = append(args, c.containerCreateOptionArgs(cfg)...)
+	args = append(args, cfg.Image)
+	args = append(args, c.containerCommandArgs(cfg)...)
+	return args
+}
+
+func (c *Client) containerCreateOptionArgs(cfg ContainerConfig) []string {
+	args := make([]string, 0, len(cfg.Env)*2+8)
+	if cfg.UsernsMode != "" {
+		args = append(args, "--userns", cfg.UsernsMode)
+	}
+	for _, envVar := range cfg.Env {
+		args = append(args, "-e", envVar)
+	}
+	if cfg.WorkingDir != "" {
+		args = append(args, "-w", cfg.WorkingDir)
+	}
+	if cfg.Tty {
+		args = append(args, "-t")
+	}
+	if cfg.OpenStdin {
+		args = append(args, "-i")
+	}
+	if len(cfg.Entrypoint) > 0 {
+		args = append(args, "--entrypoint", cfg.Entrypoint[0])
+	}
+	return args
+}
+
+func (c *Client) containerCommandArgs(cfg ContainerConfig) []string {
+	if len(cfg.Entrypoint) > 1 {
+		command := make([]string, 0, len(cfg.Entrypoint)-1+len(cfg.Cmd))
+		command = append(command, cfg.Entrypoint[1:]...)
+		command = append(command, cfg.Cmd...)
+		return command
+	}
+	return cfg.Cmd
+}
+
+func (c *Client) storeHealthTest(cfg ContainerConfig) {
+	if cfg.Healthcheck == nil || len(cfg.Healthcheck.Test) == 0 {
+		return
+	}
+	if c.healthTests == nil {
+		c.healthTests = make(map[string][]string)
+	}
+	c.healthTests[cfg.Name] = cfg.Healthcheck.Test
+}
+
+func (c *Client) preparePortConfig(ports map[int]int) []string {
+	if len(ports) == 0 {
+		return nil
+	}
+	hostPorts := make([]int, 0, len(ports))
+	for hostPort := range ports {
+		hostPorts = append(hostPorts, hostPort)
+	}
+	sort.Ints(hostPorts)
+	args := make([]string, 0, len(hostPorts)*2)
+	for _, hostPort := range hostPorts {
+		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d/tcp", hostPort, ports[hostPort]))
+	}
+	return args
+}
+
+func (c *Client) prepareMountConfig(mountDefs []MountDef) []string {
+	args := make([]string, 0, len(mountDefs)*2)
 	for _, m := range mountDefs {
-		mt := dockermount.Mount{
-			Target: m.Target,
-		}
 		switch m.Type {
 		case "bind":
-			mt.Type = dockermount.TypeBind
-			mt.Source = m.Source
+			spec := fmt.Sprintf("%s:%s", m.Source, m.Target)
 			if m.SELinux && c.Engine == "podman" {
-				mt.BindOptions = &dockermount.BindOptions{
-					Propagation: dockermount.PropagationShared,
-				}
+				spec += ":z"
 			}
+			args = append(args, "-v", spec)
 		default: // volume
-			mt.Type = dockermount.TypeVolume
-			mt.Source = m.Source
+			args = append(args, "-v", fmt.Sprintf("%s:%s", m.Source, m.Target))
 		}
-		mounts = append(mounts, mt)
 	}
-	return mounts
+	return args
 }
 
-func (c *Client) prepareHealthConfig(h *HealthcheckDef) *dockercontainer.HealthConfig {
+func (c *Client) prepareHealthConfig(h *HealthcheckDef) []string {
 	if h == nil {
 		return nil
 	}
-	return &dockercontainer.HealthConfig{
-		Test:        h.Test,
-		Interval:    h.Interval,
-		Timeout:     h.Timeout,
-		Retries:     h.Retries,
-		StartPeriod: h.StartPeriod,
+	args := make([]string, 0, 8)
+	if healthCmd := healthCommand(h.Test); healthCmd != "" {
+		args = append(args, "--health-cmd", healthCmd)
+	}
+	if h.Interval > 0 {
+		args = append(args, "--health-interval", h.Interval.String())
+	}
+	if h.Timeout > 0 {
+		args = append(args, "--health-timeout", h.Timeout.String())
+	}
+	if h.Retries > 0 {
+		args = append(args, "--health-retries", strconv.Itoa(h.Retries))
+	}
+	if h.StartPeriod > 0 {
+		args = append(args, "--health-start-period", h.StartPeriod.String())
+	}
+	return args
+}
+
+func healthCommand(test []string) string {
+	if len(test) == 0 {
+		return ""
+	}
+	switch test[0] {
+	case "CMD-SHELL", "CMD":
+		return strings.Join(test[1:], " ")
+	default:
+		return strings.Join(test, " ")
 	}
 }
 
-func (c *Client) prepareNetworkConfig(networkName string, aliases []string) (*dockernetwork.NetworkingConfig, dockercontainer.NetworkMode) {
-	var networkConfig *dockernetwork.NetworkingConfig
-	var hostNetworkMode dockercontainer.NetworkMode
-
+func (c *Client) prepareNetworkConfig(networkName string, aliases []string) []string {
 	if networkName != "" {
-		hostNetworkMode = dockercontainer.NetworkMode(networkName)
-		endpointSettings := &dockernetwork.EndpointSettings{}
-		if len(aliases) > 0 {
-			endpointSettings.Aliases = aliases
+		args := []string{"--network", networkName}
+		for _, alias := range aliases {
+			args = append(args, "--network-alias", alias)
 		}
-		networkConfig = &dockernetwork.NetworkingConfig{
-			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
-				networkName: endpointSettings,
-			},
-		}
+		return args
 	}
-	return networkConfig, hostNetworkMode
+	return nil
 }
 
 // ensureImage pulls a remote image if it is not already present locally.
 func (c *Client) ensureImage(ctx context.Context, ref string) error {
-	// Check if the image exists locally first.
-	_, _, err := c.docker.ImageInspectWithRaw(ctx, ref)
-	if err == nil {
+	if _, err := c.engineCommandOutput(ctx, "image", "inspect", ref); err == nil {
 		return nil // already present
 	}
 
 	ui.Info.Println(fmt.Sprintf("Pulling image %s ...", ref))
-	reader, err := c.docker.ImagePull(ctx, ref, dockerimage.PullOptions{})
+	output, err := c.engineCommandOutput(ctx, "pull", ref)
 	if err != nil {
-		return err
+		return fmt.Errorf("pull image %s: %w%s", ref, err, trimmedCommandOutputSuffix(output))
 	}
-	defer reader.Close()
-	// Drain the reader to complete the pull; discard progress output.
-	_, _ = io.Copy(io.Discard, reader)
+	if len(output) > 0 {
+		ui.Debug.Print(string(output))
+	}
 	return nil
 }
 
@@ -564,8 +772,12 @@ const ProjectIssuesURL = "https://github.com/evefrontier/efctl/issues"
 
 // StartContainer starts an existing container by name.
 func (c *Client) StartContainer(ctx context.Context, name string) error {
-	if err := c.docker.ContainerStart(ctx, name, dockercontainer.StartOptions{}); err != nil {
+	output, err := c.engineCommandOutput(ctx, "start", name)
+	if err != nil {
 		errStr := err.Error()
+		if len(output) > 0 {
+			errStr = string(output)
+		}
 		if strings.Contains(errStr, "netavark") && strings.Contains(errStr, "nftables") {
 			return fmt.Errorf("start container %s: %w\n\nTIP: This error often occurs on WSL with Podman's default networking. Try setting 'firewall_driver = \"iptables\"' in your ~/.config/containers/containers.conf and running 'podman system reset' if the issue persists.\n\nPlease report this issue at %s - include the output of 'efctl doctor'.", name, err, ProjectIssuesURL)
 		}
@@ -576,17 +788,18 @@ func (c *Client) StartContainer(ctx context.Context, name string) error {
 
 // StopContainer stops a running container by name (10s timeout).
 func (c *Client) StopContainer(ctx context.Context, name string) error {
-	timeout := 10
-	if err := c.docker.ContainerStop(ctx, name, dockercontainer.StopOptions{Timeout: &timeout}); err != nil && !dockerclient.IsErrNotFound(err) {
-		return fmt.Errorf("stop container %s: %w", name, err)
+	output, err := c.engineCommandOutput(ctx, "stop", "-t", "10", name)
+	if err != nil && !isContainerNotFound(output) {
+		return fmt.Errorf("stop container %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
 	}
 	return nil
 }
 
 // RemoveContainer removes a container by name, ignoring "not found" errors.
 func (c *Client) RemoveContainer(ctx context.Context, name string) error {
-	if err := c.docker.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true}); err != nil && !dockerclient.IsErrNotFound(err) {
-		return fmt.Errorf("remove container %s: %w", name, err)
+	output, err := c.engineCommandOutput(ctx, "rm", "-f", name)
+	if err != nil && !isContainerNotFound(output) {
+		return fmt.Errorf("remove container %s: %w%s", name, err, trimmedCommandOutputSuffix(output))
 	}
 	return nil
 }
@@ -615,7 +828,7 @@ func (c *Client) WaitHealthy(ctx context.Context, name string, timeout time.Dura
 			spinner.Fail(fmt.Sprintf("%s healthcheck cancelled", name))
 			return ctx.Err()
 		case <-ticker.C:
-			info, err := c.docker.ContainerInspect(ctx, name)
+			info, err := c.inspectContainer(ctx, name)
 			if err != nil {
 				continue
 			}
@@ -658,7 +871,7 @@ func (c *Client) WaitHealthy(ctx context.Context, name string, timeout time.Dura
 // execHealthProbe runs the container's healthcheck command via exec.
 // Returns true if the command exits 0.
 func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
-	if c.docker == nil {
+	if c == nil || c.Engine == "" {
 		return false
 	}
 	// Look up the healthcheck test stored during CreateContainer.
@@ -679,41 +892,14 @@ func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
 	if len(cmd) == 0 {
 		return false
 	}
-
-	execCfg, err := c.docker.ContainerExecCreate(ctx, name, dockercontainer.ExecOptions{
-		Cmd:          cmd,
-		AttachStdout: false,
-		AttachStderr: false,
-	})
+	output, err := c.engineCommandOutput(ctx, append([]string{"exec", name}, cmd...)...)
 	if err != nil {
+		if len(output) > 0 {
+			ui.Debug.Println(fmt.Sprintf("Health check exec for %s failed: %s", name, strings.TrimSpace(string(output))))
+		}
 		return false
 	}
-
-	// Use Detach: true so the exec runs asynchronously without requiring
-	// an attached stream. Podman's compat API rejects ExecStart when no
-	// streams are attached and Detach is false ("must provide at least one
-	// stream to attach to").
-	if err := c.docker.ContainerExecStart(ctx, execCfg.ID, dockercontainer.ExecStartOptions{
-		Detach: true,
-	}); err != nil {
-		return false
-	}
-
-	// Poll for exec completion with 30-second timeout
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		inspect, err := c.docker.ContainerExecInspect(ctx, execCfg.ID)
-		if err != nil {
-			return false
-		}
-		if !inspect.Running {
-			return inspect.ExitCode == 0
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	// Timeout reached, treat as unhealthy
-	ui.Debug.Println(fmt.Sprintf("Health check exec for %s timed out after 30s", name))
-	return false
+	return true
 }
 
 // ── Inspection / interaction ────────────────────────────────────────
@@ -721,7 +907,7 @@ func (c *Client) execHealthProbe(ctx context.Context, name string) bool {
 // ContainerRunning checks if a container is currently running.
 func (c *Client) ContainerRunning(name string) bool {
 	ctx := context.Background()
-	info, err := c.docker.ContainerInspect(ctx, name)
+	info, err := c.inspectContainer(ctx, name)
 	if err != nil {
 		return false
 	}
@@ -731,35 +917,17 @@ func (c *Client) ContainerRunning(name string) bool {
 // ContainerLogs returns the last N lines of a container's logs.
 func (c *Client) ContainerLogs(name string, tail int) string {
 	ctx := context.Background()
-	reader, err := c.docker.ContainerLogs(ctx, name, dockercontainer.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Tail:       fmt.Sprintf("%d", tail),
-	})
+	output, err := c.engineCommandOutput(ctx, "logs", "--tail", fmt.Sprintf("%d", tail), name)
 	if err != nil {
-		return fmt.Sprintf("(could not retrieve logs: %v)", err)
+		return fmt.Sprintf("(could not retrieve logs: %v%s)", err, trimmedCommandOutputSuffix(output))
 	}
-	defer reader.Close()
-
-	var sb strings.Builder
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		// Docker multiplexes logs with an 8-byte header; strip it when present.
-		if len(line) > 8 {
-			sb.Write(line[8:])
-		} else {
-			sb.Write(line)
-		}
-		sb.WriteByte('\n')
-	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(string(output))
 }
 
 // ContainerExitCode returns the exit code of a stopped container.
 func (c *Client) ContainerExitCode(name string) (int, error) {
 	ctx := context.Background()
-	info, err := c.docker.ContainerInspect(ctx, name)
+	info, err := c.inspectContainer(ctx, name)
 	if err != nil {
 		return -1, fmt.Errorf("failed to inspect container %s: %w", name, err)
 	}
@@ -772,76 +940,56 @@ func (c *Client) ContainerExitCode(name string) (int, error) {
 // WaitForLogs waits for a specific string in the container logs
 func (c *Client) WaitForLogs(ctx context.Context, containerName string, searchString string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Waiting for %s to initialize...", containerName))
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-	reader, err := c.docker.ContainerLogs(ctx, containerName, dockercontainer.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Follow:     true,
-	})
-	if err != nil {
-		spinner.Fail("Failed to get logs stream")
-		return err
-	}
-	defer reader.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			// Timeout reached — check if container is still running and healthy as fallback.
+			// This handles cases where the log string changed or was never printed but container is actually ready.
+			if c.ContainerRunning(containerName) {
+				ui.Debug.Println(fmt.Sprintf("WaitForLogs timeout reached but %s is still running - checking health", containerName))
+				spinner.UpdateText(fmt.Sprintf("Log string not found, verifying %s health...", containerName))
 
-	// Channel to signal when search string is found
-	done := make(chan bool, 1)
+				// Give the container a moment to stabilize
+				time.Sleep(2 * time.Second)
 
-	go func() {
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.Contains(line, searchString) {
-				done <- true
-				return
+				// Create a short timeout for the health check
+				healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer healthCancel()
+
+				// Try exec-based health probe as fallback
+				if c.execHealthProbe(healthCtx, containerName) {
+					spinner.Success(fmt.Sprintf("%s is ready (health check passed)", containerName))
+					ui.Warn.Println(fmt.Sprintf("Log string %q not found, but container is healthy", searchString))
+					return nil
+				}
 			}
-		}
-		done <- false
-	}()
 
-	select {
-	case <-ctx.Done():
-		// Timeout reached — check if container is still running and healthy as fallback.
-		// This handles cases where the log string changed or was never printed but container is actually ready.
-		if c.ContainerRunning(containerName) {
-			ui.Debug.Println(fmt.Sprintf("WaitForLogs timeout reached but %s is still running - checking health", containerName))
-			spinner.UpdateText(fmt.Sprintf("Log string not found, verifying %s health...", containerName))
-
-			// Give the container a moment to stabilize
-			time.Sleep(2 * time.Second)
-
-			// Create a short timeout for the health check
-			healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer healthCancel()
-
-			// Try exec-based health probe as fallback
-			if c.execHealthProbe(healthCtx, containerName) {
-				spinner.Success(fmt.Sprintf("%s is ready (health check passed)", containerName))
-				ui.Warn.Println(fmt.Sprintf("Log string %q not found, but container is healthy", searchString))
+			spinner.Fail("Timed out waiting for logs")
+			lastLogs := c.ContainerLogs(containerName, 50)
+			return fmt.Errorf("timeout waiting for %q in %s logs.\n\nLast 50 lines of container logs:\n%s", searchString, containerName, lastLogs)
+		case <-ticker.C:
+			logs := c.ContainerLogs(containerName, 200)
+			if strings.Contains(logs, searchString) {
+				spinner.Success(fmt.Sprintf("%s is ready", containerName))
 				return nil
 			}
-		}
-
-		spinner.Fail("Timed out waiting for logs")
-		lastLogs := c.ContainerLogs(containerName, 50)
-		return fmt.Errorf("timeout waiting for %q in %s logs.\n\nLast 50 lines of container logs:\n%s", searchString, containerName, lastLogs)
-	case found := <-done:
-		if !found {
-			// Container exited before the ready string appeared — provide diagnostics
-			exitCode, exitErr := c.ContainerExitCode(containerName)
-			lastLogs := c.ContainerLogs(containerName, 50)
-			diag := fmt.Sprintf("Container %s exited before becoming ready.", containerName)
-			if exitErr == nil {
-				diag += fmt.Sprintf(" Exit code: %d.", exitCode)
+			if !c.ContainerRunning(containerName) {
+				// Container exited before the ready string appeared — provide diagnostics
+				exitCode, exitErr := c.ContainerExitCode(containerName)
+				lastLogs := c.ContainerLogs(containerName, 50)
+				diag := fmt.Sprintf("Container %s exited before becoming ready.", containerName)
+				if exitErr == nil {
+					diag += fmt.Sprintf(" Exit code: %d.", exitCode)
+				}
+				diag += fmt.Sprintf("\n\nLast 50 lines of container logs:\n%s", lastLogs)
+				spinner.Fail(fmt.Sprintf("%s exited unexpectedly (search string %q not found)", containerName, searchString))
+				return fmt.Errorf("%s", diag)
 			}
-			diag += fmt.Sprintf("\n\nLast 50 lines of container logs:\n%s", lastLogs)
-			spinner.Fail(fmt.Sprintf("%s exited unexpectedly (search string %q not found)", containerName, searchString))
-			return fmt.Errorf("%s", diag)
 		}
 	}
-
-	spinner.Success(fmt.Sprintf("%s is ready", containerName))
-	return nil
 }
 
 // InteractiveShell opens an interactive shell in the container.
@@ -956,8 +1104,8 @@ func (c *Client) Cleanup() error {
 func (c *Client) forceRemoveContainers(ctx context.Context, names []string) {
 	for _, name := range names {
 		ui.Debug.Println(fmt.Sprintf("forceRemoveContainers: stopping and removing %s", name))
-		_ = c.docker.ContainerStop(ctx, name, dockercontainer.StopOptions{})
-		_ = c.docker.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true})
+		_, _ = c.engineCommandOutput(ctx, "stop", name)
+		_, _ = c.engineCommandOutput(ctx, "rm", "-f", name)
 	}
 }
 
@@ -967,19 +1115,19 @@ func (c *Client) forceRemoveContainers(ctx context.Context, names []string) {
 func (c *Client) RemoveImages(names []string) {
 	ctx := context.Background()
 	for _, name := range names {
-		_, _ = c.docker.ImageRemove(ctx, name, dockerimage.RemoveOptions{Force: true})
+		_, _ = c.engineCommandOutput(ctx, "rmi", "-f", name)
 	}
 }
 
 func (c *Client) removeVolumes(ctx context.Context, names []string) {
 	for _, vol := range names {
-		_ = c.docker.VolumeRemove(ctx, vol, true)
+		_, _ = c.engineCommandOutput(ctx, "volume", "rm", "-f", vol)
 	}
 }
 
 func (c *Client) normalizeBindMountPermissions(containerName string) {
 	ctx := context.Background()
-	info, err := c.docker.ContainerInspect(ctx, containerName)
+	info, err := c.inspectContainer(ctx, containerName)
 	if err != nil {
 		ui.Debug.Println(fmt.Sprintf("Permission normalization: failed to inspect %s: %v", containerName, err))
 		return
