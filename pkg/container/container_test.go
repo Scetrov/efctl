@@ -157,6 +157,40 @@ func TestPrepareMountConfig_PodmanUsesSharedPropagation(t *testing.T) {
 	}
 }
 
+func TestDockerBuildDockerfilePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		contextDir   string
+		dockerfile   string
+		expectedPath string
+	}{
+		{
+			name:         "relative dockerfile joins context directory",
+			contextDir:   "/tmp/workspace/builder-scaffold/docker",
+			dockerfile:   "Dockerfile",
+			expectedPath: "/tmp/workspace/builder-scaffold/docker/Dockerfile",
+		},
+		{
+			name:         "absolute dockerfile stays absolute",
+			contextDir:   "/tmp/workspace/builder-scaffold/docker",
+			dockerfile:   "/tmp/workspace/builder-scaffold/docker/Dockerfile",
+			expectedPath: "/tmp/workspace/builder-scaffold/docker/Dockerfile",
+		},
+		{
+			name:         "empty context leaves dockerfile unchanged",
+			contextDir:   "",
+			dockerfile:   "Dockerfile",
+			expectedPath: "Dockerfile",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expectedPath, dockerBuildDockerfilePath(test.contextDir, test.dockerfile))
+		})
+	}
+}
+
 func TestPreferredEngineOrder(t *testing.T) {
 	res := &env.CheckResult{HasDocker: true, HasPodman: true}
 
