@@ -109,10 +109,9 @@ const (
 	dockerAuthZPatchedVersion = "29.3.1"
 	dockerAuthZAdvisoryPrefix = "GHSA"
 	dockerAuthZAdvisorySuffix = "x744-4wpc-v9h2"
+	dockerAuthZAdvisoryID     = dockerAuthZAdvisoryPrefix + "-" + dockerAuthZAdvisorySuffix
 	dockerAuthZCVEID          = "CVE-2026-34040"
 )
-
-var dockerAuthZAdvisoryID = dockerAuthZAdvisoryPrefix + "-" + dockerAuthZAdvisorySuffix
 
 // NewClient returns a new container client backed by the Docker/Podman CLI.
 // It auto-detects the engine (Docker or Podman) and connects to the
