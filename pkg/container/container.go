@@ -539,7 +539,8 @@ func (c *Client) NetworkName() string {
 // BuildImage builds an image from a Dockerfile in the given context directory.
 func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileName string, tag string) error {
 	spinner, _ := ui.Spin(fmt.Sprintf("Building image %s...", tag))
-	output, err := c.engineCommandOutput(ctx, "build", "--no-cache", "--rm", "-t", tag, "-f", dockerfileName, contextDir)
+	dockerfilePath := dockerBuildDockerfilePath(contextDir, dockerfileName)
+	output, err := c.engineCommandOutput(ctx, "build", "--no-cache", "--rm", "-t", tag, "-f", dockerfilePath, contextDir)
 	if err != nil {
 		spinner.Fail("Failed to build image")
 		return fmt.Errorf("image build: %w%s", err, trimmedCommandOutputSuffix(output))
@@ -550,6 +551,14 @@ func (c *Client) BuildImage(ctx context.Context, contextDir string, dockerfileNa
 
 	spinner.Success(fmt.Sprintf("Image %s built successfully", tag))
 	return nil
+}
+
+func dockerBuildDockerfilePath(contextDir string, dockerfileName string) string {
+	if dockerfileName == "" || filepath.IsAbs(dockerfileName) || contextDir == "" {
+		return dockerfileName
+	}
+
+	return filepath.Join(contextDir, dockerfileName)
 }
 
 // CreateNetwork creates a bridge network with the given name.

@@ -53,7 +53,7 @@ const DefaultWorldContractsURL = "https://github.com/evefrontier/world-contracts
 // DefaultBuilderScaffoldURL is the default git clone URL for builder-scaffold.
 const DefaultBuilderScaffoldURL = "https://github.com/evefrontier/builder-scaffold.git"
 
-// DefaultBranch is the default git branch to checkout.
+// DefaultBranch is the canonical upstream branch name when branch semantics are needed.
 const DefaultBranch = "main"
 
 // DefaultConfigFile is the default configuration file name.
@@ -275,7 +275,8 @@ func (c *Config) GetBuilderScaffoldURL() string {
 	return DefaultBuilderScaffoldURL
 }
 
-// GetWorldContractsRef returns the configured world-contracts ref, falling back to branch, then default.
+// GetWorldContractsRef returns the configured world-contracts ref, falling back to the
+// deprecated branch field, then the recommended compatible default.
 func (c *Config) GetWorldContractsRef() string {
 	if c != nil {
 		if c.WorldContractsRef != "" {
@@ -285,10 +286,11 @@ func (c *Config) GetWorldContractsRef() string {
 			return c.WorldContractsBranch
 		}
 	}
-	return DefaultBranch
+	return RecommendedWorldContractsRef
 }
 
-// GetBuilderScaffoldRef returns the configured builder-scaffold ref, falling back to branch, then default.
+// GetBuilderScaffoldRef returns the configured builder-scaffold ref, falling back to the
+// deprecated branch field, then the recommended compatible default.
 func (c *Config) GetBuilderScaffoldRef() string {
 	if c != nil {
 		if c.BuilderScaffoldRef != "" {
@@ -298,7 +300,7 @@ func (c *Config) GetBuilderScaffoldRef() string {
 			return c.BuilderScaffoldBranch
 		}
 	}
-	return DefaultBranch
+	return RecommendedBuilderScaffoldRef
 }
 
 // GetGitAutoCRLF returns the configured git-autocrlf option, falling back to false.
