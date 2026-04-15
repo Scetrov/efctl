@@ -24,7 +24,11 @@ Shows the shortest import path from your code to the module — useful for under
 
 ## Generate a Graph Image with modgraphviz
 
-Use `modgraphviz` from stdlib.
+`modgraphviz` is a separate Go tool, commonly installed from `golang.org/x/tools/cmd/modgraphviz`.
+
+```bash
+go install golang.org/x/tools/cmd/modgraphviz@latest
+```
 
 ```bash
 go mod graph | modgraphviz | dot -Tpng -o deps.png
@@ -38,7 +42,11 @@ Green nodes represent versions selected by MVS (in the final build list). Grey n
 
 ## Complementary Analysis
 
-Use `digraph` from stdlib.
+`digraph` is also an external tool from `golang.org/x/tools/cmd/digraph`.
+
+```bash
+go install golang.org/x/tools/cmd/digraph@latest
+```
 
 ```bash
 # General graph queries on go mod graph output

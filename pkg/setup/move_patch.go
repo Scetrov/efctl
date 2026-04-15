@@ -28,7 +28,7 @@ func CleanStaleMoveLocks(workspace string) {
 
 // PatchBuilderExampleMoveTomls removes legacy named-address sections from the
 // bundled builder-scaffold example packages so they remain publishable against
-// CCP's recommended world-contracts v0.0.18 checkout.
+// CCP's recommended world-contracts v0.0.23 checkout.
 func PatchBuilderExampleMoveTomls(workspace string) error {
 	for _, contractName := range []string{"smart_gate_extension", "storage_unit_extension"} {
 		moveTomlPath := filepath.Join(workspace, "builder-scaffold", "move-contracts", contractName, "Move.toml")
