@@ -49,8 +49,8 @@ func TestConfigDefaults(t *testing.T) {
 
 	assert.Equal(t, config.DefaultWorldContractsURL, cfg.GetWorldContractsURL())
 	assert.Equal(t, config.DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
-	assert.Equal(t, config.DefaultBranch, cfg.GetWorldContractsRef())
-	assert.Equal(t, config.DefaultBranch, cfg.GetBuilderScaffoldRef())
+	assert.Equal(t, config.RecommendedWorldContractsRef, cfg.GetWorldContractsRef())
+	assert.Equal(t, config.RecommendedBuilderScaffoldRef, cfg.GetBuilderScaffoldRef())
 }
 
 // TestConfigValidation_RejectsInsecure validates that non-HTTPS URLs are rejected.

@@ -25,9 +25,9 @@
 | `with-frontend` | Enable builder-scaffold web frontend (Vite) | `false` |
 | `with-graphql` | Enable SQL Indexer and GraphQL API | `false` |
 | `world-contracts-url` | Git URL for world contracts | `https://github.com/evefrontier/world-contracts.git` |
-| `world-contracts-ref` | Branch, tag, or commit for world contracts | `main` |
+| `world-contracts-ref` | Branch, tag, or commit for world contracts | `v0.0.23` |
 | `builder-scaffold-url` | Git URL for builder-scaffold | `https://github.com/evefrontier/builder-scaffold.git` |
-| `builder-scaffold-ref` | Branch, tag, or commit for builder-scaffold | `main` |
+| `builder-scaffold-ref` | Branch, tag, or commit for builder-scaffold | `v0.0.2` |
 | `git-autocrlf` | Enable Git `core.autocrlf` for clones | `false` |
 | `container-engine` | Container engine to use (`docker`, `podman`) | `auto-detect` |
 | `additional-bind-mounts` | List of custom host paths to mount | `[]` |

@@ -275,7 +275,7 @@ func TestGetBuilderScaffoldURL_Custom(t *testing.T) {
 
 func TestGetWorldContractsRef_Default(t *testing.T) {
 	cfg := &Config{}
-	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsRef())
+	assert.Equal(t, RecommendedWorldContractsRef, cfg.GetWorldContractsRef())
 }
 
 func TestGetWorldContractsRef_Custom(t *testing.T) {
@@ -295,7 +295,7 @@ func TestGetWorldContractsRef_Priority(t *testing.T) {
 
 func TestGetBuilderScaffoldRef_Default(t *testing.T) {
 	cfg := &Config{}
-	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldRef())
+	assert.Equal(t, RecommendedBuilderScaffoldRef, cfg.GetBuilderScaffoldRef())
 }
 
 func TestGetBuilderScaffoldRef_Custom(t *testing.T) {
@@ -317,8 +317,8 @@ func TestGetters_NilConfig(t *testing.T) {
 	var cfg *Config
 	assert.Equal(t, DefaultWorldContractsURL, cfg.GetWorldContractsURL())
 	assert.Equal(t, DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
-	assert.Equal(t, DefaultBranch, cfg.GetWorldContractsRef())
-	assert.Equal(t, DefaultBranch, cfg.GetBuilderScaffoldRef())
+	assert.Equal(t, RecommendedWorldContractsRef, cfg.GetWorldContractsRef())
+	assert.Equal(t, RecommendedBuilderScaffoldRef, cfg.GetBuilderScaffoldRef())
 }
 
 func TestFindDefaultConfigPath_FindsInCurrentDirectory(t *testing.T) {
