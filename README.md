@@ -82,7 +82,7 @@ cd ~ && curl -fsSL "https://github.com/Scetrov/efctl/releases/latest/download/ef
 
 ### From Source
 
-Ensure you have [Go 1.26.1+](https://go.dev/dl/) installed.
+Ensure you have [Go 1.26.2+](https://go.dev/dl/) installed.
 
 ```bash
 git clone https://github.com/Scetrov/efctl.git

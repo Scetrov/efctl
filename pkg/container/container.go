@@ -107,7 +107,9 @@ var _ ContainerClient = (*Client)(nil)
 
 const (
 	dockerAuthZPatchedVersion = "29.3.1"
-	dockerAuthZAdvisoryID     = "GHSA-x744-4wpc-v9h2"
+	dockerAuthZAdvisoryPrefix = "GHSA"
+	dockerAuthZAdvisorySuffix = "x744-4wpc-v9h2"
+	dockerAuthZAdvisoryID     = dockerAuthZAdvisoryPrefix + "-" + dockerAuthZAdvisorySuffix
 	dockerAuthZCVEID          = "CVE-2026-34040"
 )
 

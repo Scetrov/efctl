@@ -3,7 +3,7 @@ package config
 import "fmt"
 
 // Recommended refs track the CCP-documented compatible repository pair.
-const RecommendedWorldContractsRef = "v0.0.18"
+const RecommendedWorldContractsRef = "v0.0.23"
 
 const RecommendedBuilderScaffoldRef = "v0.0.2"
 

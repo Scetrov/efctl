@@ -40,7 +40,7 @@ with-frontend: true
 with-graphql: true
 
 # Control versions
-world-contracts-ref: "v0.0.18"
+world-contracts-ref: "v0.0.23"
 builder-scaffold-ref: "v0.0.2"
 
 # Custom mounts
