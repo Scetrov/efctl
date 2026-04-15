@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "golang-dependency-management": {
+      "source": "samber/cc-skills-golang",
+      "sourceType": "github",
+      "computedHash": "72e1aa6252db2e1ed0aebe0331f99878fbe07de1eb45fd635fd2936788f12833"
+    }
+  }
+}
