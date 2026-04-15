@@ -2,18 +2,14 @@ package container
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
 
 	"efctl/pkg/env"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockermount "github.com/docker/docker/api/types/mount"
-	dockerclient "github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,14 +126,14 @@ func TestPrepareMountConfig_DockerSkipsSharedPropagation(t *testing.T) {
 		SELinux: true,
 	}})
 
-	if len(mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(mounts))
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mount args, got %d", len(mounts))
 	}
-	if mounts[0].Type != dockermount.TypeBind {
-		t.Fatalf("expected bind mount, got %q", mounts[0].Type)
+	if mounts[0] != "-v" {
+		t.Fatalf("expected docker mount flag, got %q", mounts[0])
 	}
-	if mounts[0].BindOptions != nil {
-		t.Fatalf("expected docker bind mount to omit propagation options, got %+v", mounts[0].BindOptions)
+	if mounts[1] != "/tmp/workspace/builder-scaffold:/workspace/builder-scaffold" {
+		t.Fatalf("expected docker bind mount without podman relabel suffix, got %q", mounts[1])
 	}
 }
 
@@ -150,14 +146,14 @@ func TestPrepareMountConfig_PodmanUsesSharedPropagation(t *testing.T) {
 		SELinux: true,
 	}})
 
-	if len(mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(mounts))
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mount args, got %d", len(mounts))
 	}
-	if mounts[0].BindOptions == nil {
-		t.Fatal("expected podman bind mount to include bind options")
+	if mounts[0] != "-v" {
+		t.Fatalf("expected podman mount flag, got %q", mounts[0])
 	}
-	if mounts[0].BindOptions.Propagation != dockermount.PropagationShared {
-		t.Fatalf("expected podman bind mount propagation %q, got %q", dockermount.PropagationShared, mounts[0].BindOptions.Propagation)
+	if mounts[1] != "/tmp/workspace/builder-scaffold:/workspace/builder-scaffold:z" {
+		t.Fatalf("expected podman bind mount to include SELinux relabel suffix, got %q", mounts[1])
 	}
 }
 
@@ -187,14 +183,14 @@ func TestConnectionCandidates_FallbackToDockerWhenPodmanSocketMissing(t *testing
 		return false
 	})
 
-	if len(candidates) != 1 {
-		t.Fatalf("expected only docker candidate, got %d (%+v)", len(candidates), candidates)
+	if len(candidates) < 2 {
+		t.Fatalf("expected podman and docker candidates, got %d (%+v)", len(candidates), candidates)
 	}
-	if candidates[0].engine != "docker" {
-		t.Fatalf("expected docker fallback, got %+v", candidates[0])
+	if candidates[0].engine != "podman" || candidates[0].host != "" {
+		t.Fatalf("expected default podman candidate first, got %+v", candidates[0])
 	}
-	if !candidates[0].useFromEnv {
-		t.Fatalf("expected docker candidate to use environment host, got %+v", candidates[0])
+	if candidates[1].engine != "docker" || !candidates[1].useFromEnv {
+		t.Fatalf("expected docker fallback candidate second, got %+v", candidates[1])
 	}
 }
 
@@ -206,15 +202,56 @@ func TestConnectionCandidates_UsePodmanSocketWhenAvailable(t *testing.T) {
 		return host == podmanHost
 	})
 
-	if len(candidates) < 2 {
-		t.Fatalf("expected podman and docker candidates, got %+v", candidates)
+	if len(candidates) < 3 {
+		t.Fatalf("expected podman socket, default podman, and docker candidates, got %+v", candidates)
 	}
 	if candidates[0].engine != "podman" || candidates[0].host != podmanHost {
 		t.Fatalf("expected first candidate to use podman socket, got %+v", candidates[0])
 	}
-	if candidates[1].engine != "docker" {
-		t.Fatalf("expected docker fallback candidate second, got %+v", candidates[1])
+	if candidates[1].engine != "podman" || candidates[1].host != "" {
+		t.Fatalf("expected second candidate to use default podman CLI, got %+v", candidates[1])
 	}
+	if candidates[2].engine != "docker" {
+		t.Fatalf("expected docker fallback candidate third, got %+v", candidates[2])
+	}
+}
+
+func TestDockerAuthZVulnerabilityError_AllowsDaemonWithoutAuthZPlugins(t *testing.T) {
+	if err := dockerAuthZVulnerabilityError("28.5.2", nil); err != nil {
+		t.Fatalf("expected nil error without authz plugins, got %v", err)
+	}
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsVulnerableDaemon(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("28.5.2", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected vulnerable docker daemon to be rejected")
+	}
+	assert.ErrorContains(t, err, dockerAuthZAdvisoryID)
+	assert.ErrorContains(t, err, dockerAuthZPatchedVersion)
+	assert.ErrorContains(t, err, "opa")
+}
+
+func TestDockerAuthZVulnerabilityError_AllowsPatchedDaemon(t *testing.T) {
+	if err := dockerAuthZVulnerabilityError("29.3.1", []string{"opa"}); err != nil {
+		t.Fatalf("expected patched docker daemon to be allowed, got %v", err)
+	}
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsPreReleaseAtPatchedVersion(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("29.3.1-rc.1", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected pre-release docker daemon to be rejected")
+	}
+	assert.ErrorContains(t, err, dockerAuthZAdvisoryID)
+}
+
+func TestDockerAuthZVulnerabilityError_RejectsUnknownVersionWithAuthZPlugins(t *testing.T) {
+	err := dockerAuthZVulnerabilityError("dev-build", []string{"opa"})
+	if err == nil {
+		t.Fatal("expected unverifiable docker daemon version to be rejected")
+	}
+	assert.ErrorContains(t, err, "could not be validated")
 }
 
 // ── execHealthProbe unit tests ─────────────────────────────────────
@@ -239,17 +276,17 @@ func TestExecHealthProbe_EmptyTest(t *testing.T) {
 	}
 }
 
-func TestExecHealthProbe_NilDockerClient(t *testing.T) {
-	// When the docker client is nil, execHealthProbe must return false
+func TestExecHealthProbe_EmptyEngine(t *testing.T) {
+	// When the engine is not configured, execHealthProbe must return false
 	// without panicking.
 	c := &Client{
-		docker: nil,
+		Engine: "",
 		healthTests: map[string][]string{
 			"ctr": {"CMD-SHELL", "pg_isready -U sui"},
 		},
 	}
 	if c.execHealthProbe(context.Background(), "ctr") {
-		t.Error("expected false when docker client is nil")
+		t.Error("expected false when engine is not configured")
 	}
 }
 
@@ -262,44 +299,38 @@ func TestExecHealthProbe_PodmanDetach(t *testing.T) {
 	if os.Getenv("EFCTL_INTEGRATION") == "" {
 		t.Skip("set EFCTL_INTEGRATION=1 to run container integration tests")
 	}
-
-	uid := os.Getuid()
-	sock := fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
-	dc, err := dockerclient.NewClientWithOpts(
-		dockerclient.WithHost(sock),
-		dockerclient.WithAPIVersionNegotiation(),
-	)
-	if err != nil {
-		t.Skipf("cannot create docker client: %v", err)
+	if _, err := exec.LookPath("podman"); err != nil {
+		t.Skipf("podman is not installed: %v", err)
 	}
 
 	ctx := context.Background()
 	const name = "efctl-test-health-probe"
+	c := &Client{Engine: "podman"}
 
 	// Cleanup any previous run.
-	dc.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true})
+	_, _ = c.engineCommandOutput(ctx, "rm", "-f", name)
 	t.Cleanup(func() {
-		dc.ContainerRemove(ctx, name, dockercontainer.RemoveOptions{Force: true})
+		_, _ = c.engineCommandOutput(context.Background(), "rm", "-f", name)
 	})
 
 	// Create and start a postgres container.
-	cp := nat.Port("5432/tcp")
-	_, err = dc.ContainerCreate(ctx, &dockercontainer.Config{
-		Image:        ImagePostgres,
-		Env:          []string{"POSTGRES_USER=sui", "POSTGRES_PASSWORD=sui", "POSTGRES_DB=sui_indexer"},
-		ExposedPorts: map[nat.Port]struct{}{cp: {}},
-		Healthcheck: &dockercontainer.HealthConfig{
-			Test:        []string{"CMD-SHELL", "pg_isready -U sui -d sui_indexer"},
-			Interval:    2 * time.Second,
-			Timeout:     3 * time.Second,
-			Retries:     30,
-			StartPeriod: 5 * time.Second,
-		},
-	}, nil, nil, nil, name)
+	_, err := c.engineCommandOutput(ctx,
+		"create",
+		"--name", name,
+		"-e", "POSTGRES_USER=sui",
+		"-e", "POSTGRES_PASSWORD=sui",
+		"-e", "POSTGRES_DB=sui_indexer",
+		"--health-cmd", "pg_isready -U sui -d sui_indexer",
+		"--health-interval", "2s",
+		"--health-timeout", "3s",
+		"--health-retries", "30",
+		"--health-start-period", "5s",
+		ImagePostgres,
+	)
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	if err := dc.ContainerStart(ctx, name, dockercontainer.StartOptions{}); err != nil {
+	if _, err := c.engineCommandOutput(ctx, "start", name); err != nil {
 		t.Fatalf("start container: %v", err)
 	}
 
@@ -307,7 +338,7 @@ func TestExecHealthProbe_PodmanDetach(t *testing.T) {
 	ready := false
 	for i := 0; i < 15; i++ {
 		time.Sleep(2 * time.Second)
-		info, err := dc.ContainerInspect(ctx, name)
+		info, err := c.inspectContainer(ctx, name)
 		if err != nil || info.State == nil || !info.State.Running {
 			continue
 		}
@@ -319,13 +350,7 @@ func TestExecHealthProbe_PodmanDetach(t *testing.T) {
 	}
 
 	// Now test execHealthProbe with the Detach-based approach.
-	c := &Client{
-		Engine: "podman",
-		docker: dc,
-		healthTests: map[string][]string{
-			name: {"CMD-SHELL", "pg_isready -U sui -d sui_indexer"},
-		},
-	}
+	c.healthTests = map[string][]string{name: {"CMD-SHELL", "pg_isready -U sui -d sui_indexer"}}
 
 	ok := c.execHealthProbe(ctx, name)
 	if !ok {
