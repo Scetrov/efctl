@@ -81,7 +81,7 @@ func patchNpmrc(path string) error {
 		if os.IsNotExist(err) {
 			// Create .npmrc if it doesn't exist
 			content := "onlyBuiltDependencies=esbuild\n"
-			return os.WriteFile(path, []byte(content), 0600) // #nosec G304
+			return os.WriteFile(path, []byte(content), 0600) // #nosec G306 -- path validated by safePath; write with restrictive permissions
 		}
 		return err
 	}
@@ -91,8 +91,8 @@ func patchNpmrc(path string) error {
 		return nil
 	}
 
-	// Append the onlyBuiltDependencies config
-	content = strings.TrimRight(content, "\n") + "\nonlyBuiltDependencies=esbuild\n"
+	// Append the onlyBuiltDependencies config (handle both LF and CRLF line endings)
+	content = strings.TrimRight(strings.TrimRight(content, "\n"), "\r") + "\nonlyBuiltDependencies=esbuild\n"
 
 	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated by safePath; G703 false positive from taint analysis
 }

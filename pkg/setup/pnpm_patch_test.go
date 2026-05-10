@@ -47,7 +47,10 @@ func TestPatchPackageJSON(t *testing.T) {
 	if err := patchPackageJSON(pkgPath); err != nil {
 		t.Fatalf("second patch failed: %v", err)
 	}
-	newData2, _ := os.ReadFile(pkgPath)
+	newData2, err := os.ReadFile(pkgPath)
+	if err != nil {
+		t.Fatalf("failed to read package.json for idempotency check: %v", err)
+	}
 	if string(newData2) != newContent {
 		t.Errorf("patch is not idempotent")
 	}
@@ -75,7 +78,10 @@ func TestPatchPackageJSON_NoPackageManager(t *testing.T) {
 		t.Fatalf("patchPackageJSON failed: %v", err)
 	}
 
-	newData, _ := os.ReadFile(pkgPath)
+	newData, err := os.ReadFile(pkgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	newContent := string(newData)
 	if !strings.Contains(newContent, "\"onlyBuiltDependencies\"") {
 		t.Errorf("patch did not inject onlyBuiltDependencies. Content:\n%s", newContent)
@@ -148,13 +154,19 @@ func TestPatchNpmrc_Idempotent(t *testing.T) {
 		t.Fatalf("patchNpmrc failed: %v", err)
 	}
 
-	data1, _ := os.ReadFile(npmrcPath)
+	data1, err := os.ReadFile(npmrcPath)
+	if err != nil {
+		t.Fatalf("failed to read npmrc after first patch: %v", err)
+	}
 
 	if err := patchNpmrc(npmrcPath); err != nil {
 		t.Fatalf("second patch failed: %v", err)
 	}
 
-	data2, _ := os.ReadFile(npmrcPath)
+	data2, err := os.ReadFile(npmrcPath)
+	if err != nil {
+		t.Fatalf("failed to read npmrc after second patch: %v", err)
+	}
 	if string(data1) != string(data2) {
 		t.Errorf("npmrc patch is not idempotent.\nFirst:  %q\nSecond: %q", data1, data2)
 	}
