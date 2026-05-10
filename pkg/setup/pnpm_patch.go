@@ -94,5 +94,5 @@ func patchNpmrc(path string) error {
 	// Append the onlyBuiltDependencies config
 	content = strings.TrimRight(content, "\n") + "\nonlyBuiltDependencies=esbuild\n"
 
-	return os.WriteFile(path, []byte(content), 0600) // #nosec G306
+	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated by safePath; G703 false positive from taint analysis
 }
