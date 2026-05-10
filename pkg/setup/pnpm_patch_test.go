@@ -81,3 +81,81 @@ func TestPatchPackageJSON_NoPackageManager(t *testing.T) {
 		t.Errorf("patch did not inject onlyBuiltDependencies. Content:\n%s", newContent)
 	}
 }
+
+func TestPatchNpmrc_CreatesNew(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_npmrc_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	npmrcPath := filepath.Join(tmpDir, ".npmrc")
+	if err := patchNpmrc(npmrcPath); err != nil {
+		t.Fatalf("patchNpmrc failed on new file: %v", err)
+	}
+
+	data, err := os.ReadFile(npmrcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "onlyBuiltDependencies=esbuild") {
+		t.Errorf("npmrc should contain onlyBuiltDependencies=esbuild. Got:\n%s", content)
+	}
+}
+
+func TestPatchNpmrc_AppendsToExisting(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_npmrc_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	npmrcPath := filepath.Join(tmpDir, ".npmrc")
+	existing := "strict-peer-dependencies=true\n"
+	if err := os.WriteFile(npmrcPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchNpmrc(npmrcPath); err != nil {
+		t.Fatalf("patchNpmrc failed: %v", err)
+	}
+
+	data, err := os.ReadFile(npmrcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "strict-peer-dependencies=true") {
+		t.Errorf("original content should be preserved")
+	}
+	if !strings.Contains(content, "onlyBuiltDependencies=esbuild") {
+		t.Errorf("npmrc should contain onlyBuiltDependencies=esbuild. Got:\n%s", content)
+	}
+}
+
+func TestPatchNpmrc_Idempotent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_npmrc_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	npmrcPath := filepath.Join(tmpDir, ".npmrc")
+	if err := patchNpmrc(npmrcPath); err != nil {
+		t.Fatalf("patchNpmrc failed: %v", err)
+	}
+
+	data1, _ := os.ReadFile(npmrcPath)
+
+	if err := patchNpmrc(npmrcPath); err != nil {
+		t.Fatalf("second patch failed: %v", err)
+	}
+
+	data2, _ := os.ReadFile(npmrcPath)
+	if string(data1) != string(data2) {
+		t.Errorf("npmrc patch is not idempotent.\nFirst:  %q\nSecond: %q", data1, data2)
+	}
+}
