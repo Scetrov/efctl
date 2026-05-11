@@ -14,8 +14,9 @@ import (
 	"efctl/pkg/container"
 	"efctl/pkg/setup"
 	"efctl/pkg/ui"
-	"github.com/lithammer/fuzzysearch/fuzzy"
 	"regexp"
+
+	"github.com/lithammer/fuzzysearch/fuzzy"
 )
 
 // publishOutput represents the relevant parts of the JSON from `sui client publish --json`.
@@ -224,8 +225,8 @@ func isExtensionManifest(manifestPath string) (bool, error) {
 	return strings.Contains(string(manifestContent), worldDependencyMarker), nil
 }
 
-// buildPublishCmd constructs the sui publish command and, for localnet, deletes any
-// stale ephemeral publication file so that re-running is idempotent.
+// buildPublishCmd constructs the sui publish command and, for localnet, uses
+// test-publish with pubfiles so that re-running is idempotent.
 func buildPublishCmd(c container.ContainerClient, workspace, network, containerContractDir string) (string, error) {
 	switch network {
 	case "localnet":
@@ -256,7 +257,7 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 		if foundPub != "" {
 			ui.Info.Printf("Found existing world publication (%s); using it as a dependency.\n", foundPub)
 			return fmt.Sprintf(
-				"cd %s && sui client publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
+				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
 				containerContractDir, foundPub,
 			), nil
 		}
@@ -267,7 +268,7 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 			return "", fmt.Errorf("failed to remove previous publish file: %w", err)
 		}
 		return fmt.Sprintf(
-			"cd %s && sui client publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
+			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
 			containerContractDir,
 		), nil
 

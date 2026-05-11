@@ -165,11 +165,25 @@ func TestBuildPublishCmd_Localnet(t *testing.T) {
 
 	cmd, err := buildPublishCmd(nil, tmp, "localnet", "/workspace/contracts/my_ext")
 	require.NoError(t, err)
-	assert.Contains(t, cmd, "sui client publish")
+	assert.Contains(t, cmd, "sui client test-publish")
+	assert.Contains(t, cmd, "--pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml")
 	assert.Contains(t, cmd, "/workspace/contracts/my_ext")
 	// The stale file should have been removed
 	_, statErr := os.Stat(pubFile)
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestBuildPublishCmd_LocalnetWithExistingWorldPubfile(t *testing.T) {
+	tmp := t.TempDir()
+	pubDir := filepath.Join(tmp, "builder-scaffold", "deployments", "localnet")
+	require.NoError(t, os.MkdirAll(pubDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(pubDir, "Pub.localnet.toml"), []byte("world"), 0600))
+
+	cmd, err := buildPublishCmd(nil, tmp, "localnet", "/workspace/contracts/my_ext")
+	require.NoError(t, err)
+	assert.Contains(t, cmd, "sui client test-publish")
+	assert.Contains(t, cmd, "--pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.localnet.toml")
+	assert.NotContains(t, cmd, "sui client publish --pubfile-path")
 }
 
 func TestBuildPublishCmd_Testnet(t *testing.T) {

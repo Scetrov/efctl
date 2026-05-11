@@ -30,3 +30,4 @@ world-contracts/
 test-env/
 .pnpm-store/
 tmp/
+.github/context-mode/
