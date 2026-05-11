@@ -40,7 +40,7 @@ The review artifact has been written to `thoughts/shared/reviews/2026-05-11_13-3
 - Working directory has unstaged changes in `pkg/setup/pnpm_patch.go`, `pkg/setup/pnpm_patch_test.go`, `docs/pnpm_esbuild_e2e_investigation.md`, `.pi/agents/` files — these are the pnpm/esbuild rework from the previous handoff (uncommitted)
 
 ## Learnings
-1. **The pnpm/esbuild fix is uncommitted.** The diff shows `pnpm_patch.go` has been rewritten to use `pnpm-workspace.yaml` with `allowBuilds` (correct approach for pnpm v10.26+), but these changes are **not committed**. The last commit (45ea6e7) is "chore: commit interum findings". The actual pnpm fix code needs to be committed as part of the fix work.
+1. **The pnpm/esbuild fix is uncommitted.** The diff shows `pnpm_patch.go` has been rewritten to use `pnpm-workspace.yaml` with `allowBuilds` (correct approach for pnpm v10.26+), but these changes are **not committed**. The last commit (45ea6e7) is "chore: commit interim findings". The actual pnpm fix code needs to be committed as part of the fix work.
 2. **Investigation doc is thorough.** `docs/pnpm_esbuild_e2e_investigation.md` documents the full root cause (pnpm v10.26+ removed `onlyBuiltDependencies`, replaced with `allowBuilds` in `pnpm-workspace.yaml`). Step 5 section was added but marked WIP — the implementation is actually complete in the uncommitted diff.
 3. **All existing unit tests pass** (`go test ./pkg/setup/...` — 0.007s). `go vet` clean.
 4. **14 .pi/agents/*.md files**, not 16 as the handoff originally claimed. The claim-verifier corrected this.

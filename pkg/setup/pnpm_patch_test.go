@@ -228,7 +228,7 @@ func TestContainsAllowBuildsForEsbuild(t *testing.T) {
 		{
 			name:    "has allowBuilds with esbuild false",
 			content: "allowBuilds:\n  esbuild: false\n",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "has allowBuilds without esbuild",
@@ -254,6 +254,16 @@ func TestContainsAllowBuildsForEsbuild(t *testing.T) {
 			name:    "esbuild in allowBuilds with intermediate keys",
 			content: "allowBuilds:\n  electron: true\n  esbuild: true\n",
 			want:    true,
+		},
+		{
+			name:    "inline allowBuilds map with esbuild true",
+			content: "allowBuilds: { esbuild: true }\n",
+			want:    true,
+		},
+		{
+			name:    "inline allowBuilds map without esbuild",
+			content: "allowBuilds: { electron: true }\n",
+			want:    false,
 		},
 	}
 
@@ -310,6 +320,81 @@ func TestPatchPnpmWorkspaceYaml_MergesIntoExistingAllowBuilds(t *testing.T) {
 	data2, _ := os.ReadFile(yamlPath)
 	if string(data) != string(data2) {
 		t.Errorf("double-merge: patch is not idempotent.\nFirst:  %q\nSecond: %q", data, data2)
+	}
+}
+
+func TestPatchPnpmWorkspaceYaml_MergesInlineAllowBuildsMap(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_workspace_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	yamlPath := filepath.Join(tmpDir, "pnpm-workspace.yaml")
+	existing := "packages:\n  - \"packages/*\"\nallowBuilds: { electron: true }\n"
+	if err := os.WriteFile(yamlPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchPnpmWorkspaceYaml(yamlPath); err != nil {
+		t.Fatalf("patchPnpmWorkspaceYaml failed: %v", err)
+	}
+
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	if countOccurrences(content, "allowBuilds:") != 1 {
+		t.Errorf("should have exactly one allowBuilds: key. Got:\n%s", content)
+	}
+	if !strings.Contains(content, "electron: true") {
+		t.Errorf("original electron entry should be preserved. Got:\n%s", content)
+	}
+	if !strings.Contains(content, "esbuild: true") {
+		t.Errorf("should contain esbuild: true. Got:\n%s", content)
+	}
+	if strings.Count(content, "esbuild: true") != 1 {
+		t.Errorf("should contain exactly one esbuild: true entry. Got:\n%s", content)
+	}
+	if err := patchPnpmWorkspaceYaml(yamlPath); err != nil {
+		t.Fatalf("second patch failed: %v", err)
+	}
+	data2, _ := os.ReadFile(yamlPath)
+	if string(data) != string(data2) {
+		t.Errorf("inline merge is not idempotent.\nFirst:  %q\nSecond: %q", data, data2)
+	}
+}
+
+func TestPatchPnpmWorkspaceYaml_UpdatesExistingFalseValue(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_workspace_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	yamlPath := filepath.Join(tmpDir, "pnpm-workspace.yaml")
+	existing := "allowBuilds:\n  esbuild: false\n"
+	if err := os.WriteFile(yamlPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchPnpmWorkspaceYaml(yamlPath); err != nil {
+		t.Fatalf("patchPnpmWorkspaceYaml failed: %v", err)
+	}
+
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "esbuild: true") {
+		t.Errorf("should update esbuild to true. Got:\n%s", content)
+	}
+	if strings.Contains(content, "esbuild: false") {
+		t.Errorf("should not leave esbuild: false behind. Got:\n%s", content)
 	}
 }
 

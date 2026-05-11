@@ -1,7 +1,7 @@
 # PNPM ESBuild E2E Fix Hunt
 
 ## PROBLEM
-CI e2e test die. `pnpm install` fail inside container. Error:
+The CI e2e workflow fails during `pnpm install` inside the container. The install stops with the following error, which then prevents world deployment:
 ```
 [ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: esbuild@0.27.2
 Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
@@ -9,7 +9,7 @@ Deployment failed: failed to deploy world: exec error: exit status 1
 ```
 
 ## ROOT CAUSE
-pnpm 10+ got picky. Block build scripts by default. `esbuild` need native binding compile. `onlyBuiltDependencies=esbuild` in `.npmrc` not work right. `pnpm approve-builds esbuild` say "no packages awaiting approval" — pnpm think already approved or config wrong.
+pnpm 10+ blocks build scripts unless they are explicitly allowed. `esbuild` needs its build step to produce the native binary required by `pnpm deploy-world`. The older `onlyBuiltDependencies=esbuild` configuration in `.npmrc` did not take effect reliably in this environment, and `pnpm approve-builds esbuild` reported that there were no pending approvals. As a result, the install continued to skip the `esbuild` build script.
 
 ## STEPS TRIED
 

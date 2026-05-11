@@ -1,11 +1,13 @@
 package setup
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+
+	"gopkg.in/yaml.v3"
 )
 
 // patchPnpmDependencies creates pnpm-workspace.yaml in each repo directory
@@ -48,48 +50,149 @@ func patchPnpmWorkspaceYaml(path string) error {
 		return err
 	}
 
-	content := string(existing)
-	// Check if already patched
-	if containsAllowBuildsForEsbuild(content) {
+	updated, changed, err := ensureAllowBuildsEsbuild(existing)
+	if err != nil {
+		return fmt.Errorf("parse pnpm-workspace.yaml: %w", err)
+	}
+	if !changed {
 		return nil
 	}
 
-	// If there's already an allowBuilds: block without esbuild, merge it
-	if hasAllowBuildsBlock(content) {
-		content = mergeAllowBuildsEsbuild(content)
-		return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated; restricted permissions
+	return os.WriteFile(path, updated, 0600) // #nosec G306 G703 -- path validated; restricted permissions
+}
+
+func ensureAllowBuildsEsbuild(content []byte) ([]byte, bool, error) {
+	var document yaml.Node
+	if err := yaml.Unmarshal(content, &document); err != nil {
+		return nil, false, err
 	}
 
-	// Append allowBuilds section
-	content += "\nallowBuilds:\n  esbuild: true\n"
-	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated; restricted permissions
+	root, changed, err := ensureDocumentMapping(&document)
+	if err != nil {
+		return nil, false, err
+	}
+
+	allowBuildsNode, allowBuildsChanged, err := ensureMappingValue(root, "allowBuilds")
+	if err != nil {
+		return nil, false, err
+	}
+	changed = changed || allowBuildsChanged
+
+	esbuildChanged := ensureBoolMappingValue(allowBuildsNode, "esbuild", true)
+	changed = changed || esbuildChanged
+	if !changed {
+		return nil, false, nil
+	}
+
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&document); err != nil {
+		return nil, false, err
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, false, err
+	}
+
+	return buf.Bytes(), true, nil
 }
 
-// hasAllowBuildsBlock checks if content contains an allowBuilds: top-level key
-// (without esbuild: beneath it, since containsAllowBuildsForEsbuild already checked that).
-var allowBuildsBlockRe = regexp.MustCompile(`(?m)^allowBuilds:\s*$`)
+func ensureDocumentMapping(document *yaml.Node) (*yaml.Node, bool, error) {
+	if len(document.Content) == 0 {
+		document.Kind = yaml.DocumentNode
+		document.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
+		return document.Content[0], true, nil
+	}
 
-func hasAllowBuildsBlock(content string) bool {
-	return allowBuildsBlockRe.MatchString(content)
+	root := document.Content[0]
+	if root.Kind == yaml.ScalarNode && root.Tag == "!!null" {
+		document.Content[0] = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		return document.Content[0], true, nil
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil, false, fmt.Errorf("expected top-level mapping, got YAML node kind %d", root.Kind)
+	}
+
+	return root, false, nil
 }
 
-// mergeAllowBuildsEsbuild inserts "esbuild: true" at the correct indentation
-// level (2 spaces) into the first allowBuilds: block.
-func mergeAllowBuildsEsbuild(content string) string {
-	// Find the allowBuilds: line and insert esbuild right after it.
-	return allowBuildsBlockRe.ReplaceAllStringFunc(content, func(match string) string {
-		return match + "\n  esbuild: true"
-	})
+func ensureMappingValue(root *yaml.Node, key string) (*yaml.Node, bool, error) {
+	valueNode, _ := mappingValue(root, key)
+	if valueNode == nil {
+		valueNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, valueNode)
+		return valueNode, true, nil
+	}
+
+	if valueNode.Kind == yaml.ScalarNode && valueNode.Tag == "!!null" {
+		valueNode.Kind = yaml.MappingNode
+		valueNode.Tag = "!!map"
+		valueNode.Value = ""
+		return valueNode, true, nil
+	}
+	if valueNode.Kind != yaml.MappingNode {
+		return nil, false, fmt.Errorf("expected %s to be a YAML mapping, got node kind %d", key, valueNode.Kind)
+	}
+
+	return valueNode, false, nil
 }
 
-// containsAllowBuildsForEsbuild checks if the content already has
-// allowBuilds with esbuild (true or false) — used to ensure idempotency.
+func ensureBoolMappingValue(root *yaml.Node, key string, want bool) bool {
+	valueNode, _ := mappingValue(root, key)
+	wantValue := "false"
+	if want {
+		wantValue = "true"
+	}
+
+	if valueNode == nil {
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: wantValue},
+		)
+		return true
+	}
+
+	if valueNode.Kind == yaml.ScalarNode && valueNode.Tag == "!!bool" && valueNode.Value == wantValue {
+		return false
+	}
+
+	valueNode.Kind = yaml.ScalarNode
+	valueNode.Tag = "!!bool"
+	valueNode.Value = wantValue
+	valueNode.Content = nil
+	return true
+}
+
+func mappingValue(root *yaml.Node, key string) (*yaml.Node, int) {
+	for index := 0; index+1 < len(root.Content); index += 2 {
+		if root.Content[index].Value == key {
+			return root.Content[index+1], index + 1
+		}
+	}
+
+	return nil, -1
+}
+
+// containsAllowBuildsForEsbuild checks if the content already enables
+// allowBuilds.esbuild: true.
 func containsAllowBuildsForEsbuild(content string) bool {
-	// Single regex: match allowBuilds block containing an indented esbuild entry.
-	// This prevents false positives where esbuild appears as a sibling key outside
-	// the allowBuilds section.
-	pat := regexp.MustCompile(`(?m)^allowBuilds:\s*\n(\s+.*\n)*?\s+esbuild:\s+(true|false)\s*$`)
-	return pat.MatchString(content)
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return false
+	}
+
+	root, _, err := ensureDocumentMapping(&document)
+	if err != nil {
+		return false
+	}
+
+	allowBuildsNode, _ := mappingValue(root, "allowBuilds")
+	if allowBuildsNode == nil || allowBuildsNode.Kind != yaml.MappingNode {
+		return false
+	}
+
+	esbuildNode, _ := mappingValue(allowBuildsNode, "esbuild")
+	return esbuildNode != nil && esbuildNode.Kind == yaml.ScalarNode && esbuildNode.Tag == "!!bool" && esbuildNode.Value == "true"
 }
 
 // pnpmWorkspaceYamlContent returns the canonical pnpm-workspace.yaml content
