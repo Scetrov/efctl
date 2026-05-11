@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -23,12 +22,15 @@ func patchPnpmDependencies(workspace string) error {
 	repos := []string{"builder-scaffold", "world-contracts"}
 	var errs []error
 	for _, repo := range repos {
-		repoDir := filepath.Join(workspace, repo)
+		workspacePath, err := pnpmWorkspacePath(workspace, repo)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("resolve pnpm-workspace.yaml path in %s: %w", repo, err))
+			continue
+		}
 
 		// Create pnpm-workspace.yaml with allowBuilds for esbuild.
 		// This is the only supported location for build-related settings
 		// in pnpm v10.26+ (allowBuilds replaces onlyBuiltDependencies in v11).
-		workspacePath := filepath.Join(repoDir, "pnpm-workspace.yaml")
 		if err := patchPnpmWorkspaceYaml(workspacePath); err != nil {
 			errs = append(errs, fmt.Errorf("patch pnpm-workspace.yaml in %s: %w", repo, err))
 		}
@@ -36,16 +38,20 @@ func patchPnpmDependencies(workspace string) error {
 	return errors.Join(errs...)
 }
 
+func pnpmWorkspacePath(workspace, repo string) (string, error) {
+	return safePath(workspace, repo, "pnpm-workspace.yaml")
+}
+
 // patchPnpmWorkspaceYaml creates or updates pnpm-workspace.yaml with
 // allowBuilds configuration for esbuild. Idempotent — safe to re-run.
 func patchPnpmWorkspaceYaml(path string) error {
 	// Read existing content if present
-	existing, err := os.ReadFile(path) // #nosec G304 -- path is within workspace
+	existing, err := os.ReadFile(path) // #nosec G304 -- path is validated by patchPnpmDependencies or provided by a test fixture
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create new file
 			content := "allowBuilds:\n  esbuild: true\n"
-			return os.WriteFile(path, []byte(content), 0600) // #nosec G306 -- path validated; restricted permissions
+			return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path is validated by patchPnpmDependencies or provided by a test fixture; restricted permissions
 		}
 		return err
 	}
@@ -58,7 +64,7 @@ func patchPnpmWorkspaceYaml(path string) error {
 		return nil
 	}
 
-	return os.WriteFile(path, updated, 0600) // #nosec G306 G703 -- path validated; restricted permissions
+	return os.WriteFile(path, updated, 0600) // #nosec G306 G703 -- path is validated by patchPnpmDependencies or provided by a test fixture; restricted permissions
 }
 
 func ensureAllowBuildsEsbuild(content []byte) ([]byte, bool, error) {

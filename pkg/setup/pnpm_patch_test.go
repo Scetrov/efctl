@@ -182,6 +182,22 @@ func TestPatchPnpmDependencies_PropagatesErrors(t *testing.T) {
 	}
 }
 
+func TestPnpmWorkspacePath_RejectsTraversal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_workspace_path_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	_, err = pnpmWorkspacePath(tmpDir, "../escape")
+	if err == nil {
+		t.Fatal("expected traversal to be rejected")
+	}
+	if !strings.Contains(err.Error(), "escapes base directory") {
+		t.Fatalf("expected escape error, got: %v", err)
+	}
+}
+
 func TestPatchPnpmWorkspaceYaml_DetectsExistingAllowBuilds(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "pnpm_workspace_test")
 	if err != nil {
