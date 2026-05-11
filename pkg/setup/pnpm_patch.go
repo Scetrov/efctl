@@ -1,98 +1,80 @@
 package setup
 
 import (
-	"log"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 )
 
-// patchPnpmDependencies injects pnpm configuration into package.json files
-// and .npmrc to allow esbuild build scripts, avoiding pnpm warnings during
-// install. Writing to both package.json and .npmrc ensures pnpm 10+ with
-// corepack picks up the config regardless of which resolution path is used.
-func patchPnpmDependencies(workspace string) {
+// patchPnpmDependencies creates pnpm-workspace.yaml in each repo directory
+// to allow esbuild build scripts. Since pnpm v10.26+, onlyBuiltDependencies
+// was replaced by allowBuilds in pnpm-workspace.yaml. The .npmrc file only
+// reads auth/registry settings and is ignored for build-related configs.
+//
+// pnpm-workspace.yaml format (valid for pnpm v10.26+ and v11+):
+//
+//	allowBuilds:
+//	  esbuild: true
+func patchPnpmDependencies(workspace string) error {
 	repos := []string{"builder-scaffold", "world-contracts"}
+	var errs []error
 	for _, repo := range repos {
 		repoDir := filepath.Join(workspace, repo)
 
-		// Patch package.json
-		pkgPath := filepath.Join(repoDir, "package.json")
-		if err := patchPackageJSON(pkgPath); err != nil {
-			log.Printf("pnpm_patch: failed to patch %s: %v", pkgPath, err)
-		}
-
-		// Also patch .npmrc for pnpm 10+ corepack compatibility.
-		// This is the most reliable way to configure onlyBuiltDependencies
-		// because .npmrc is always read regardless of packageManager field.
-		npmrcPath := filepath.Join(repoDir, ".npmrc")
-		if err := patchNpmrc(npmrcPath); err != nil {
-			log.Printf("pnpm_patch: failed to patch %s: %v", npmrcPath, err)
+		// Create pnpm-workspace.yaml with allowBuilds for esbuild.
+		// This is the only supported location for build-related settings
+		// in pnpm v10.26+ (allowBuilds replaces onlyBuiltDependencies in v11).
+		workspacePath := filepath.Join(repoDir, "pnpm-workspace.yaml")
+		if err := patchPnpmWorkspaceYaml(workspacePath); err != nil {
+			errs = append(errs, fmt.Errorf("patch pnpm-workspace.yaml in %s: %w", repo, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
-func patchPackageJSON(path string) error {
-	data, err := os.ReadFile(path) // #nosec G304 -- path is validated to be within workspace
+// patchPnpmWorkspaceYaml creates or updates pnpm-workspace.yaml with
+// allowBuilds configuration for esbuild. Idempotent — safe to re-run.
+func patchPnpmWorkspaceYaml(path string) error {
+	// Read existing content if present
+	existing, err := os.ReadFile(path) // #nosec G304 -- path is within workspace
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			// Create new file
+			content := "allowBuilds:\n  esbuild: true\n"
+			return os.WriteFile(path, []byte(content), 0600) // #nosec G306 -- path validated; restricted permissions
 		}
 		return err
 	}
 
-	content := string(data)
-	if strings.Contains(content, "\"onlyBuiltDependencies\"") && strings.Contains(content, "\"esbuild\"") {
+	content := string(existing)
+	// Check if already patched
+	if containsAllowBuildsForEsbuild(content) {
 		return nil
 	}
 
-	pnpmBlock := `  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },`
-
-	// Try to inject after packageManager or before scripts
-	if strings.Contains(content, "\"packageManager\":") {
-		lines := strings.Split(content, "\n")
-		for i, line := range lines {
-			if strings.Contains(line, "\"packageManager\":") {
-				lines[i] = line + "\n" + pnpmBlock
-				break
-			}
-		}
-		content = strings.Join(lines, "\n")
-	} else if strings.Contains(content, "\"scripts\": {") {
-		content = strings.Replace(content, "\"scripts\": {", pnpmBlock+"\n  \"scripts\": {", 1)
-	} else {
-		// Fallback: inject after the first opening brace
-		content = strings.Replace(content, "{", "{\n"+pnpmBlock, 1)
-	}
-
-	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- restricted permissions and path is within workspace
+	// Append allowBuilds section (idempotent merge)
+	content += "\nallowBuilds:\n  esbuild: true\n"
+	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated; restricted permissions
 }
 
-// patchNpmrc injects pnpm configuration into .npmrc files
-// to allow esbuild build scripts. This complements the package.json patch
-// and is the most reliable method for pnpm 10+ with corepack.
-func patchNpmrc(path string) error {
-	data, err := os.ReadFile(path) // #nosec G304 -- path is validated to be within workspace
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Create .npmrc if it doesn't exist
-			content := "onlyBuiltDependencies=esbuild\n"
-			return os.WriteFile(path, []byte(content), 0600) // #nosec G306 -- path validated by safePath; write with restrictive permissions
-		}
-		return err
-	}
+// containsAllowBuildsForEsbuild checks if the content already has
+// allowBuilds with esbuild (true or false) — used to ensure idempotency.
+func containsAllowBuildsForEsbuild(content string) bool {
+	// Single regex: match allowBuilds block containing an indented esbuild entry.
+	// This prevents false positives where esbuild appears as a sibling key outside
+	// the allowBuilds section.
+	pat := regexp.MustCompile(`(?m)^allowBuilds:\s*\n(\s+.*\n)*?\s+esbuild:\s+(true|false)\s*$`)
+	return pat.MatchString(content)
+}
 
-	content := string(data)
-	if strings.Contains(content, "onlyBuiltDependencies=esbuild") {
-		return nil
-	}
+// pnpmWorkspaceYamlContent returns the canonical pnpm-workspace.yaml content
+// for allowing esbuild build scripts. Used by tests.
+const pnpmWorkspaceYamlContent = "allowBuilds:\n  esbuild: true\n"
 
-	// Append the onlyBuiltDependencies config (handle both LF and CRLF line endings)
-	content = strings.TrimRight(strings.TrimRight(content, "\n"), "\r") + "\nonlyBuiltDependencies=esbuild\n"
-
-	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated by safePath; G703 false positive from taint analysis
+// pnpmWorkspaceYamlRelPath returns the relative path to pnpm-workspace.yaml
+// within a repo directory. Used by tests.
+func pnpmWorkspaceYamlRelPath() string {
+	return "pnpm-workspace.yaml"
 }

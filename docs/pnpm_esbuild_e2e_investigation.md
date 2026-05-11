@@ -13,6 +13,10 @@ pnpm 10+ got picky. Block build scripts by default. `esbuild` need native bindin
 
 ## STEPS TRIED
 
+### Step 5: pnpm-workspace.yaml with allowBuilds (WIP)
+Create `pnpm-workspace.yaml` with `allowBuilds: { esbuild: true }` in each repo.
+**Result:** Not yet deployed — this is the fix being implemented now.
+
 ### Step 1: .npmrc patch (commit c5963f2)
 Add `onlyBuiltDependencies=esbuild` to `.npmrc` in `world-contracts` and `builder-scaffold`.
 Also add `"onlyBuiltDependencies": ["esbuild"]` to `package.json` pnpm block.
@@ -111,6 +115,48 @@ Output:
 - CI status: e2e-tests FAILING, all other checks PASSING
 - Unit tests: PASSING
 - gosec: PASSING
+
+## ROOT CAUSE DISCOVERED (Step 5)
+
+### The pnpm 11 Breaking Change
+
+The container runs **pnpm v11** (or at least v10.26+). In pnpm v10.26-v11:
+
+1. **`.npmrc` ONLY reads auth and registry settings** — build-related settings like `onlyBuiltDependencies` are completely ignored
+2. **`package.json`'s `pnpm` field is ignored** — `pnpm.onlyBuiltDependencies` does not work
+3. **`onlyBuiltDependencies` was REMOVED** — replaced by `allowBuilds` in `pnpm-workspace.yaml`
+
+### Why Previous Patches Failed
+
+| Patch | File | Why It Failed |
+|-------|------|---------------|
+| Step 1 | `.npmrc` with `onlyBuiltDependencies=esbuild` | `.npmrc` ignored for non-auth settings |
+| Step 1 | `package.json` with `pnpm.onlyBuiltDependencies` | `pnpm` field ignored in v11 |
+| Step 2 | `pnpm approve-builds esbuild` | Says "no packages awaiting" because pnpm cached the decision to block |
+
+### The Correct Fix
+
+Create `pnpm-workspace.yaml` with `allowBuilds`:
+
+```yaml
+allowBuilds:
+  esbuild: true
+```
+
+This is the ONLY supported location for build-related settings in pnpm v10.26+ / v11+.
+
+The `allowBuilds` setting was added in pnpm v10.26.0 and replaces all deprecated settings:
+- `onlyBuiltDependencies` → `allowBuilds: { esbuild: true }`
+- `neverBuiltDependencies` → `allowBuilds: { pkg: false }`
+- `ignoredBuiltDependencies` → `allowBuilds: { esbuild: false }`
+
+### Implementation
+
+- `patchPnpmDependencies()` now creates `pnpm-workspace.yaml` in both `builder-scaffold/` and `world-contracts/`
+- Removed old `patchPackageJSON()` and `patchNpmrc()` functions (they don't work in pnpm 11)
+- `CmdDeployWorld` unchanged (no `pnpm approve-builds` needed — `allowBuilds` pre-approves)
+- All unit tests pass
+- gosec clean (added G703 to #nosec for taint analysis)
 
 ## NOTES
 - Copilot 4 review comments fixed

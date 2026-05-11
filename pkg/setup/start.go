@@ -40,8 +40,10 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	dockerDir := filepath.Join(workspace, "builder-scaffold", "docker")
 	ctx := context.Background()
 
-	// Patch package.json files to allow esbuild scripts.
-	patchPnpmDependencies(workspace)
+	// Patch pnpm-workspace.yaml files to allow esbuild build scripts.
+	if err := patchPnpmDependencies(workspace); err != nil {
+		return fmt.Errorf("patch pnpm dependencies: %w", err)
+	}
 
 	// Patch Dockerfile and entrypoint.sh from the upstream clone.
 	if err := prepareDockerEnvironment(dockerDir, c.GetEngine(), withGraphql, withFrontend); err != nil {
