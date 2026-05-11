@@ -165,7 +165,7 @@ func TestBuildPublishCmd_Localnet(t *testing.T) {
 
 	cmd, err := buildPublishCmd(nil, tmp, "localnet", "/workspace/contracts/my_ext")
 	require.NoError(t, err)
-	assert.Contains(t, cmd, "test-publish")
+	assert.Contains(t, cmd, "sui client publish")
 	assert.Contains(t, cmd, "/workspace/contracts/my_ext")
 	// The stale file should have been removed
 	_, statErr := os.Stat(pubFile)

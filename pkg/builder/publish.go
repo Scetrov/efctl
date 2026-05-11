@@ -256,7 +256,7 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 		if foundPub != "" {
 			ui.Info.Printf("Found existing world publication (%s); using it as a dependency.\n", foundPub)
 			return fmt.Sprintf(
-				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
+				"cd %s && sui client publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
 				containerContractDir, foundPub,
 			), nil
 		}
@@ -267,7 +267,7 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 			return "", fmt.Errorf("failed to remove previous publish file: %w", err)
 		}
 		return fmt.Sprintf(
-			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
+			"cd %s && sui client publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
 			containerContractDir,
 		), nil
 
