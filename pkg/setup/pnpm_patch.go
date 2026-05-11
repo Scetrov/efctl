@@ -54,9 +54,32 @@ func patchPnpmWorkspaceYaml(path string) error {
 		return nil
 	}
 
-	// Append allowBuilds section (idempotent merge)
+	// If there's already an allowBuilds: block without esbuild, merge it
+	if hasAllowBuildsBlock(content) {
+		content = mergeAllowBuildsEsbuild(content)
+		return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated; restricted permissions
+	}
+
+	// Append allowBuilds section
 	content += "\nallowBuilds:\n  esbuild: true\n"
 	return os.WriteFile(path, []byte(content), 0600) // #nosec G306 G703 -- path validated; restricted permissions
+}
+
+// hasAllowBuildsBlock checks if content contains an allowBuilds: top-level key
+// (without esbuild: beneath it, since containsAllowBuildsForEsbuild already checked that).
+var allowBuildsBlockRe = regexp.MustCompile(`(?m)^allowBuilds:\s*$`)
+
+func hasAllowBuildsBlock(content string) bool {
+	return allowBuildsBlockRe.MatchString(content)
+}
+
+// mergeAllowBuildsEsbuild inserts "esbuild: true" at the correct indentation
+// level (2 spaces) into the first allowBuilds: block.
+func mergeAllowBuildsEsbuild(content string) string {
+	// Find the allowBuilds: line and insert esbuild right after it.
+	return allowBuildsBlockRe.ReplaceAllStringFunc(content, func(match string) string {
+		return match + "\n  esbuild: true"
+	})
 }
 
 // containsAllowBuildsForEsbuild checks if the content already has

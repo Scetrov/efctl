@@ -266,3 +266,63 @@ func TestContainsAllowBuildsForEsbuild(t *testing.T) {
 		})
 	}
 }
+
+func TestPatchPnpmWorkspaceYaml_MergesIntoExistingAllowBuilds(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pnpm_workspace_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	yamlPath := filepath.Join(tmpDir, "pnpm-workspace.yaml")
+	// Pre-create with allowBuilds for electron but NOT esbuild.
+	existing := "packages:\n  - \"packages/*\"\nallowBuilds:\n  electron: true\n"
+	if err := os.WriteFile(yamlPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchPnpmWorkspaceYaml(yamlPath); err != nil {
+		t.Fatalf("patchPnpmWorkspaceYaml failed: %v", err)
+	}
+
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	// Should have exactly ONE allowBuilds: key.
+	if countOccurrences(content, "allowBuilds:") != 1 {
+		t.Errorf("should have exactly one allowBuilds: key. Got:\n%s", content)
+	}
+	if !strings.Contains(content, "electron: true") {
+		t.Errorf("original electron: true should be preserved. Got:\n%s", content)
+	}
+	if !strings.Contains(content, "esbuild: true") {
+		t.Errorf("should contain esbuild: true. Got:\n%s", content)
+	}
+
+	// Idempotency check: patching again should not duplicate esbuild entry.
+	if err := patchPnpmWorkspaceYaml(yamlPath); err != nil {
+		t.Fatalf("second patch failed: %v", err)
+	}
+
+	data2, _ := os.ReadFile(yamlPath)
+	if string(data) != string(data2) {
+		t.Errorf("double-merge: patch is not idempotent.\nFirst:  %q\nSecond: %q", data, data2)
+	}
+}
+
+func countOccurrences(content, substr string) int {
+	count := 0
+	idx := 0
+	for {
+		pos := strings.Index(content[idx:], substr)
+		if pos == -1 {
+			break
+		}
+		idx += pos + len(substr)
+		count++
+	}
+	return count
+}

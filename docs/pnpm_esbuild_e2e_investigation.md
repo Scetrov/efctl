@@ -13,9 +13,9 @@ pnpm 10+ got picky. Block build scripts by default. `esbuild` need native bindin
 
 ## STEPS TRIED
 
-### Step 5: pnpm-workspace.yaml with allowBuilds (WIP)
+### Step 5: pnpm-workspace.yaml with allowBuilds (implemented)
 Create `pnpm-workspace.yaml` with `allowBuilds: { esbuild: true }` in each repo.
-**Result:** Not yet deployed — this is the fix being implemented now.
+**Result:** Implemented and pending CI confirmation. The implementation handles both new file creation and merging into existing `allowBuilds:` blocks to avoid duplicate YAML keys.
 
 ### Step 1: .npmrc patch (commit c5963f2)
 Add `onlyBuiltDependencies=esbuild` to `.npmrc` in `world-contracts` and `builder-scaffold`.
