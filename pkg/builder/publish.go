@@ -14,6 +14,7 @@ import (
 	"efctl/pkg/container"
 	"efctl/pkg/setup"
 	"efctl/pkg/ui"
+
 	"github.com/lithammer/fuzzysearch/fuzzy"
 	"regexp"
 )
@@ -75,7 +76,7 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 
 	ui.Info.Printf("Executing publish inside container at %s...\n", candidate.ContainerPath)
 
-	publishCmd, err := buildPublishCmd(c, workspace, network, candidate.ContainerPath)
+	publishCmd, pubfilePath, err := buildPublishCmd(c, workspace, network, candidate.ContainerPath)
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func PublishExtension(c container.ContainerClient, workspace string, network str
 		return fmt.Errorf("publish command failed: %w", err)
 	}
 
-	return writePublishedIDs(workspace, output)
+	return writePublishedIDs(workspace, output, pubfilePath)
 }
 
 func resolvePublishContractDir(workspace string) (PublishCandidate, error) {
@@ -224,9 +225,9 @@ func isExtensionManifest(manifestPath string) (bool, error) {
 	return strings.Contains(string(manifestContent), worldDependencyMarker), nil
 }
 
-// buildPublishCmd constructs the sui publish command and, for localnet, deletes any
-// stale ephemeral publication file so that re-running is idempotent.
-func buildPublishCmd(c container.ContainerClient, workspace, network, containerContractDir string) (string, error) {
+// buildPublishCmd constructs the sui publish command and, for localnet, returns
+// the pubfile updated by test-publish so IDs can be recovered from it when needed.
+func buildPublishCmd(c container.ContainerClient, workspace, network, containerContractDir string) (string, string, error) {
 	switch network {
 	case "localnet":
 		// Check if we have an existing world publication file to use as a dependency.
@@ -254,40 +255,51 @@ func buildPublishCmd(c container.ContainerClient, workspace, network, containerC
 		}
 
 		if foundPub != "" {
-			ui.Info.Printf("Found existing world publication (%s); using it as a dependency.\n", foundPub)
+			pubFile := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.extension.toml")
+			if err := copyFile(foundPath, pubFile); err != nil {
+				return "", "", fmt.Errorf("failed to seed extension pubfile from %s: %w", foundPub, err)
+			}
 			return fmt.Sprintf(
-				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/%s --build-env testnet --json",
-				containerContractDir, foundPub,
-			), nil
+				"cd %s && sui client test-publish --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --build-env testnet --json",
+				containerContractDir,
+			), pubFile, nil
 		}
 
 		// Fallback to full publish if no existing world publication is found
 		pubFile := filepath.Join(workspace, "builder-scaffold", "deployments", network, "Pub.extension.toml")
 		if err := os.Remove(pubFile); err != nil && !os.IsNotExist(err) {
-			return "", fmt.Errorf("failed to remove previous publish file: %w", err)
+			return "", "", fmt.Errorf("failed to remove previous publish file: %w", err)
 		}
 		return fmt.Sprintf(
 			"cd %s && sui client test-publish --with-unpublished-dependencies --build-env testnet --pubfile-path /workspace/builder-scaffold/deployments/localnet/Pub.extension.toml --json",
 			containerContractDir,
-		), nil
+		), pubFile, nil
 
 	case "testnet":
 		return fmt.Sprintf(
 			"cd %s && sui client publish --with-unpublished-dependencies --build-env testnet --json",
 			containerContractDir,
-		), nil
+		), "", nil
 
 	default:
-		return "", fmt.Errorf("unsupported network %s", network)
+		return "", "", fmt.Errorf("unsupported network %s", network)
 	}
 }
 
 // writePublishedIDs parses the publish command JSON output and writes the discovered
 // package and config IDs into builder-scaffold/.env.
-func writePublishedIDs(workspace, output string) error {
+func writePublishedIDs(workspace, output, pubfilePath string) error {
 	builderPackageID, extensionConfigID, parseErr := extractPublishIDs(output)
 	if parseErr != nil {
 		ui.Warn.Printf("Could not parse publish output as JSON: %v\n", parseErr)
+	}
+	if builderPackageID == "" && pubfilePath != "" {
+		pubfilePackageID, err := getLastPublishedAt(pubfilePath)
+		if err != nil {
+			ui.Warn.Printf("Could not extract BUILDER_PACKAGE_ID from %s: %v\n", pubfilePath, err)
+		} else {
+			builderPackageID = pubfilePackageID
+		}
 	}
 
 	if builderPackageID == "" {
@@ -504,6 +516,23 @@ func repairEnvironmentIfMismatched(c container.ContainerClient, workspace, netwo
 	}
 
 	return nil
+}
+
+func getLastPublishedAt(pubfilePath string) (string, error) {
+	content, err := os.ReadFile(pubfilePath) // #nosec G304 -- path is constructed in caller from workspace-local paths
+	if err != nil {
+		return "", err
+	}
+	re := regexp.MustCompile(`published-at\s*=\s*"([^"]+)"`)
+	matches := re.FindAllStringSubmatch(string(content), -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("published-at not found in %s", pubfilePath)
+	}
+	last := matches[len(matches)-1]
+	if len(last) < 2 || last[1] == "" {
+		return "", fmt.Errorf("published-at not found in %s", pubfilePath)
+	}
+	return last[1], nil
 }
 
 func getPubfileChainID(pubfilePath string) (string, error) {
