@@ -108,13 +108,13 @@ Output:
 - Verification steps
 ```
 
-## CURRENT STATE
-- Branch: `chore/bump-codeql-and-crypto`
-- Last commit: `8cf75b5` — Copilot fixes (CRLF, #nosec, test errors)
-- `CmdDeployWorld` currently: `pnpm install --prefer-offline && pnpm deploy-world`
-- CI status: e2e-tests FAILING, all other checks PASSING
-- Unit tests: PASSING
-- gosec: PASSING
+## STATE AT TIME OF INVESTIGATION
+- Investigated on branch: `chore/bump-codeql-and-crypto`
+- Repo snapshot examined: `8cf75b5` — Copilot fixes (CRLF, #nosec, test errors)
+- `CmdDeployWorld` in that snapshot: `pnpm install --prefer-offline && pnpm deploy-world`
+- CI status observed then: e2e-tests FAILING, all other checks PASSING
+- Unit tests observed then: PASSING
+- gosec observed then: PASSING
 
 ## ROOT CAUSE DISCOVERED (Step 5)
 
@@ -163,4 +163,4 @@ The `allowBuilds` setting was added in pnpm v10.26.0 and replaces all deprecated
 - CRLF fix good for cross-platform
 - #nosec G304→G306 fix correct
 - Test error handling fixes good
-- Nothing about pnpm/esbuild yet
+- pnpm/esbuild investigation and implemented `allowBuilds` approach documented above

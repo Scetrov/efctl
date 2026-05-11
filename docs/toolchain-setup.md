@@ -49,31 +49,34 @@ Added `.nvmrc` file to specify Node.js version requirement:
 
 ### Key Changes Made
 
-1. **Container Image**: Uses `docker.io/library/node:24-slim` ensuring consistent Node.js version
-2. **Configuration**: Dynamically adds engine specifications and allows builds in cloned repositories on demand
-3. **Backwards Compatibility**: Safe to run multiple times (idempotent)
-4. **Security**: All file operations use validated and sanitized paths
+1. **Frontend Container Image**: The frontend container uses `docker.io/library/node:24-slim`, ensuring a consistent Node.js version for frontend-specific tasks
+2. **Main Dev Container**: The primary `sui-dev` environment is built from `builder-scaffold/docker/Dockerfile` (`ImageSuiDev`), not from `docker.io/library/node:24-slim`
+3. **Configuration**: Dynamically adds engine specifications and allows builds in cloned repositories on demand
+4. **Backwards Compatibility**: Safe to run multiple times (idempotent)
+5. **Security**: All file operations use validated and sanitized paths
 
 ### Technical Details
 
 - **Root Cause**: In pnpm v10.26+, `.npmrc` only handles auth and registry settings; build-related configs must be in `pnpm-workspace.yaml`
 - **Old Approach**: `.npmrc` with `onlyBuiltDependencies` (deprecated)
-- **New Approach**: `pnpm-workspace.yaml` with `allowBuilds: { esbuild: true }` 
-- **Node Version**: Locked to Node.js 24 (matches container image version)
+- **New Approach**: `pnpm-workspace.yaml` with `allowBuilds: { esbuild: true }`
+- **Node Version**: Locked to Node.js 24 for local tooling and for the frontend `node:24-slim` container; the main `sui-dev` container is built separately from `builder-scaffold/docker/Dockerfile`
 
 ### Integration Point
 
 The configuration is automatically applied in `pkg/setup/pnpm_patch.go` via the `patchPnpmDependencies()` function, which:
 1. Creates/updates `pnpm-workspace.yaml` in both repositories
-2. Updates `package.json` in both repositories to specify required engine versions  
+2. Updates `package.json` in both repositories to specify required engine versions
 3. Handles idempotency and safely manages missing files
 
 ### Version Alignment
 
-- **Container Runtime**: Node.js 24-slim Docker image
-- **Developers Local**: Managed by .nvmrc to use Node.js 24
+- **Frontend Container Runtime**: `docker.io/library/node:24-slim`
+- **Main Dev Container Runtime**: `sui-dev`, built from `builder-scaffold/docker/Dockerfile` (`ImageSuiDev`)
+- **world-contracts / pnpm install execution**: Runs in the main `sui-dev` environment, so it should not be assumed to run inside the frontend `node:24-slim` container
+- **Developers Local**: Managed by `.nvmrc` to use Node.js 24
 - **package.json**: Specifies `>=24.0.0` requirement
-- **pnpm Version**: `>=9.0.0` to align with container ecosystem
+- **pnpm Version**: `>=9.0.0` to align with the supported toolchain
 
 ## Testing
 
