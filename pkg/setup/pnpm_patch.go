@@ -2,9 +2,11 @@ package setup
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +15,7 @@ import (
 // to allow esbuild build scripts. Since pnpm v10.26+, onlyBuiltDependencies
 // was replaced by allowBuilds in pnpm-workspace.yaml. The .npmrc file only
 // reads auth/registry settings and is ignored for build-related configs.
+// Also configures Node.js engines in package.json
 //
 // pnpm-workspace.yaml format (valid for pnpm v10.26+ and v11+):
 //
@@ -33,6 +36,15 @@ func patchPnpmDependencies(workspace string) error {
 		// in pnpm v10.26+ (allowBuilds replaces onlyBuiltDependencies in v11).
 		if err := patchPnpmWorkspaceYaml(workspacePath); err != nil {
 			errs = append(errs, fmt.Errorf("patch pnpm-workspace.yaml in %s: %w", repo, err))
+		}
+
+		// Update package.json engines configuration in repo
+		packageJsonPath := filepath.Join(workspace, repo, "package.json")
+		if err := patchEnginesInPackageJSON(packageJsonPath); err != nil {
+			// Don't fail if package.json doesn't exist, might be added later or in different branch
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("patch package.json engines in %s: %w", repo, err))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -199,4 +211,43 @@ func containsAllowBuildsForEsbuild(content string) bool {
 
 	esbuildNode, _ := mappingValue(allowBuildsNode, "esbuild")
 	return esbuildNode != nil && esbuildNode.Kind == yaml.ScalarNode && esbuildNode.Tag == "!!bool" && esbuildNode.Value == "true"
+}
+
+// patchEnginesInPackageJSON adds or updates engines.node specification in package.json
+// This ensures consistent Node.js versions across environments
+func patchEnginesInPackageJSON(path string) error {
+	content, err := os.ReadFile(path) // #nosec G304
+	if err != nil {
+		return err
+	}
+
+	var packageJSON map[string]interface{}
+	if err := json.Unmarshal(content, &packageJSON); err != nil {
+		return fmt.Errorf("invalid JSON in package.json: %w", err)
+	}
+
+	// Update or create engines configuration
+	engines, ok := packageJSON["engines"]
+	if !ok {
+		engines = make(map[string]interface{})
+		packageJSON["engines"] = engines
+	}
+
+	enginesMap, ok := engines.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("engines field is not an object")
+	}
+
+	// Set Node.js version to match the container image
+	enginesMap["node"] = ">=24.0.0"
+	enginesMap["pnpm"] = ">=9.0.0"
+
+	// Re-marshal and write back
+	updated, err := json.MarshalIndent(packageJSON, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated package.json: %w", err)
+	}
+	updated = append(updated, byte('\n'))
+
+	return os.WriteFile(path, updated, 0600) // #nosec G306
 }
