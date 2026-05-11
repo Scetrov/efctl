@@ -200,13 +200,3 @@ func containsAllowBuildsForEsbuild(content string) bool {
 	esbuildNode, _ := mappingValue(allowBuildsNode, "esbuild")
 	return esbuildNode != nil && esbuildNode.Kind == yaml.ScalarNode && esbuildNode.Tag == "!!bool" && esbuildNode.Value == "true"
 }
-
-// pnpmWorkspaceYamlContent returns the canonical pnpm-workspace.yaml content
-// for allowing esbuild build scripts. Used by tests.
-const pnpmWorkspaceYamlContent = "allowBuilds:\n  esbuild: true\n"
-
-// pnpmWorkspaceYamlRelPath returns the relative path to pnpm-workspace.yaml
-// within a repo directory. Used by tests.
-func pnpmWorkspaceYamlRelPath() string {
-	return "pnpm-workspace.yaml"
-}

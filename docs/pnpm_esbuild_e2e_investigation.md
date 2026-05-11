@@ -20,34 +20,34 @@ Create `pnpm-workspace.yaml` with `allowBuilds: { esbuild: true }` in each repo.
 ### Step 1: .npmrc patch (commit c5963f2)
 Add `onlyBuiltDependencies=esbuild` to `.npmrc` in `world-contracts` and `builder-scaffold`.
 Also add `"onlyBuiltDependencies": ["esbuild"]` to `package.json` pnpm block.
-**Result:** CI still fail. pnpm 10 still block esbuild build scripts.
+**Result:** CI still failed. pnpm 10 still blocked the `esbuild` build script.
 
 ### Step 2: pnpm approve-builds (commit e4ea805)
 Change `CmdDeployWorld` to:
 ```
 pnpm approve-builds esbuild && pnpm install && pnpm deploy-world
 ```
-**Result:** CI still fail. Log show "There are no packages awaiting approval" — pnpm not work right. Config in `.npmrc` and `package.json` not enough for pnpm 10.
+**Result:** CI still failed. The logs showed "There are no packages awaiting approval," so pnpm did not treat the configuration in `.npmrc` or `package.json` as a pending approval in pnpm 10.
 
 ### Step 3: pnpm install || true
 Try skip error with `|| true`.
-**Result:** Bad idea. esbuild native binding not build. `pnpm deploy-world` still fail — need esbuild binary.
+**Result:** This was a bad idea. The `esbuild` native binding was still not built, so `pnpm deploy-world` failed later because the binary was missing.
 
 ### Step 4: Copilot review fixes (commit 8cf75b5)
 - Fix CRLF handling in `patchNpmrc` — trim `\r` too
 - Fix wrong `#nosec G304` (should be `G306` for write)
 - Fix test error handling in `TestPatchPackageJSON`, `TestPatchNpmrc_Idempotent`
-**Result:** Unit test pass. gosec clean. But e2e still die.
+**Result:** Unit tests passed and `gosec` was clean, but the e2e flow still failed.
 
 ## WHAT WE KNOW
-1. Container run `pnpm install` — esbuild build script block by pnpm 10
-2. `.npmrc` with `onlyBuiltDependencies=esbuild` not work as expected
-3. `package.json` pnpm block not work either
-4. `pnpm approve-builds esbuild` not work — pnpm say nothing to approve
-5. esbuild native binding MUST compile for `pnpm deploy-world` to work
-6. `pnpm install || true` bad — esbuild not build, deploy fail later
-7. Docker image has pnpm 10+ with corepack
-8. Node.js v20.20.2 in container (warn about version drift)
+1. The container runs `pnpm install`, and pnpm 10 blocks the `esbuild` build script.
+2. `.npmrc` with `onlyBuiltDependencies=esbuild` does not work as expected.
+3. The `package.json` pnpm block does not work either.
+4. `pnpm approve-builds esbuild` does not work; pnpm reports that there is nothing to approve.
+5. The `esbuild` native binding must be built for `pnpm deploy-world` to work.
+6. `pnpm install || true` is not a valid workaround; `esbuild` remains unbuilt and deployment still fails later.
+7. The Docker image uses pnpm 10+ with Corepack.
+8. The container uses Node.js v20.20.2, and the logs warn about version drift.
 
 ## INVESTIGATION PROMPT FOR NEXT AGENT
 
