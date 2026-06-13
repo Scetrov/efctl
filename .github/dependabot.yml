@@ -1,18 +1,22 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
+  - package-ecosystem: "gomod"
+    directory: "/"
     schedule:
-      interval: daily
+      interval: "weekly"
+    cooldown:
+      default-days: 5
     groups:
       all-go-deps:
         patterns:
           - "*"
 
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    cooldown:
+      default-days: 5
     groups:
       all-actions:
         patterns:
