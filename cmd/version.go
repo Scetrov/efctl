@@ -9,7 +9,7 @@ import (
 
 // Set via -ldflags at build time
 var (
-	Version   = "dev"
+	Version   = "v0.3.2"
 	CommitSHA = "unknown"
 	BuildDate = "unknown"
 )

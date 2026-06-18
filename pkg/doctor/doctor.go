@@ -13,6 +13,7 @@ import (
 	"efctl/pkg/config"
 	"efctl/pkg/container"
 	"efctl/pkg/env"
+	"efctl/pkg/sui"
 )
 
 // ── Public types ───────────────────────────────────────────────────
@@ -565,6 +566,11 @@ func gatherSuiClient() SuiClientInfo {
 		return info
 	}
 	info.Found = true
+
+	if !sui.SuiConfigExists() {
+		info.ActiveEnv = "not configured"
+		return info
+	}
 
 	// Gather active environment
 	if out, err := exec.Command("sui", "client", "active-env").Output(); err == nil {

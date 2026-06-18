@@ -60,6 +60,22 @@ var adminKeyRegex = regexp.MustCompile(`^ADMIN_PRIVATE_KEY=(suiprivkey[a-z0-9]+)
 var playerAKeyRegex = regexp.MustCompile(`^PLAYER_A_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
 var playerBKeyRegex = regexp.MustCompile(`^PLAYER_B_PRIVATE_KEY=(suiprivkey[a-z0-9]+)`)
 
+// SuiConfigPath returns the default sui client config path,
+// resolved relative to the current user's home directory.
+func SuiConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".sui", "sui_config", "client.yaml")
+}
+
+// SuiConfigExists reports whether the default sui client config file exists.
+func SuiConfigExists() bool {
+	_, err := os.Stat(SuiConfigPath())
+	return err == nil
+}
+
 func IsSuiUpInstalled() bool {
 	_, err := exec.LookPath("suiup")
 	return err == nil

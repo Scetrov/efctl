@@ -211,7 +211,7 @@ func CheckoutRef(repoPath string, ref string) error {
 		autocrlf = "true"
 	}
 	cmdConfig := exec.Command("git", "-C", repoPath, "config", "core.autocrlf", autocrlf) // #nosec G204 -- "git" is a hardcoded binary; autocrlf is "true" or "false" only
-	cmdConfig.Run()
+	cmdConfig.Run()                                                                       // #nosec G104 -- config errors are non-fatal
 
 	cmd := exec.Command("git", "-C", repoPath, "checkout", ref) // #nosec G204 -- "git" is a hardcoded binary; ref comes from validated config
 	output, err := cmd.CombinedOutput()
@@ -227,7 +227,7 @@ func CheckoutRef(repoPath string, ref string) error {
 	if !isCommit {
 		cmd = exec.Command("git", "-C", repoPath, "pull", "origin", ref) // #nosec G204 -- "git" is a hardcoded binary; ref comes from validated config
 		// We ignore pull errors since the ref might be local-only or already up-to-date
-		cmd.Run()
+		cmd.Run() // #nosec G104 -- pull errors intentionally ignored
 	}
 
 	spinner.Success(fmt.Sprintf("Checked out ref '%s' in %s", ref, repoPath))
