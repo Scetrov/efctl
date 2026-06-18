@@ -10,6 +10,8 @@ import (
 
 	"efctl/pkg/config"
 	"efctl/pkg/env"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGatherSystem_NonEmpty(t *testing.T) {
@@ -243,6 +245,79 @@ func TestParseContainerVersion(t *testing.T) {
 			t.Errorf("parseContainerVersion(%q, %q) = %q, want %q", c.engine, c.raw, got, c.want)
 		}
 	}
+}
+
+func TestGatherSuiClient_SkipsCommandsWhenConfigMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	counter := filepath.Join(home, "sui_calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> ` + counter + `
+case "$1 $2" in
+	"client active-env") echo "ef-localhost" ;;
+	"client active-address") echo "0xabc123" ;;
+	"client envs")
+		if [ "$3" = "--json" ]; then
+			echo '[[{"alias":"ef-localhost","rpc":"http://localhost:9000","faucet":"http://localhost:9123","ws":null,"basic_auth":null}],"ef-localhost"]'
+		else
+			echo "table fallback"
+		fi
+		;;
+esac
+`
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "sui"), []byte(script), 0755))
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	info := gatherSuiClient()
+
+	assert.True(t, info.Found)
+	assert.Equal(t, "not configured", info.ActiveEnv)
+	assert.Empty(t, info.ActiveAddress)
+	assert.Empty(t, info.ActiveEnvRpcUrl)
+	_, err := os.Stat(counter)
+	assert.True(t, os.IsNotExist(err), "sui client commands should not run when config is missing")
+}
+
+func TestGatherSuiClient_RunsCommandsWhenConfigPresent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configDir := filepath.Join(home, ".sui", "sui_config")
+	require.NoError(t, os.MkdirAll(configDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "client.yaml"), []byte("config"), 0600))
+
+	binDir := t.TempDir()
+	counter := filepath.Join(home, "sui_calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> ` + counter + `
+case "$1 $2" in
+	"client active-env") echo "ef-localhost" ;;
+	"client active-address") echo "0xabc123" ;;
+	"client envs")
+		if [ "$3" = "--json" ]; then
+			echo '[[{"alias":"ef-localhost","rpc":"http://localhost:9000","faucet":"http://localhost:9123","ws":null,"basic_auth":null}],"ef-localhost"]'
+		else
+			echo "table fallback"
+		fi
+		;;
+esac
+`
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "sui"), []byte(script), 0755))
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	info := gatherSuiClient()
+
+	assert.True(t, info.Found)
+	assert.Equal(t, "ef-localhost", info.ActiveEnv)
+	assert.Equal(t, "0xabc123", info.ActiveAddress)
+	assert.Equal(t, "http://localhost:9000", info.ActiveEnvRpcUrl)
+	assert.Equal(t, "http://localhost:9123", info.ActiveEnvFaucetUrl)
+
+	calls, err := os.ReadFile(counter)
+	require.NoError(t, err)
+	assert.NotEmpty(t, calls, "sui client commands should run when config is present")
 }
 
 func TestGatherRepos_ReturnsBoth(t *testing.T) {

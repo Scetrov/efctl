@@ -219,6 +219,51 @@ func TestResolveRepoPath_RejectsUnsafeRepoName(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestResolveAddress_SkipsWhenConfigMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	counter := filepath.Join(home, "sui_calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> ` + counter + `
+echo '{"activeAddress":"0xabc","addresses":[["ef-admin","0xabc"]]}'
+`
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "sui"), []byte(script), 0755))
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	got := resolveAddress("ef-admin")
+
+	assert.Empty(t, got)
+	_, err := os.Stat(counter)
+	assert.True(t, os.IsNotExist(err), "sui client addresses should not run when config is missing")
+}
+
+func TestResolveAddress_RunsWhenConfigPresent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configDir := filepath.Join(home, ".sui", "sui_config")
+	require.NoError(t, os.MkdirAll(configDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "client.yaml"), []byte("config"), 0600))
+
+	binDir := t.TempDir()
+	counter := filepath.Join(home, "sui_calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> ` + counter + `
+echo '{"activeAddress":"0xabc","addresses":[["ef-admin","0xabc"]]}'
+`
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "sui"), []byte(script), 0755))
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	got := resolveAddress("ef-admin")
+
+	assert.Equal(t, "0xabc", got)
+	calls, err := os.ReadFile(counter)
+	require.NoError(t, err)
+	assert.Contains(t, string(calls), "client addresses --json")
+}
+
 func TestResolveRepoPath_RejectsSymlinkEscape(t *testing.T) {
 	ws := t.TempDir()
 	external := t.TempDir()

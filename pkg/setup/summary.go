@@ -252,6 +252,10 @@ func deriveRoleAddress(role, alias, address, key string) AddressInfo {
 }
 
 func resolveAddress(alias string) string {
+	if !sui.SuiConfigExists() {
+		return ""
+	}
+
 	// sui client addresses --json
 	out, err := exec.Command("sui", "client", "addresses", "--json").Output()
 	if err != nil {
