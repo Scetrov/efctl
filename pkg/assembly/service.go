@@ -162,7 +162,7 @@ func OnlineAssembly(workspace string, assemblyType AssemblyType, assemblyId, nwn
 			EnergyConfig string `json:"energyConfig"`
 		} `json:"world"`
 	}
-	json.Unmarshal(bytes, &extracted)
+	json.Unmarshal(bytes, &extracted) // #nosec G104 -- missing extract file is handled below by falling back to defaults
 
 	module := string(assemblyType)
 

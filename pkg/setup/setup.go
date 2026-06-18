@@ -119,7 +119,7 @@ func CloneRepositories(g git.GitClient, workspace string) error {
 			}
 			if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".sh") {
 				ui.Debug.Printfln("Normalizing line endings for %s", path)
-				git.NormalizeLineEndings(path)
+				git.NormalizeLineEndings(path) // #nosec G104 -- line ending normalization is best-effort
 			}
 			return nil
 		})
