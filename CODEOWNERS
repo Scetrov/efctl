@@ -1,0 +1,8 @@
+# Default ownership for repository changes.
+* @Scetrov
+
+# Extra scrutiny for supply-chain sensitive paths.
+.github/workflows/ @Scetrov
+go.mod @Scetrov
+go.sum @Scetrov
+Dockerfile @Scetrov
