@@ -1,0 +1,22 @@
+# CODEOWNERS
+
+# Default owner for everything in the repository
+* @Scetrov
+
+# GitHub Actions workflows and templates
+.github/workflows/ @Scetrov
+.github/dependabot.yml @Scetrov
+
+# Dependency manifests and lockfiles
+go.mod @Scetrov
+go.sum @Scetrov
+
+# Security documentation and policy
+SECURITY.md @Scetrov
+docs/threat-model.md @Scetrov
+
+# Release automation
+.github/workflows/release.yml @Scetrov
+
+# Infrastructure-as-code and credentials files where applicable
+efctl.yaml @Scetrov
