@@ -28,6 +28,10 @@ git-autocrlf: false
 # If Podman networking fails on WSL, try setting this to "docker".
 container-engine: auto-detect
 
+# Bind address for container port mappings (default: 127.0.0.1).
+# Set to "0.0.0.0" to expose ports on all network interfaces.
+host: "127.0.0.1"
+
 # Additional host directories to bind-mount into the container environment.
 # additional-bind-mounts:
 #   - hostPath: ./my-extension

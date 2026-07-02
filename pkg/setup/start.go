@@ -105,7 +105,7 @@ func startPostgres(c container.ContainerClient, ctx context.Context, user, pass,
 		return fmt.Errorf("failed to create pgdata volume: %w", err)
 	}
 
-	pgCfg := container.PostgresConfig(networkName, user, pass, db)
+	pgCfg := container.PostgresConfig(networkName, user, pass, db, config.Loaded.GetHost())
 	if err := c.CreateContainer(ctx, pgCfg); err != nil {
 		return fmt.Errorf("failed to create postgres container: %w", err)
 	}
@@ -125,7 +125,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		return mountErr
 	}
 
-	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB, additionalMounts)
+	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB, additionalMounts, config.Loaded.GetHost())
 	if err := c.CreateContainer(ctx, suiCfg); err != nil {
 		return fmt.Errorf("failed to create sui-playground container: %w", err)
 	}
@@ -141,7 +141,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 
 	// Give the container a moment to start, then verify it is still running
 	// before entering the (potentially long) log-wait loop.
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 	if !c.ContainerRunning(container.ContainerSuiPlayground) {
 		exitCode, _ := c.ContainerExitCode(container.ContainerSuiPlayground)
 		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 30)
@@ -239,7 +239,7 @@ func startFrontend(c container.ContainerClient, ctx context.Context, workspace s
 		return fmt.Errorf("failed to create frontend modules volume: %w", err)
 	}
 
-	feCfg := container.FrontendConfig(workspace, networkName, c.GetEngine())
+	feCfg := container.FrontendConfig(workspace, networkName, c.GetEngine(), config.Loaded.GetHost())
 	if err := c.CreateContainer(ctx, feCfg); err != nil {
 		return fmt.Errorf("failed to create frontend container: %w", err)
 	}
