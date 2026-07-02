@@ -53,6 +53,7 @@ type ContainerConfig struct {
 	OpenStdin   bool
 	Healthcheck *HealthcheckDef
 	UsernsMode  string // e.g. "keep-id" for Podman
+	Host        string // bind address for port mappings (default: 127.0.0.1)
 }
 
 // ── Interface ──────────────────────────────────────────────────────
@@ -630,7 +631,7 @@ func (c *Client) ensureContainerImage(ctx context.Context, image string) error {
 
 func (c *Client) buildCreateContainerArgs(cfg ContainerConfig) []string {
 	args := []string{"create", "--name", cfg.Name}
-	args = append(args, c.preparePortConfig(cfg.Ports)...)
+	args = append(args, c.preparePortConfig(cfg.Host, cfg.Ports)...)
 	args = append(args, c.prepareMountConfig(cfg.Mounts)...)
 	args = append(args, c.prepareHealthConfig(cfg.Healthcheck)...)
 	args = append(args, c.prepareNetworkConfig(cfg.NetworkName, cfg.Aliases)...)
@@ -683,7 +684,7 @@ func (c *Client) storeHealthTest(cfg ContainerConfig) {
 	c.healthTests[cfg.Name] = cfg.Healthcheck.Test
 }
 
-func (c *Client) preparePortConfig(ports map[int]int) []string {
+func (c *Client) preparePortConfig(host string, ports map[int]int) []string {
 	if len(ports) == 0 {
 		return nil
 	}
@@ -694,7 +695,7 @@ func (c *Client) preparePortConfig(ports map[int]int) []string {
 	sort.Ints(hostPorts)
 	args := make([]string, 0, len(hostPorts)*2)
 	for _, hostPort := range hostPorts {
-		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d/tcp", hostPort, ports[hostPort]))
+		args = append(args, "-p", fmt.Sprintf("%s:%d:%d/tcp", host, hostPort, ports[hostPort]))
 	}
 	return args
 }
