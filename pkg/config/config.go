@@ -41,6 +41,7 @@ type Config struct {
 	GitAutoCRLF           *bool                 `yaml:"git-autocrlf"`
 	ContainerEngine       string                `yaml:"container-engine"`
 	AdditionalBindMounts  []AdditionalBindMount `yaml:"additional-bind-mounts"`
+	Host                  string                `yaml:"host"`
 
 	// Internal field to track if a config file was actually loaded
 	configFileLoaded bool
@@ -317,6 +318,14 @@ func (c *Config) GetContainerEngine() string {
 		return c.ContainerEngine
 	}
 	return "auto-detect"
+}
+
+// GetHost returns the configured bind address for container ports, defaulting to 127.0.0.1.
+func (c *Config) GetHost() string {
+	if c != nil && c.Host != "" {
+		return c.Host
+	}
+	return "127.0.0.1"
 }
 
 // WasLoaded returns true if a config file was successfully loaded (not just defaulted).

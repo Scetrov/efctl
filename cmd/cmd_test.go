@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"efctl/pkg/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -434,4 +436,129 @@ func TestCommandTree_DoctorExists(t *testing.T) {
 		names[c.Name()] = true
 	}
 	assert.True(t, names["doctor"], "doctor command should exist")
+}
+
+// ── resolveDisplayHost ─────────────────────────────────────────────
+
+func TestResolveDisplayHost_Localhost(t *testing.T) {
+	assert.Equal(t, "localhost", resolveDisplayHost("127.0.0.1"))
+}
+
+func TestResolveDisplayHost_CustomIP(t *testing.T) {
+	assert.Equal(t, "172.0.0.1", resolveDisplayHost("172.0.0.1"))
+	assert.Equal(t, "192.168.1.100", resolveDisplayHost("192.168.1.100"))
+	assert.Equal(t, "10.0.0.5", resolveDisplayHost("10.0.0.5"))
+}
+
+func TestResolveDisplayHost_AllInterfaces(t *testing.T) {
+	// 0.0.0.0 should resolve to either the Ethernet IP or fallback to "localhost"
+	got := resolveDisplayHost("0.0.0.0")
+	assert.NotEmpty(t, got)
+	// Should be either an IP or localhost fallback
+	assert.True(t, got == "localhost" || strings.Count(got, ".") == 3,
+		"expected localhost or valid IPv4, got %q", got)
+}
+
+func TestResolveDisplayHost_Empty(t *testing.T) {
+	// An empty host is passed through as-is
+	assert.Equal(t, "", resolveDisplayHost(""))
+}
+
+// ── rpcBaseURL ─────────────────────────────────────────────────────
+
+func TestRpcBaseURL_Localhost(t *testing.T) {
+	assert.Equal(t, "http://localhost", rpcBaseURL("127.0.0.1"))
+}
+
+func TestRpcBaseURL_CustomIP(t *testing.T) {
+	assert.Equal(t, "http://172.0.0.1", rpcBaseURL("172.0.0.1"))
+}
+
+// ── getEthernetIP ──────────────────────────────────────────────────
+
+func TestGetEthernetIP_DoesNotPanic(t *testing.T) {
+	// Call it — must not panic regardless of environment
+	got := getEthernetIP()
+	// If we have network, it should be a valid IPv4 or empty
+	if got != "" {
+		assert.True(t, strings.Count(got, ".") == 3,
+			"expected valid IPv4, got %q", got)
+	}
+}
+
+// ── initialModel host resolution ───────────────────────────────────
+
+func TestInitialModel_HostDefault(t *testing.T) {
+	// Without config.Loaded set, host defaults to 127.0.0.1
+	saved := config.Loaded
+	config.Loaded = nil
+	defer func() { config.Loaded = saved }()
+
+	m := initialModel("docker", t.TempDir())
+	assert.Equal(t, "127.0.0.1", m.host)
+}
+
+func TestInitialModel_HostFromConfig(t *testing.T) {
+	saved := config.Loaded
+	config.Loaded = &config.Config{Host: "0.0.0.0"}
+	defer func() { config.Loaded = saved }()
+
+	m := initialModel("docker", t.TempDir())
+	assert.Equal(t, "0.0.0.0", m.host)
+}
+
+// ── writeEnvConfig URL rendering ───────────────────────────────────
+
+func TestWriteEnvConfig_UrlsWithLocalhostHost(t *testing.T) {
+	m := model{
+		host:      "127.0.0.1",
+		graphqlOn: true,
+		frontendOn: true,
+		width:    120,
+		envVars:  map[string]string{},
+	}
+	var buf bytes.Buffer
+	m.writeEnvConfig(&buf, func(s string) string { return s })
+
+	out := buf.String()
+	assert.Contains(t, out, "http://localhost:9000")
+	assert.Contains(t, out, "http://localhost:9125/graphql")
+	assert.Contains(t, out, "http://localhost:5173")
+}
+
+func TestWriteEnvConfig_UrlsWithCustomHost(t *testing.T) {
+	m := model{
+		host:      "172.0.0.1",
+		graphqlOn: true,
+		frontendOn: true,
+		width:    120,
+		envVars:  map[string]string{},
+	}
+	var buf bytes.Buffer
+	m.writeEnvConfig(&buf, func(s string) string { return s })
+
+	out := buf.String()
+	assert.Contains(t, out, "http://172.0.0.1:9000")
+	assert.Contains(t, out, "http://172.0.0.1:9125/graphql")
+	assert.Contains(t, out, "http://172.0.0.1:5173")
+}
+
+func TestWriteEnvConfig_GqlAndFeOff(t *testing.T) {
+	m := model{
+		host:      "127.0.0.1",
+		graphqlOn: false,
+		frontendOn: false,
+		width:    120,
+		envVars:  map[string]string{},
+	}
+	var buf bytes.Buffer
+	m.writeEnvConfig(&buf, func(s string) string { return s })
+
+	out := buf.String()
+	assert.Contains(t, out, "RPC:")
+	assert.Contains(t, out, "http://localhost:9000")
+	assert.NotContains(t, out, "GraphQL:")
+	assert.NotContains(t, out, "Frontend:")
+	assert.NotContains(t, out, "9125")
+	assert.NotContains(t, out, "5173")
 }
