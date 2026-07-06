@@ -1,0 +1,11 @@
+# Global fallback
+* @Scetrov
+
+# Security-sensitive paths
+.github/ @Scetrov
+.github/workflows/ @Scetrov
+docs/threat-model.md @Scetrov
+SECURITY.md @Scetrov
+go.mod @Scetrov
+go.sum @Scetrov
+Makefile @Scetrov

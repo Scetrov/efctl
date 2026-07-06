@@ -7,9 +7,10 @@ updates:
     cooldown:
       default-days: 5
     groups:
-      all-go-deps:
-        patterns:
-          - "*"
+      low-risk:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -18,6 +19,7 @@ updates:
     cooldown:
       default-days: 5
     groups:
-      all-actions:
-        patterns:
-          - "*"
+      low-risk:
+        update-types:
+          - "minor"
+          - "patch"
