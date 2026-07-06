@@ -16,4 +16,9 @@ You can update with `efctl update` or re-install with the one-liner from the REA
 
 Please report any security vulnerabilities directly to the maintainers rather than creating a public issue.
 
-You can report vulnerabilities by creating a GitHub Security Advisory or by contacting the maintainers securely. All security vulnerabilities will be promptly addressed.
+Use GitHub's private vulnerability reporting for this repository:
+
+- [Report a vulnerability privately](https://github.com/Scetrov/efctl/security/advisories/new)
+- [Repository security overview](https://github.com/Scetrov/efctl/security)
+
+Include the affected version or commit, reproduction steps, expected impact, and any suggested remediation. Maintainers will acknowledge reports within 7 days, provide status updates as the issue is investigated, and coordinate disclosure after a fix is available.
