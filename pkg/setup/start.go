@@ -15,7 +15,15 @@ import (
 	"efctl/pkg/ui"
 )
 
-const defaultStartupTimeout = 10 * time.Minute
+const (
+	defaultStartupTimeout      = 10 * time.Minute
+	suiLivenessGracePeriod     = 1 * time.Second
+	suiLivenessPollInterval    = 250 * time.Millisecond
+	suiLivenessPollingTimeout  = 10 * time.Second
+	suiLivenessDiagnosticLines = 30
+)
+
+var waitForSuiLivenessFunc = waitForSuiLiveness
 
 // startupTimeoutFromEnv returns the startup timeout, defaulting to 10 minutes.
 // Override with EFCTL_STARTUP_TIMEOUT_SECONDS for CI or slow environments.
@@ -105,7 +113,7 @@ func startPostgres(c container.ContainerClient, ctx context.Context, user, pass,
 		return fmt.Errorf("failed to create pgdata volume: %w", err)
 	}
 
-	pgCfg := container.PostgresConfig(networkName, user, pass, db)
+	pgCfg := container.PostgresConfig(networkName, user, pass, db, config.Loaded.GetPostgresHost())
 	if err := c.CreateContainer(ctx, pgCfg); err != nil {
 		return fmt.Errorf("failed to create postgres container: %w", err)
 	}
@@ -125,7 +133,7 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		return mountErr
 	}
 
-	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB, additionalMounts)
+	suiCfg := container.SuiDevConfig(workspace, networkName, c.GetEngine(), withGraphql, pgUser, pgPass, pgDB, additionalMounts, config.Loaded.GetHost())
 	if err := c.CreateContainer(ctx, suiCfg); err != nil {
 		return fmt.Errorf("failed to create sui-playground container: %w", err)
 	}
@@ -139,14 +147,8 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		ui.Warn.Println(fmt.Sprintf("Script normalization failed (continuing): %v", err))
 	}
 
-	// Give the container a moment to start, then verify it is still running
-	// before entering the (potentially long) log-wait loop.
-	time.Sleep(10 * time.Second)
-	if !c.ContainerRunning(container.ContainerSuiPlayground) {
-		exitCode, _ := c.ContainerExitCode(container.ContainerSuiPlayground)
-		lastLogs := c.ContainerLogs(container.ContainerSuiPlayground, 30)
-		return fmt.Errorf("%s exited immediately after launch (exit code %d).\n\nLast 30 lines of container logs:\n%s",
-			container.ContainerSuiPlayground, exitCode, lastLogs)
+	if err := waitForSuiLivenessFunc(c, container.ContainerSuiPlayground, suiLivenessGracePeriod, suiLivenessPollInterval, suiLivenessPollingTimeout); err != nil {
+		return err
 	}
 
 	startupTimeout := startupTimeoutFromEnv()
@@ -184,6 +186,43 @@ func startSuiDev(c container.ContainerClient, ctx context.Context, workspace, do
 		}
 	}
 	return nil
+}
+
+func waitForSuiLiveness(c container.ContainerClient, containerName string, gracePeriod, pollInterval, timeout time.Duration) error {
+	if gracePeriod > 0 {
+		time.Sleep(gracePeriod)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if c.ContainerRunning(containerName) {
+			return nil
+		}
+
+		exitCode, exitErr := c.ContainerExitCode(containerName)
+		if exitErr == nil && exitCode != 0 {
+			lastLogs := c.ContainerLogs(containerName, suiLivenessDiagnosticLines)
+			return fmt.Errorf("%s exited before becoming live (exit code %d).\n\nLast %d lines of container logs:\n%s",
+				containerName, exitCode, suiLivenessDiagnosticLines, lastLogs)
+		}
+
+		if !time.Now().Before(deadline) {
+			lastLogs := c.ContainerLogs(containerName, suiLivenessDiagnosticLines)
+			return fmt.Errorf("%s did not become live within %s (ExitCode: %d, ExitErr: %v).\n\nLast %d lines of container logs:\n%s",
+				containerName, timeout, exitCode, exitErr, suiLivenessDiagnosticLines, lastLogs)
+		}
+
+		sleepFor := pollInterval
+		if sleepFor <= 0 {
+			sleepFor = time.Millisecond
+		}
+		if remaining := time.Until(deadline); remaining < sleepFor {
+			sleepFor = remaining
+		}
+		if sleepFor > 0 {
+			time.Sleep(sleepFor)
+		}
+	}
 }
 
 func resolveAdditionalContainerMounts(workspace string) ([]container.AdditionalBindMount, error) {
@@ -239,7 +278,7 @@ func startFrontend(c container.ContainerClient, ctx context.Context, workspace s
 		return fmt.Errorf("failed to create frontend modules volume: %w", err)
 	}
 
-	feCfg := container.FrontendConfig(workspace, networkName, c.GetEngine())
+	feCfg := container.FrontendConfig(workspace, networkName, c.GetEngine(), config.Loaded.GetHost())
 	if err := c.CreateContainer(ctx, feCfg); err != nil {
 		return fmt.Errorf("failed to create frontend container: %w", err)
 	}
