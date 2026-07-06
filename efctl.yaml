@@ -28,6 +28,15 @@ git-autocrlf: false
 # If Podman networking fails on WSL, try setting this to "docker".
 container-engine: auto-detect
 
+# Bind address for RPC, GraphQL, and frontend port mappings (default: 127.0.0.1).
+# Set to "0.0.0.0" to expose these services on all network interfaces.
+# WARNING: Remote service exposure increases your local network attack surface.
+host: "127.0.0.1"
+
+# Keep PostgreSQL bound to localhost by default. Set to true only if you
+# intentionally need remote database access; this exposes port 5432 on the host above.
+expose-postgres: false
+
 # Additional host directories to bind-mount into the container environment.
 # additional-bind-mounts:
 #   - hostPath: ./my-extension

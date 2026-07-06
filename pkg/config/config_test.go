@@ -141,6 +141,71 @@ func TestValidate_RejectsInvalidAdditionalBindMountIdentifier(t *testing.T) {
 	assert.Contains(t, err.Error(), "identifier contains invalid characters")
 }
 
+func TestGetContainerEngine_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, "auto-detect", cfg.GetContainerEngine())
+}
+
+func TestGetContainerEngine_Custom(t *testing.T) {
+	cfg := &Config{ContainerEngine: "podman"}
+	assert.Equal(t, "podman", cfg.GetContainerEngine())
+}
+
+func TestGetHost_Default(t *testing.T) {
+	cfg := &Config{}
+	assert.Equal(t, "127.0.0.1", cfg.GetHost())
+}
+
+func TestGetHost_Custom(t *testing.T) {
+	cfg := &Config{Host: "0.0.0.0"}
+	assert.Equal(t, "0.0.0.0", cfg.GetHost())
+}
+
+func TestGetHost_TrimsWhitespace(t *testing.T) {
+	cfg := &Config{Host: "  devbox.local  "}
+	assert.Equal(t, "devbox.local", cfg.GetHost())
+}
+
+func TestValidate_AcceptsHostValues(t *testing.T) {
+	for _, host := range []string{"localhost", "127.0.0.1", "0.0.0.0", "192.168.1.10", "devbox.local", "my-host"} {
+		t.Run(host, func(t *testing.T) {
+			cfg := &Config{Host: host}
+			require.NoError(t, cfg.Validate())
+		})
+	}
+}
+
+func TestValidate_AcceptsTrimmedHostValue(t *testing.T) {
+	cfg := &Config{Host: "  0.0.0.0  "}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_RejectsInvalidHostValues(t *testing.T) {
+	for _, host := range []string{"   ", "bad_host!", "-bad.example", "bad..example", "http://localhost"} {
+		t.Run(host, func(t *testing.T) {
+			cfg := &Config{Host: host}
+			require.Error(t, cfg.Validate())
+		})
+	}
+}
+
+func TestValidate_RejectsIPv6HostValue(t *testing.T) {
+	cfg := &Config{Host: "::1"}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "IPv6")
+}
+
+func TestGetPostgresHost_DefaultsLocalOnly(t *testing.T) {
+	cfg := &Config{Host: "0.0.0.0"}
+	assert.Equal(t, "127.0.0.1", cfg.GetPostgresHost())
+}
+
+func TestGetPostgresHost_UsesServiceHostWhenExposed(t *testing.T) {
+	cfg := &Config{Host: "  devbox.local  ", ExposePostgres: true}
+	assert.Equal(t, "devbox.local", cfg.GetPostgresHost())
+}
+
 func TestResolveAdditionalBindMounts_UsesConfigDirectory(t *testing.T) {
 	configDir := t.TempDir()
 	mountDir := filepath.Join(configDir, "contracts")
@@ -319,6 +384,7 @@ func TestGetters_NilConfig(t *testing.T) {
 	assert.Equal(t, DefaultBuilderScaffoldURL, cfg.GetBuilderScaffoldURL())
 	assert.Equal(t, RecommendedWorldContractsRef, cfg.GetWorldContractsRef())
 	assert.Equal(t, RecommendedBuilderScaffoldRef, cfg.GetBuilderScaffoldRef())
+	assert.Equal(t, "127.0.0.1", cfg.GetHost())
 }
 
 func TestFindDefaultConfigPath_FindsInCurrentDirectory(t *testing.T) {
