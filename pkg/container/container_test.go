@@ -51,7 +51,7 @@ func TestNetworkNameForWorkspace_UniquePerPath(t *testing.T) {
 }
 
 func TestSuiDevConfig_Ports(t *testing.T) {
-	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil)
+	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil, "127.0.0.1")
 	if _, ok := cfg.Ports[9000]; !ok {
 		t.Error("Expected port 9000 in SuiDevConfig")
 	}
@@ -59,7 +59,7 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 		t.Error("Port 9125 should not be present without graphql")
 	}
 
-	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db", nil)
+	cfgGql := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db", nil, "127.0.0.1")
 	if _, ok := cfgGql.Ports[9125]; !ok {
 		t.Error("Expected port 9125 with graphql enabled")
 	}
@@ -71,12 +71,12 @@ func TestSuiDevConfig_Ports(t *testing.T) {
 func TestSuiDevConfig_PodmanUserns(t *testing.T) {
 	// The sui-dev container must use keep-id to avoid host permission
 	// issues with bind mounts in Podman rootless mode.
-	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db", nil)
+	cfg := SuiDevConfig("/workspace", "efctl-test", "podman", false, "sui", "pass", "db", nil, "127.0.0.1")
 	if cfg.UsernsMode != "keep-id" {
 		t.Errorf("Expected UsernsMode 'keep-id' for Podman sui-dev, got %q", cfg.UsernsMode)
 	}
 
-	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil)
+	cfgDocker := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", nil, "127.0.0.1")
 	if cfgDocker.UsernsMode != "" {
 		t.Errorf("Expected empty UsernsMode for Docker, got %q", cfgDocker.UsernsMode)
 	}
@@ -86,7 +86,7 @@ func TestSuiDevConfig_AdditionalBindMounts(t *testing.T) {
 	cfg := SuiDevConfig("/workspace", "efctl-test", "docker", false, "sui", "pass", "db", []AdditionalBindMount{{
 		Source:     "/tmp/contracts",
 		Identifier: "contracts_mount",
-	}})
+	}}, "127.0.0.1")
 
 	require.Len(t, cfg.Mounts, 4)
 	assert.Equal(t, "/tmp/contracts", cfg.Mounts[3].Source)
@@ -95,7 +95,7 @@ func TestSuiDevConfig_AdditionalBindMounts(t *testing.T) {
 }
 
 func TestPostgresConfig_Healthcheck(t *testing.T) {
-	cfg := PostgresConfig("efctl-test", "sui", "pass", "db")
+	cfg := PostgresConfig("efctl-test", "sui", "pass", "db", "127.0.0.1")
 	if cfg.Healthcheck == nil {
 		t.Fatal("Expected healthcheck for postgres")
 	}
@@ -105,15 +105,70 @@ func TestPostgresConfig_Healthcheck(t *testing.T) {
 	if cfg.Name != ContainerPostgres {
 		t.Errorf("Expected container name %q, got %q", ContainerPostgres, cfg.Name)
 	}
+	assert.Equal(t, "127.0.0.1", cfg.Host)
+}
+
+func TestServiceConfigs_SetHost(t *testing.T) {
+	suiCfg := SuiDevConfig("/workspace", "efctl-test", "docker", true, "sui", "pass", "db", nil, "0.0.0.0")
+	assert.Equal(t, "0.0.0.0", suiCfg.Host)
+	assert.Equal(t, map[int]int{9000: 9000, 9123: 9123, 9125: 9125}, suiCfg.Ports)
+
+	frontendCfg := FrontendConfig("/workspace", "efctl-test", "docker", "0.0.0.0")
+	assert.Equal(t, "0.0.0.0", frontendCfg.Host)
+	assert.Equal(t, map[int]int{5173: 5173}, frontendCfg.Ports)
+}
+
+func TestPostgresConfig_UsesProvidedHost(t *testing.T) {
+	cfg := PostgresConfig("efctl-test", "sui", "pass", "db", "0.0.0.0")
+	assert.Equal(t, "0.0.0.0", cfg.Host)
+	assert.Equal(t, map[int]int{5432: 5432}, cfg.Ports)
 }
 
 func TestFrontendConfig_WorkingDir(t *testing.T) {
-	cfg := FrontendConfig("/workspace", "efctl-test", "docker")
+	cfg := FrontendConfig("/workspace", "efctl-test", "docker", "127.0.0.1")
 	if cfg.WorkingDir != "/workspace/builder-scaffold/dapps" {
 		t.Errorf("Expected working dir /workspace/builder-scaffold/dapps, got %q", cfg.WorkingDir)
 	}
 	if cfg.Name != ContainerFrontend {
 		t.Errorf("Expected container name %q, got %q", ContainerFrontend, cfg.Name)
+	}
+}
+
+func TestPreparePortConfig_DefaultHost(t *testing.T) {
+	c := &Client{Engine: "docker"}
+	ports := map[int]int{9000: 9000, 5432: 5432}
+	args := c.preparePortConfig("127.0.0.1", ports)
+
+	// Should have 4 elements: -p 127.0.0.1:5432:5432/tcp -p 127.0.0.1:9000:9000/tcp
+	if len(args) != 4 {
+		t.Fatalf("expected 4 port args, got %d: %v", len(args), args)
+	}
+	if args[0] != "-p" || args[1] != "127.0.0.1:5432:5432/tcp" {
+		t.Fatalf("expected first pair to be -p 127.0.0.1:5432:5432/tcp, got %v", args[:2])
+	}
+	if args[2] != "-p" || args[3] != "127.0.0.1:9000:9000/tcp" {
+		t.Fatalf("expected second pair to be -p 127.0.0.1:9000:9000/tcp, got %v", args[2:])
+	}
+}
+
+func TestPreparePortConfig_CustomHost(t *testing.T) {
+	c := &Client{Engine: "docker"}
+	ports := map[int]int{8080: 3000}
+	args := c.preparePortConfig("0.0.0.0", ports)
+
+	if len(args) != 2 {
+		t.Fatalf("expected 2 port args, got %d", len(args))
+	}
+	if args[0] != "-p" || args[1] != "0.0.0.0:8080:3000/tcp" {
+		t.Fatalf("expected -p 0.0.0.0:8080:3000/tcp, got %v", args)
+	}
+}
+
+func TestPreparePortConfig_EmptyPorts(t *testing.T) {
+	c := &Client{Engine: "docker"}
+	args := c.preparePortConfig("127.0.0.1", nil)
+	if args != nil {
+		t.Fatalf("expected nil for empty ports, got %v", args)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"efctl/pkg/config"
 	"efctl/pkg/container"
 	"efctl/pkg/dashboard"
 	"efctl/pkg/env"
@@ -266,6 +268,59 @@ func formatCPU(cpu string) string {
 // formatMem delegates to the dashboard package.
 func formatMem(mem string) string {
 	return dashboard.FormatMem(mem)
+}
+
+// resolveDisplayHost returns the display-friendly host for URLs shown in the dashboard.
+// "127.0.0.1" → "localhost", "0.0.0.0" → ethernet IP, anything else → as-is.
+func resolveDisplayHost(host string) string {
+	if host == "127.0.0.1" {
+		return "localhost"
+	}
+	if host == "0.0.0.0" {
+		if ip := getEthernetIP(); ip != "" {
+			return ip
+		}
+		return "localhost" // fallback when no Ethernet IP found
+	}
+	return host
+}
+
+// getEthernetIP returns the first non-loopback IPv4 address of an up interface.
+func getEthernetIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				return ipv4.String()
+			}
+		}
+	}
+	return ""
+}
+
+// rpcBaseURL returns the base HTTP URL for the RPC endpoint (scheme + host).
+func rpcBaseURL(host string) string {
+	return "http://" + resolveDisplayHost(host)
 }
 
 func fetchChainInfo(client *http.Client) chainStat {
@@ -656,6 +711,7 @@ type model struct {
 	frontendOn     bool         // whether the frontend dApp container is enabled
 	worldEvents    []worldEvent // recent events from the world package
 	restarting     bool         // whether we are in the interactive restart menu
+	host           string       // bind address for container ports (from config, default 127.0.0.1)
 }
 
 func initialModel(engine string, workspace string) model {
@@ -672,6 +728,13 @@ func initialModel(engine string, workspace string) model {
 			feOn = true
 		}
 	}
+
+	// Resolve host from config (defaults to 127.0.0.1)
+	host := "127.0.0.1"
+	if config.Loaded != nil {
+		host = config.Loaded.GetHost()
+	}
+
 	return model{
 		engine:     engine,
 		workspace:  workspace,
@@ -682,6 +745,7 @@ func initialModel(engine string, workspace string) model {
 		adminAddr:  "Checking...",
 		graphqlOn:  gqlOn,
 		frontendOn: feOn,
+		host:       host,
 	}
 }
 
@@ -1324,7 +1388,7 @@ func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 	}
 	items := []item{
 		{label: " Network:", value: network},
-		{label: "RPC:", value: "http://localhost:9000"},
+		{label: "RPC:", value: "http://" + resolveDisplayHost(m.host) + ":9000"},
 	}
 	if v, ok := m.envVars["TENANT"]; ok {
 		items = append(items, item{label: "Tenant:", value: v})
@@ -1333,10 +1397,10 @@ func (m model) writeEnvConfig(b *bytes.Buffer, shorten func(string) string) {
 		items = append(items, item{label: "World Pkg:", value: shorten(m.worldPkgID)})
 	}
 	if m.isGraphQLEnabled() {
-		items = append(items, item{label: "GraphQL:", value: "http://localhost:9125/graphql"})
+		items = append(items, item{label: "GraphQL:", value: "http://" + resolveDisplayHost(m.host) + ":9125/graphql"})
 	}
 	if m.isFrontendEnabled() {
-		items = append(items, item{label: "Frontend:", value: "http://localhost:5173"})
+		items = append(items, item{label: "Frontend:", value: "http://" + resolveDisplayHost(m.host) + ":5173"})
 	}
 
 	var currentLine strings.Builder

@@ -14,7 +14,7 @@ type AdditionalBindMount struct {
 }
 
 // SuiDevConfig returns the ContainerConfig for the main Sui development node.
-func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUser, pgPass, pgDB string, additionalMounts []AdditionalBindMount) ContainerConfig {
+func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUser, pgPass, pgDB string, additionalMounts []AdditionalBindMount, host string) ContainerConfig {
 	builderScaffold := filepath.Join(workspace, "builder-scaffold")
 	worldContracts := filepath.Join(workspace, "world-contracts")
 
@@ -54,6 +54,7 @@ func SuiDevConfig(workspace, networkName, engine string, withGraphql bool, pgUse
 		Tty:         true,
 		OpenStdin:   true,
 		UsernsMode:  usernsMode,
+		Host:        host,
 	}
 }
 
@@ -76,7 +77,7 @@ func additionalBindMountDefs(additionalMounts []AdditionalBindMount) []MountDef 
 }
 
 // PostgresConfig returns the ContainerConfig for the PostgreSQL indexer database.
-func PostgresConfig(networkName, user, password, dbName string) ContainerConfig {
+func PostgresConfig(networkName, user, password, dbName, host string) ContainerConfig {
 	return ContainerConfig{
 		Name:        ContainerPostgres,
 		Image:       ImagePostgres,
@@ -92,10 +93,11 @@ func PostgresConfig(networkName, user, password, dbName string) ContainerConfig 
 			Retries:     30,
 			StartPeriod: 10 * time.Second,
 		},
+		Host: host,
 	}
 }
 
-func FrontendConfig(workspace, networkName, engine string) ContainerConfig {
+func FrontendConfig(workspace, networkName, engine, host string) ContainerConfig {
 	usernsMode := ""
 	if engine == "podman" {
 		usernsMode = "keep-id"
@@ -114,5 +116,6 @@ func FrontendConfig(workspace, networkName, engine string) ContainerConfig {
 		WorkingDir:  "/workspace/builder-scaffold/dapps",
 		Cmd:         []string{"sh", "-c", "set -e\nnpx pnpm install\nexec npx pnpm dev --host 0.0.0.0"},
 		UsernsMode:  usernsMode,
+		Host:        host,
 	}
 }
