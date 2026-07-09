@@ -1,6 +1,6 @@
 module efctl
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -11,7 +11,6 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.53.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

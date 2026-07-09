@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/blake2b"
+	"efctl/internal/blake2b256"
 )
 
 // DeriveAddressFromPrivateKey derives a Sui address from a bech32-encoded
@@ -38,7 +38,7 @@ func DeriveAddressFromPrivateKey(privkey string) (string, error) {
 	msg := make([]byte, 0, 33)
 	msg = append(msg, flag)
 	msg = append(msg, pub...)
-	hash := blake2b.Sum256(msg)
+	hash := blake2b256.Sum256(msg)
 
 	return "0x" + hex.EncodeToString(hash[:]), nil
 }
