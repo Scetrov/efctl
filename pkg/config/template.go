@@ -21,14 +21,14 @@ with-graphql: true
 # Git clone URL for the world-contracts repository
 world-contracts-url: %q
 
-# Ref (branch, tag, or commit) to checkout for world-contracts (default: v0.0.23)
+# Ref (branch, tag, or commit) to checkout for world-contracts (default: %s)
 world-contracts-ref: %q
 # world-contracts-branch: %q # Deprecated: use world-contracts-ref
 
 # Git clone URL for the builder-scaffold repository
 builder-scaffold-url: %q
 
-# Ref (branch, tag, or commit) to checkout for builder-scaffold (default: v0.0.2)
+# Ref (branch, tag, or commit) to checkout for builder-scaffold (default: %s)
 builder-scaffold-ref: %q
 # builder-scaffold-branch: %q # Deprecated: use builder-scaffold-ref
 
@@ -52,5 +52,8 @@ expose-postgres: false
 # additional-bind-mounts:
 #   - hostPath: ./my-extension
 #     identifier: my-extension
-`, DefaultWorldContractsURL, RecommendedWorldContractsRef, RecommendedWorldContractsRef, DefaultBuilderScaffoldURL, RecommendedBuilderScaffoldRef, RecommendedBuilderScaffoldRef)
+`, DefaultWorldContractsURL,
+		RecommendedWorldContractsRef, RecommendedWorldContractsRef, RecommendedWorldContractsRef,
+		DefaultBuilderScaffoldURL,
+		RecommendedBuilderScaffoldRef, RecommendedBuilderScaffoldRef, RecommendedBuilderScaffoldRef)
 }
