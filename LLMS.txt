@@ -1,0 +1,131 @@
+# efctl
+
+> `efctl` is a Go CLI that automates the lifecycle of EVE Frontier local development environments on the Sui blockchain, encompassing container-based service orchestration, Move extension publishing, Smart Assembly deployment, and GraphQL/world inspection.
+
+This file is repository-only guidance named `LLMS.txt`. It does not claim canonical lowercase `/llms.txt` website discovery. If a published website later serves this guide, publication tooling should expose it at lowercase `/llms.txt` and rewrite links accordingly.
+
+**Authority and precedence.**
+
+Content in this guide is reconciled using this hierarchy: (1) executable behavior in `cmd/` and `pkg/`, (2) generated `docs/efctl*.md` command pages, (3) OpenSpec requirements, (4) `README.md`, `USAGE.md`, and provider instruction files. When sources disagree, `LLMS.txt` follows the higher-ranked source. If `USAGE.md` drifts from executable behavior, prefer the generated command reference or command source.
+
+Unless `--config-file` is supplied, configuration discovery walks upward from the process current working directory (`.`), preferring `efctl.yaml` over `efctl.yml`, before `--workspace` is resolved. The `efctl.yaml` filename is preferred over the deprecated `efctl.yml` alias. All properties are optional; command flags override loaded YAML values when the flag is explicitly set on the command line. Explicitly set `--with-graphql` and `--with-frontend` override loaded YAML only when the CLI flag changes.
+
+Prerequisite engine checks consult valid YAML `container-engine` before `EFCTL_ENGINE`, then auto-detection. The actual container client currently consults `EFCTL_ENGINE`, `DOCKER_HOST`, daemon reachability, and Podman-before-Docker fallback without consulting YAML.
+
+**Operating rules.**
+
+Use `--no-progress` or `CI=true` for automation-safe output; both suppress the progress spinner but do not answer interactive prompts. Enable `--debug` only when diagnostic detail is needed. Always confirm the absolute workspace path and target network before mutation. Run `efctl doctor` to diagnose prerequisites before startup. Run `efctl env status` after startup to verify environment state.
+
+Service endpoints (host ports when bound to `127.0.0.1`): Sui JSON-RPC is on host and container `9000`, faucet on `9123`, GraphQL on host and container `9125` at `/graphql`, frontend on host `5173`, and PostgreSQL on host `5432` only when `expose-postgres: true`. When `--with-graphql` is enabled, current startup preflight separately requires host ports `8000` and `5432` to be free; these are preflight availability reservations, not service endpoint mappings — the GraphQL service is published on `9125`, not `8000`.
+
+The default `host` bind address is `127.0.0.1`. Setting `host: "0.0.0.0"` exposes all service ports on all network interfaces. PostgreSQL remains on `127.0.0.1` unless `expose-postgres: true` is set. Additional bind mounts in `additional-bind-mounts` grant host directory access to containers; treat each as an explicit security decision.
+
+Recovery from a failed `efctl env up` after partial mutation: inspect the reported error and recent state, then use `efctl env down` as the documented cleanup path to stop and remove all related containers, images, and volumes.
+
+Every mutating or externally scoped action requires confirmation of workspace and impact plus human approval unless the exact action was already authorized. Destructive actions include `init --force` (overwrites config), `init` (writes workspace files and git metadata), `env down` (removes containers/images/networks/volumes), `env run` (executes commands in builder container), `env shell` (opens interactive shell in container), `extension publish` (publishes to network), `assembly deploy/authorize` (deploys to network), `update` (replaces the efctl executable), and `sui install` (conditionally interactive). Remote or exposed operations — publishing to non-local networks, binding services beyond loopback, exposing PostgreSQL, adding host bind mounts — require explicit approval before proceeding.
+
+Never print, record, or echo mnemonics, recovery phrases, private keys, or passwords. Redact secret material from diagnostic output, environment files, and command failures before sharing.
+
+**Skill: diagnosis and initialization.**
+
+Run `efctl doctor` to diagnose prerequisites and environment state. Run `efctl init` to scaffold an `efctl.yaml` configuration file with recommended defaults. The `init` command creates the config file (mode `0600`), initializes an empty git repository if none exists, updates `.gitignore` with `.pnpm-store/`, `world-contracts/`, and `builder-scaffold/`, creates an example `my-extension/` directory, and optionally writes AI instructions (`.pi/`, `.agents/`, or `.gemini/` directories) when `--ai` is set to `copilot`, `claude`, or `gemini`. Using `--force` overwrites an existing config file without confirmation; confirm the workspace path before using this flag.
+
+**Skill: environment lifecycle.**
+
+Run `efctl env up` to execute check, setup, start, and deploy sequentially. Prerequisites checked include Node.js >= 20.0.0, Docker or Podman, Git, and port availability (always `9000`; when `--with-graphql`, preflight also checks `8000` and `5432`; when `--with-frontend`, checks `5173`). The faucet endpoint remains `9123`, but startup does not preflight that port. Setup clones world-contracts and builder-scaffold repositories. Start creates and starts containers and networks. Deploy initializes world contracts and spawns smart gates. If setup fails after repositories may have been created, use `efctl env down` as recovery before retrying.
+
+Run `efctl env status` for non-interactive table output of container state, port usage, chain health, and deployed world metadata. Run `efctl env dash` to launch the environment dashboard in the default browser. Run `efctl env down` to stop and remove all related containers, images, networks, and volumes. This is a destructive operation.
+
+**Skill: extension workflow.**
+
+Extensions are Move packages developed in the builder-scaffold container. Run `efctl env extension init` to scaffold a new extension, `efctl env extension list` to list available extensions, `efctl env extension build` to compile, and `efctl env extension test` to run tests. Run `efctl env extension publish [extension-path]` to publish the specified extension contract to the target network (default `localnet`; use `--network testnet` for remote publishing). Publish writes `BUILDER_PACKAGE_ID` and `EXTENSION_CONFIG_ID` to `.env`; capture those returned IDs and verify them on the selected network. On failure, preserve output and inspect state before retrying or cleaning up. Publishing to non-local networks requires explicit approval.
+
+**Skill: assembly deployment and authorization.**
+
+Run `efctl env assembly deploy gate|turret|storage` to deploy a Smart Assembly (requires `--item-id` and `--type-id`; optional `--location-hash`, `--online`, `--on-behalf-of`). Run `efctl env assembly authorize [extension-config-id] [assembly-id]` to authorize an extension for an assembly (optional `--type gate|turret|storage`). These commands deploy and authorize on-chain objects and require explicit approval. Verification: inspect the returned object ID and confirm against the target network.
+
+**Skill: container run and shell.**
+
+Run `efctl env run [script-name]` to execute a script inside the builder-scaffold container at `/workspace/builder-scaffold`. The script name and each argument are restricted to safe-name characters: alphanumeric, hyphens, underscores, dots, and slashes (`^[a-zA-Z0-9_./-]+$`). Arbitrary shell syntax and shell metacharacters are rejected. Without extra arguments, the command is wrapped with `pnpm`. Run `efctl env shell` to open an interactive bash shell inside the running `sui-playground` container. This command requires a TTY and is not automation-safe. Both commands execute inside the container and provide host-level access to the workspace.
+
+**Skill: faucet and GraphQL/world inspection.**
+
+Run `efctl env faucet --address <sui-address>` to request gas tokens from the local faucet on port `9123`. Run `efctl graphql` and `efctl graphql object` / `efctl graphql package` to interact with the local Sui GraphQL RPC at `http://localhost:9125/graphql`. Run `efctl world query [object_id]` to query the Sui GraphQL RPC for world objects.
+
+**Skill: Sui installation.**
+
+Run `efctl sui install` to install `suiup` and the Sui client. This command is not unattended-safe when prerequisites are absent: it can issue up to two confirmation prompts. `--no-progress` and `CI=true` suppress the progress spinner but do not answer these prompts. Unattended execution requires `suiup` and the Sui client to already be installed, or the run must be interactive and human-controlled.
+
+**Skill: CLI maintenance.**
+
+Run `efctl version` to print the current version. Run `efctl update` to download the latest release from GitHub, verify its SHA-256 checksum, and replace the current executable. This replaces the running binary and requires approval. Run `efctl completion [bash|zsh|fish|powershell]` to generate shell completion scripts. Run `efctl doctor` to diagnose prerequisites and environment configuration.
+
+**Configuration reference.**
+
+Supported `efctl.yaml` keys: `with-frontend` (bool, enable Vite dev server on port `5173`), `with-graphql` (bool, enable SQL Indexer and GraphQL API), `world-contracts-url` (string, HTTPS git clone URL), `world-contracts-ref` (string, ref to checkout), `world-contracts-branch` (deprecated alias for `world-contracts-ref`), `builder-scaffold-url` (string, HTTPS git clone URL), `builder-scaffold-ref` (string, ref to checkout), `builder-scaffold-branch` (deprecated alias for `builder-scaffold-ref`), `git-autocrlf` (bool), `container-engine` (string: `docker`, `podman`, or `auto-detect`), `host` (string, default `127.0.0.1`), `expose-postgres` (bool, default false), `additional-bind-mounts` (list of `{hostPath, identifier}`).
+
+Operational environment variables: `CI=true` disables progress output; `EFCTL_ENGINE` overrides configured and auto-detected container engine selection; `DOCKER_HOST` overrides the Docker daemon socket and also affects Podman via `unix://` prefix; `EFCTL_STARTUP_TIMEOUT_SECONDS` overrides the startup liveness timeout; `EFCTL_PG_PASSWORD` supplies the PostgreSQL password for the GraphQL indexer. `EFCTL_PG_PASSWORD` is a secret-valued variable; never record or echo its value.
+
+Global flags: `--config-file <path>` sets an explicit configuration file path, `--debug` enables verbose debug logging, `--no-progress` disables the progress spinner. Env commands also accept `--workspace` / `-w` to set the workspace directory.
+
+**Maintenance rule.**
+
+Changes to `efctl` commands, flags, configuration keys, operational environment variables, service endpoints, workflow side effects, generated command references, or recovery paths must review and update this guide in the same change. After changes, regenerate CLI documentation with `make docs`, inspect the diff for command drift, run `go test ./...` to verify acceptance coverage, and run `pre-commit run --all-files` to verify all gates pass.
+
+## Core documentation
+
+- [README.md](README.md) — project overview, features, installation, and quick start
+- [SECURITY.md](SECURITY.md) — supported versions and vulnerability reporting process
+- [USAGE.md](USAGE.md) — user-facing command and configuration guide
+- [CONTRIBUTING.md](CONTRIBUTING.md) — project contribution guidelines and development workflow
+- [AGENTS.md](AGENTS.md) — AI agent constitution, testing requirements, and development rules
+- [efctl.yaml](efctl.yaml) — reference configuration file with annotated defaults and all supported keys
+
+## Command reference
+
+- [efctl](docs/efctl.md) — root command overview and global flags
+- [efctl init](docs/efctl_init.md) — scaffold configuration file with optional AI instructions
+- [efctl env](docs/efctl_env.md) — environment management: up, down, status, dash, run, shell, extension, assembly, faucet
+- [efctl env up](docs/efctl_env_up.md) — bring up the local environment with prerequisites check and workspace setup
+- [efctl env down](docs/efctl_env_down.md) — tear down the local environment, removing containers, images, networks, and volumes
+- [efctl env status](docs/efctl_env_status.md) — show environment status with non-interactive table output
+- [efctl env dash](docs/efctl_env_dash.md) — launch the environment dashboard in the default browser
+- [efctl env run](docs/efctl_env_run.md) — run a script in the builder-scaffold container (safe-name restricted)
+- [efctl env shell](docs/efctl_env_shell.md) — open an interactive shell inside the running container
+- [efctl env faucet](docs/efctl_env_faucet.md) — request gas tokens from the local faucet
+- [efctl env extension](docs/efctl_env_extension.md) — manage the builder-scaffold extension flow
+- [efctl env extension init](docs/efctl_env_extension_init.md) — scaffold a new extension project
+- [efctl env extension list](docs/efctl_env_extension_list.md) — list available extensions
+- [efctl env extension build](docs/efctl_env_extension_build.md) — compile an extension contract
+- [efctl env extension test](docs/efctl_env_extension_test.md) — run extension tests
+- [efctl env extension publish](docs/efctl_env_extension_publish.md) — publish an extension contract to the target network
+- [efctl env assembly](docs/efctl_env_assembly.md) — deploy, online, and authorize Smart Assemblies
+- [efctl env assembly deploy](docs/efctl_env_assembly_deploy.md) — deploy a new assembly (gate, turret, or storage)
+- [efctl env assembly deploy gate](docs/efctl_env_assembly_deploy_gate.md) — deploy a Smart Gate
+- [efctl env assembly deploy turret](docs/efctl_env_assembly_deploy_turret.md) — deploy a Smart Turret
+- [efctl env assembly deploy storage](docs/efctl_env_assembly_deploy_storage.md) — deploy a Smart Storage Unit
+- [efctl env assembly authorize](docs/efctl_env_assembly_authorize.md) — authorize an extension for an assembly
+- [efctl graphql](docs/efctl_graphql.md) — interact with the local Sui GraphQL RPC
+- [efctl graphql object](docs/efctl_graphql_object.md) — query a specific object from the local GraphQL endpoint
+- [efctl graphql package](docs/efctl_graphql_package.md) — query a specific package from the local GraphQL endpoint
+- [efctl world](docs/efctl_world.md) — world-level inspection commands
+- [efctl world query](docs/efctl_world_query.md) — query world objects via the Sui GraphQL RPC
+- [efctl sui](docs/efctl_sui.md) — Sui toolchain management
+- [efctl sui install](docs/efctl_sui_install.md) — install suiup and the Sui client (conditionally interactive)
+- [efctl update](docs/efctl_update.md) — update efctl to the latest version (replaces the executable)
+- [efctl version](docs/efctl_version.md) — print the current version
+- [efctl doctor](docs/efctl_doctor.md) — diagnose prerequisites and environment configuration
+- [efctl completion](docs/efctl_completion.md) — generate shell completion scripts
+
+## Operations and security
+
+- [Security Policy](SECURITY.md) — supported versions and how to report vulnerabilities
+- [Threat Model](docs/threat-model.md) — security threat analysis and mitigation approach
+- [Toolchain Setup](docs/toolchain-setup.md) — toolchain and environment setup guidance
+
+## Development and contributor references
+
+- [Contributing](CONTRIBUTING.md) — development workflow and contribution guidelines
+- [Agent Constitution](AGENTS.md) — testing pyramid, clean code standards, and environment isolation rules
+- [Agent-Specific: CLAUDE](CLAUDE.md) — agent-specific instructions for Claude
+- [Agent-Specific: GEMINI](GEMINI.md) — agent-specific instructions for Gemini
