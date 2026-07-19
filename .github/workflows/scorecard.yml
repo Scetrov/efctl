@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  security-events: write # Required to upload SARIF to code scanning.
+  id-token: write # Required when publish_results is enabled.
 
 jobs:
   analysis:
