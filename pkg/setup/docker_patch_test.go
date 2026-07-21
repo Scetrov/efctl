@@ -183,6 +183,135 @@ sui start --with-faucet --force-regenesis &
 	assert.Contains(t, string(body), `/workspace/.sui/.env.sui`)
 }
 
+// ── patchEntrypointFaucetWait ────────────────────────────────────────
+
+func TestPatchEntrypointFaucetWait_ReplacesFixedSleep(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	result := patchEntrypointFaucetWait(content)
+	assert.Contains(t, result, "Waiting for faucet on port 9123")
+	assert.Contains(t, result, "curl -s -o /dev/null http://127.0.0.1:9123")
+	assert.Contains(t, result, `echo "[sui-dev] Node ready."`)
+	// The unconditional fixed sleep must be gone in favour of a bounded poll.
+	assert.NotContains(t, result, "sleep 5\necho \"[sui-dev] Node ready.\"")
+}
+
+func TestPatchEntrypointFaucetWait_Idempotent(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	first := patchEntrypointFaucetWait(content)
+	second := patchEntrypointFaucetWait(first)
+	assert.Equal(t, first, second)
+}
+
+func TestPatchEntrypointFaucetWait_NoOpWhenMarkerAbsent(t *testing.T) {
+	// If upstream has already changed this section beyond recognition, the
+	// patch must not corrupt the file — it should leave it untouched.
+	content := `echo "[sui-dev] Something else entirely"`
+	result := patchEntrypointFaucetWait(content)
+	assert.Equal(t, content, result)
+}
+
+// ── patchEntrypointFaucetResilience ──────────────────────────────────
+
+func TestPatchEntrypointFaucetResilience_ReplacesExitWithWarning(t *testing.T) {
+	content := `for alias in ADMIN PLAYER_A PLAYER_B; do
+  sui client switch --address "$alias"
+  for attempt in 1 2 3; do
+    sui client faucet 2>&1 && break
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+    sleep 2
+  done
+done`
+
+	result := patchEntrypointFaucetResilience(content)
+	assert.Contains(t, result, "will not be funded automatically")
+	assert.Contains(t, result, "efctl env faucet --address")
+	// A single funding failure must no longer terminate the whole script.
+	assert.NotContains(t, result, "exit 1")
+}
+
+func TestPatchEntrypointFaucetResilience_Idempotent(t *testing.T) {
+	content := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }`
+
+	first := patchEntrypointFaucetResilience(content)
+	second := patchEntrypointFaucetResilience(first)
+	assert.Equal(t, first, second)
+}
+
+func TestPatchEntrypointFaucetResilience_NoOpWhenMarkerAbsent(t *testing.T) {
+	content := `echo "[sui-dev] Something else entirely"`
+	result := patchEntrypointFaucetResilience(content)
+	assert.Equal(t, content, result)
+}
+
+// ── patchEntrypoint end-to-end: faucet patches applied together ─────
+
+func TestPatchEntrypoint_FaucetPatchesAppliedTogether(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptsDir := filepath.Join(tmpDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+
+	// Mirrors the real upstream builder-scaffold entrypoint.sh shape for the
+	// node-start-through-funding section.
+	content := `#!/usr/bin/env bash
+set -e
+SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
+
+# ---------- start local node ----------
+sui start --with-faucet --force-regenesis &
+NODE_PID=$!
+
+echo "[sui-dev] Waiting for RPC on port 9000..."
+for i in $(seq 1 30); do
+  curl -s -o /dev/null http://127.0.0.1:9000 2>/dev/null && break
+  if [ "$i" -eq 30 ]; then
+    echo "[sui-dev] ERROR: RPC did not become ready" >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."
+
+# ---------- fund accounts ----------
+echo "[sui-dev] Funding accounts from faucet..."
+for alias in ADMIN PLAYER_A PLAYER_B; do
+  sui client switch --address "$alias"
+  for attempt in 1 2 3; do
+    sui client faucet 2>&1 && break
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+    sleep 2
+  done
+done
+`
+	os.WriteFile(entrypointPath, []byte(content), 0755)
+
+	patchEntrypoint(tmpDir)
+
+	body, _ := os.ReadFile(entrypointPath)
+	bodyStr := string(body)
+	assert.Contains(t, bodyStr, "Waiting for faucet on port 9123", "faucet-wait patch should be applied")
+	assert.Contains(t, bodyStr, "will not be funded automatically", "faucet-resilience patch should be applied")
+	assert.NotContains(t, bodyStr, "exit 1\n    }", "faucet funding failure must no longer be fatal")
+}
+
 // ── patchDockerfile safety-net ──────────────────────────────────────
 
 func TestPatchDockerfile_InjectsSedSafetyNet(t *testing.T) {
