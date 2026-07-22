@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"efctl/pkg/ui"
 )
 
 // safePath constructs and validates a file path under the given base directory,
@@ -30,6 +32,13 @@ func safePath(base string, elem ...string) (string, error) {
 	}
 
 	return absP, nil
+}
+
+// warnPatchUnmatched emits a ui.Warn identifying a required patch whose target
+// text was not found. It is non-fatal and never includes file contents or
+// environment values.
+func warnPatchUnmatched(op, target string) {
+	ui.Warn.Printf("patch: %s — target not found in %s", op, target)
 }
 
 func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool, withFrontend bool) error {
@@ -59,10 +68,21 @@ func patchDockerfile(dockerDir string) {
 		return
 	}
 	content := string(dockerfile)
-	if !strings.Contains(content, "postgresql-client") {
+	if strings.Contains(content, "postgresql-client") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, "dos2unix \\") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
+	} else {
+		warnPatchUnmatched("postgresql-client", "Dockerfile")
 	}
-	content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
+
+	if strings.Contains(content, "ENV SUI_CONFIG_DIR=/workspace/.sui") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, "ENV SUI_CONFIG_DIR=/root/.sui") {
+		content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
+	} else {
+		warnPatchUnmatched("sui-config-dir", "Dockerfile")
+	}
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
 	// at build time.  This uses a broad global replacement (not just the
@@ -86,18 +106,26 @@ func patchDockerfile(dockerDir string) {
     mv "$SUIUP_PATH" /usr/local/bin/suiup && \
     chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
 
-	if !strings.Contains(content, globalSui) {
+	if strings.Contains(content, globalSui) {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, `&& sui --version`) {
 		content = strings.Replace(content,
 			`&& sui --version`,
 			`&& sui --version`+"\n"+globalSui,
 			1)
+	} else {
+		warnPatchUnmatched("global-sui", "Dockerfile")
 	}
 
-	if !strings.Contains(content, sedSafetyNet) {
+	if strings.Contains(content, sedSafetyNet) {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
 		content = strings.Replace(content,
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
 			1)
+	} else {
+		warnPatchUnmatched("sed-safety-net", "Dockerfile")
 	}
 	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
 		log.Printf("patch: failed to write Dockerfile: %v", err)
@@ -160,8 +188,11 @@ func patchEntrypointEnvPath(content string) string {
 			prefix := envFileBindMountRe.FindStringSubmatch(match)[1]
 			return prefix + replacement
 		})
+		return content
 	}
 
+	// Neither source nor marker found — target unmatched.
+	warnPatchUnmatched("env-file-path", "scripts/entrypoint.sh")
 	return content
 }
 
@@ -214,9 +245,14 @@ fi
 
 # ---------- start local node ----------`
 
-	if !strings.Contains(content, "wait for postgres") {
-		content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
+	if strings.Contains(content, "wait for postgres") {
+		return content // already-applied
 	}
+	if strings.Contains(content, "# ---------- start local node ----------") {
+		content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
+		return content
+	}
+	warnPatchUnmatched("postgres-wait", "scripts/entrypoint.sh")
 	return content
 }
 
@@ -229,21 +265,51 @@ if [ "${SUI_GRAPHQL_ENABLED:-}" = "true" ]; then
   SUI_START_ARGS="$SUI_START_ARGS --with-graphql=0.0.0.0:9125"
 fi
 sui start $SUI_START_ARGS &`
-	if !strings.Contains(content, "SUI_START_ARGS") {
-		content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
+	if strings.Contains(content, "SUI_START_ARGS") {
+		return content // already-applied
 	}
+	if strings.Contains(content, "sui start --with-faucet --force-regenesis &") {
+		content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
+		return content
+	}
+	warnPatchUnmatched("sui-start", "scripts/entrypoint.sh")
 	return content
 }
 
 func patchEntrypointLoopTimings(content string) string {
-	content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
-	content = strings.ReplaceAll(content, "if [ \"$i\" -eq 30 ]; then", "if [ \"$i\" -eq 60 ]; then")
+	// Already-applied marker for the compound patch.
+	if strings.Contains(content, "RPC responding, waiting for full initialization") {
+		// Still apply seq changes in case of partial application.
+		content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
+		content = strings.ReplaceAll(content, `if [ "$i" -eq 30 ]; then`, `if [ "$i" -eq 60 ]; then`)
+		return content
+	}
 
-	if !strings.Contains(content, "RPC responding, waiting for full initialization") {
-		rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+	matched := false
+
+	// Track whether any source form is present, or the already-patched form
+	// ("seq 1 60") is present (indicating a prior run already patched these lines).
+	if strings.Contains(content, "for i in $(seq 1 30); do") ||
+		strings.Contains(content, `if [ "$i" -eq 30 ]; then`) ||
+		strings.Contains(content, "for i in $(seq 1 60); do") ||
+		strings.Contains(content, `if [ "$i" -eq 60 ]; then`) {
+		matched = true
+	}
+	content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
+	content = strings.ReplaceAll(content, `if [ "$i" -eq 30 ]; then`, `if [ "$i" -eq 60 ]; then`)
+
+	rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
 sleep 5
 echo "[sui-dev] Node ready."`
-		content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
+
+	oldRPCReady := "sleep 2\necho \"[sui-dev] RPC ready.\""
+	if strings.Contains(content, oldRPCReady) {
+		content = strings.ReplaceAll(content, oldRPCReady, rpcWaitScript)
+		matched = true
+	}
+
+	if !matched {
+		warnPatchUnmatched("loop-timings", "scripts/entrypoint.sh")
 	}
 	return content
 }
@@ -258,14 +324,15 @@ echo "[sui-dev] Node ready."`
 // fixed sleep with a real poll on port 9123 before proceeding.
 func patchEntrypointFaucetWait(content string) string {
 	if strings.Contains(content, "Waiting for faucet on port 9123") {
-		return content
+		return content // already-applied
 	}
 
 	old := `echo "[sui-dev] RPC responding, waiting for full initialization..."
 sleep 5
 echo "[sui-dev] Node ready."`
 
-	faucetWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+	if strings.Contains(content, old) {
+		faucetWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
 sleep 2
 echo "[sui-dev] Waiting for faucet on port 9123..."
 FAUCET_READY=0
@@ -278,7 +345,11 @@ if [ "$FAUCET_READY" -ne 1 ]; then
 fi
 echo "[sui-dev] Node ready."`
 
-	return strings.ReplaceAll(content, old, faucetWaitScript)
+		return strings.ReplaceAll(content, old, faucetWaitScript)
+	}
+
+	warnPatchUnmatched("faucet-wait", "scripts/entrypoint.sh")
+	return content
 }
 
 // patchEntrypointFaucetResilience stops a transient faucet-funding failure
@@ -289,7 +360,7 @@ echo "[sui-dev] Node ready."`
 // and force a full `env down && env up` cycle.
 func patchEntrypointFaucetResilience(content string) string {
 	if strings.Contains(content, "will not be funded automatically") {
-		return content
+		return content // already-applied
 	}
 
 	old := `    [ "$attempt" -eq 3 ] && {
@@ -297,9 +368,14 @@ func patchEntrypointFaucetResilience(content string) string {
       exit 1
     }`
 
-	resilientScript := `    [ "$attempt" -eq 3 ] && {
+	if strings.Contains(content, old) {
+		resilientScript := `    [ "$attempt" -eq 3 ] && {
       echo "[sui-dev] WARNING: faucet failed for $alias after 3 attempts; it will not be funded automatically. Retry later with: efctl env faucet --address <address>" >&2
     }`
 
-	return strings.ReplaceAll(content, old, resilientScript)
+		return strings.ReplaceAll(content, old, resilientScript)
+	}
+
+	warnPatchUnmatched("faucet-resilience", "scripts/entrypoint.sh")
+	return content
 }

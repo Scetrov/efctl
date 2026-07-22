@@ -1,14 +1,37 @@
 package setup
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pterm/pterm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"efctl/pkg/ui"
 )
+
+// ── Test helpers ────────────────────────────────────────────────────
+
+// captureWarnings redirects ui.Warn output to a buffer and disables pterm
+// styling so assertions can match plain text. It returns a pointer to the
+// buffer; the original writer and styling mode are restored automatically.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	ui.Warn.Writer = w
+	pterm.DisableStyling()
+	t.Cleanup(func() {
+		ui.Warn.Writer = nil
+		pterm.EnableStyling()
+	})
+	return &buf
+}
 
 // ── prepareDockerEnvironment (integration) ─────────────────────────
 
@@ -381,4 +404,359 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	second, _ := os.ReadFile(dockerfilePath)
 
 	assert.Equal(t, string(first), string(second), "Dockerfile sed patch must be idempotent")
+}
+
+// ── Patch diagnostic tests (tasks 1.2 + 1.3) ────────────────────────
+
+// fullDockerfile returns Dockerfile content whose source texts are all
+// matched by the required patches.
+func fullDockerfile() string {
+	return `FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dos2unix \
+    && apt-get clean
+COPY scripts/ /workspace/scripts/
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+ENV SUI_CONFIG_DIR=/root/.sui
+&& sui --version
+ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
+`
+}
+
+// fullEntrypoint returns entrypoint content whose source texts are all
+// matched by the required patches.
+func fullEntrypoint() string {
+	return `#!/usr/bin/env bash
+set -e
+SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
+ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
+
+# ---------- start local node ----------
+sui start --with-faucet --force-regenesis &
+
+for i in $(seq 1 30); do
+  if [ "$i" -eq 30 ]; then
+    echo "Fail"
+  fi
+done
+sleep 2
+echo "[sui-dev] RPC ready."
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+`
+}
+
+// --- 1.2 Unmatched patches emit warnings --------------------------------------
+
+func TestPatchDockerfile_WarnsOnUnmatchedPostgresqlClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No "dos2unix \" backslash → postgresql-client source absent.
+	content := `FROM ubuntu:24.04
+RUN apt-get update
+ENV SUI_CONFIG_DIR=/root/.sui
+&& sui --version
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "postgresql-client")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedSuiConfigDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := `FROM ubuntu:24.04
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+&& sui --version
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "sui-config-dir")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedGlobalSui(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No "&& sui --version" source → globalSui cannot be injected.
+	content := `FROM ubuntu:24.04
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+ENV SUI_CONFIG_DIR=/root/.sui
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "global-sui")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedSedSafetyNet(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No "RUN dos2unix …" source line → sed safety-net cannot be injected.
+	content := `FROM ubuntu:24.04
+COPY scripts/ /workspace/scripts/
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+ENV SUI_CONFIG_DIR=/root/.sui
+&& sui --version
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "sed-safety-net")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_NoWarningForLegacySedCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// Full content but the old narrow sed line is absent — that should NOT
+	// produce a warning because legacy cleanup is excluded from diagnostics.
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	// No warning about any legacy sed operation
+	assert.NotContains(t, buf.String(), "legacy-sed")
+	assert.NotContains(t, buf.String(), "old-narrow-sed")
+}
+
+func TestPatchEntrypointEnvPath_WarnsOnUnmatched(t *testing.T) {
+	content := `SUI_CFG="/workspace/.sui"
+ENV_FILE="/some/other/path"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	// Content must remain unchanged.
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "env-file-path")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointPostgresWait_WarnsOnUnmatched(t *testing.T) {
+	// Content without "# ---------- start local node ----------" source
+	// or "wait for postgres" marker.
+	content := `#!/bin/bash
+echo "completely different script"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointPostgresWait(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "postgres-wait")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointSuiStart_WarnsOnUnmatched(t *testing.T) {
+	// Content without "sui start --with-faucet --force-regenesis &" source
+	// or "SUI_START_ARGS" marker.
+	content := `#!/bin/bash
+some_other_command &
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointSuiStart(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "sui-start")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointLoopTimings_WarnsOnUnmatchedOnce(t *testing.T) {
+	// Content without any recognizable loop or RPC-ready patterns.
+	content := `#!/bin/bash
+for i in $(seq 1 10); do
+  echo "different loop"
+done
+echo "done"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointLoopTimings(content)
+
+	assert.Equal(t, content, result)
+	w := buf.String()
+	assert.Contains(t, w, "loop-timings", "warning must identify the patch operation")
+	// At most one warning per semantic patch attempt.
+	assert.Equal(t, 1, strings.Count(w, "loop-timings"))
+}
+
+func TestPatchEntrypointFaucetWait_WarnsOnUnmatched(t *testing.T) {
+	// Content without the sleep-5 + "RPC ready" source pattern or marker.
+	content := `echo "[sui-dev] Something else entirely"`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetWait(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "faucet-wait")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointFaucetResilience_WarnsOnUnmatched(t *testing.T) {
+	content := `echo "[sui-dev] Something else entirely"`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetResilience(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "faucet-resilience")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+// --- 1.3 Successful and already-applied patches emit no warning -------------------
+
+func TestPatchDockerfile_NoWarningOnSuccessfulPatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Empty(t, buf.String(), "successful patches must not produce warnings")
+}
+
+func TestPatchDockerfile_NoWarningWhenAlreadyPatched(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+
+	// First pass: apply patches normally.
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+	patchDockerfile(tmpDir)
+
+	// Second pass: everything already applied — no warnings.
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Empty(t, buf.String(), "idempotent re-run must emit no warnings")
+}
+
+func TestPatchEntrypointEnvPath_NoWarningOnSuccess(t *testing.T) {
+	content := `ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	assert.Contains(t, result, `ENV_FILE="${SUI_CFG}/.env.sui"`)
+	assert.Empty(t, buf.String(), "successful patch must not warn")
+}
+
+func TestPatchEntrypointEnvPath_NoWarningWhenAlreadyPatched(t *testing.T) {
+	content := `ENV_FILE="${SUI_CFG}/.env.sui"`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	assert.Equal(t, content, result)
+	assert.Empty(t, buf.String(), "already-applied patch must not warn")
+}
+
+func TestPatchEntrypointPostgresWait_NoWarningWhenAlreadyPatched(t *testing.T) {
+	content := fullEntrypoint()
+	// Apply once
+	result := patchEntrypointPostgresWait(content)
+	assert.Contains(t, result, "wait for postgres")
+
+	// Apply again — already patched
+	buf := captureWarnings(t)
+	result2 := patchEntrypointPostgresWait(result)
+	assert.Equal(t, result, result2)
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointSuiStart_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointSuiStart(content)
+
+	assert.Contains(t, result, "SUI_START_ARGS")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointLoopTimings_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointLoopTimings(content)
+
+	assert.Contains(t, result, "seq 1 60")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointFaucetWait_NoWarningOnSuccess(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetWait(content)
+
+	assert.Contains(t, result, "Waiting for faucet on port 9123")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointFaucetResilience_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetResilience(content)
+
+	assert.Contains(t, result, "will not be funded automatically")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypoint_FullRunWithNoWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := tmpDir
+	scriptsDir := filepath.Join(dockerDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+
+	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+	os.WriteFile(entrypointPath, []byte(fullEntrypoint()), 0755)
+
+	buf := captureWarnings(t)
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	assert.Empty(t, buf.String(), "full successful patch run must produce no warnings")
+}
+
+func TestPatchEntrypoint_IdempotentRunWithNoWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := tmpDir
+	scriptsDir := filepath.Join(dockerDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+
+	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+	os.WriteFile(entrypointPath, []byte(fullEntrypoint()), 0755)
+
+	// First run: apply all patches.
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	// Second run: everything already applied — no warnings.
+	buf := captureWarnings(t)
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	assert.Empty(t, buf.String(), "idempotent re-run must produce no warnings")
 }
