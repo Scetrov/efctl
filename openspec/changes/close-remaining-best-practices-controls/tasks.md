@@ -18,4 +18,4 @@
 
 ## 4. Consolidate Pull Requests
 
-- [ ] 4.1 Consolidate all active pull requests for this change into one pull request before requesting further review or CI runs, then close superseded pull requests.
+- [x] 4.1 Consolidate all active pull requests for this change into one pull request before requesting further review or CI runs, then close superseded pull requests.
