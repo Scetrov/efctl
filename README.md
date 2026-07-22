@@ -2,6 +2,8 @@
 
 ![efctl Logo](https://raw.githubusercontent.com/Scetrov/efctl/refs/heads/main/assets/logo.png)
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13754/badge)](https://www.bestpractices.dev/projects/13754)
+
 > [!IMPORTANT]
 > `efctl` is a high-performance CLI designed to automate the lifecycle of EVE Frontier local world contracts and smart gates.
 
