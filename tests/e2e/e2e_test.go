@@ -6,6 +6,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,7 +26,29 @@ type containerRuntime struct {
 	env    []string
 }
 
-const worldDependencyMarker = "world = {"
+const (
+	worldDependencyMarker    = "world = {"
+	defaultE2ECommandTimeout = 5 * time.Minute
+	envUpE2ECommandTimeout   = 15 * time.Minute
+)
+
+func TestRunCommandTimeout(t *testing.T) {
+	if os.Getenv("EFCTL_E2E_TIMEOUT_HELPER") == "1" {
+		select {}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := runCommand(
+		ctx,
+		os.Args[0],
+		t.TempDir(),
+		[]string{"EFCTL_E2E_TIMEOUT_HELPER=1"},
+		"-test.run=^TestRunCommandTimeout$",
+	)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
 
 // efctlBin returns the absolute path to the compiled efctl binary.
 // Set EFCTL_BINARY env var to override. Otherwise it builds from source.
@@ -62,20 +85,36 @@ func projectRoot(t *testing.T) string {
 	}
 }
 
-// runEfctl runs efctl with the given args in the given workspace directory.
-// Returns stdout+stderr combined, and any error.
+// runEfctl runs efctl with the default E2E command deadline.
 func runEfctl(t *testing.T, bin, workDir string, args ...string) (string, error) {
 	t.Helper()
-	// Always include --no-progress for cleaner test output
+	return runEfctlWithTimeout(t, defaultE2ECommandTimeout, bin, workDir, args...)
+}
+
+// runEfctlWithTimeout runs efctl with a command-specific deadline.
+func runEfctlWithTimeout(t *testing.T, timeout time.Duration, bin, workDir string, args ...string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Always include --no-progress for cleaner test output.
 	fullArgs := append([]string{"--no-progress"}, args...)
-	cmd := exec.Command(bin, fullArgs...)
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	env := append(os.Environ(), "NO_COLOR=1")
 	if runtime, ok := reachableContainerRuntime(); ok {
-		cmd.Env = append(cmd.Env, runtime.env...)
-		cmd.Env = append(cmd.Env, "EFCTL_ENGINE="+runtime.engine)
+		env = append(env, runtime.env...)
+		env = append(env, "EFCTL_ENGINE="+runtime.engine)
 	}
+	return runCommand(ctx, bin, workDir, env, fullArgs...)
+}
+
+func runCommand(ctx context.Context, bin, workDir string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = workDir
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), ctx.Err()
+	}
 	return string(out), err
 }
 
@@ -351,7 +390,7 @@ func (tester *e2eLifecycleTester) testVersion(t *testing.T) {
 
 func (tester *e2eLifecycleTester) testEnvUp(t *testing.T) {
 	start := time.Now()
-	out, err := runEfctl(t, tester.bin, tester.workspace, "env", "up")
+	out, err := runEfctlWithTimeout(t, envUpE2ECommandTimeout, tester.bin, tester.workspace, "env", "up")
 	elapsed := time.Since(start)
 	t.Logf("env up took %s", elapsed)
 
@@ -563,7 +602,7 @@ func (tester *e2eLifecycleTester) testEnvDown(t *testing.T) {
 //   - Docker or Podman available AND daemon reachable
 //   - Git available
 //   - Network access (clones repos, pulls images)
-//   - ~10 minutes for full test (container build + world deploy)
+//   - up to 30 minutes for a cold CI run (container build + world deploy)
 func TestE2E_FullLifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
@@ -576,7 +615,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		t.Skip("skipping: container daemon (Docker/Podman) is not reachable — run `docker info` to debug")
 	}
 
-	// Set generous timeout for CI environments (15 minutes = 900 seconds)
+	// Allow a cold CI environment startup up to 15 minutes; the overall suite
+	// timeout remains larger so later lifecycle and cleanup steps can run.
 	os.Setenv("EFCTL_STARTUP_TIMEOUT_SECONDS", "900")
 	defer os.Unsetenv("EFCTL_STARTUP_TIMEOUT_SECONDS")
 

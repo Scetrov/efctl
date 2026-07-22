@@ -40,7 +40,7 @@ test-integration:
 
 ## test-e2e: Build efctl and run Docker-backed end-to-end tests.
 test-e2e: build
-	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout 15m -v ./tests/e2e/...
+	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout 30m -v ./tests/e2e/...
 
 ## test-all: Run unit, integration, and end-to-end tests.
 test-all: test test-integration test-e2e
