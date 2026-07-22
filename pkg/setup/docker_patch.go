@@ -120,6 +120,8 @@ func patchEntrypoint(dockerDir string) {
 	content = patchEntrypointPostgresWait(content)
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
+	content = patchEntrypointFaucetWait(content)
+	content = patchEntrypointFaucetResilience(content)
 
 	// Post-patch validation: ensure the bind-mount .env.sui path was fully
 	// eliminated. If any patch above silently failed (e.g. upstream changed
@@ -244,4 +246,60 @@ echo "[sui-dev] Node ready."`
 		content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
 	}
 	return content
+}
+
+// patchEntrypointFaucetWait fixes a race condition in the upstream entrypoint:
+// `sui start --with-faucet` runs the RPC (port 9000) and the faucet HTTP
+// server (port 9123) as two independently-initializing components of the
+// same process, but the script only polls port 9000 and then assumes the
+// faucet is ready after a flat 5-second sleep. On a loaded host that's not
+// always enough, and the very next step (funding ADMIN/PLAYER_A/PLAYER_B)
+// gets connection-refused and aborts the whole container. This replaces the
+// fixed sleep with a real poll on port 9123 before proceeding.
+func patchEntrypointFaucetWait(content string) string {
+	if strings.Contains(content, "Waiting for faucet on port 9123") {
+		return content
+	}
+
+	old := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	faucetWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 2
+echo "[sui-dev] Waiting for faucet on port 9123..."
+FAUCET_READY=0
+for i in $(seq 1 60); do
+  curl --max-time 10 -s -o /dev/null http://127.0.0.1:9123 2>/dev/null && { FAUCET_READY=1; break; }
+  sleep 1
+done
+if [ "$FAUCET_READY" -ne 1 ]; then
+  echo "[sui-dev] WARNING: faucet did not respond within 60s; funding may fail" >&2
+fi
+echo "[sui-dev] Node ready."`
+
+	return strings.ReplaceAll(content, old, faucetWaitScript)
+}
+
+// patchEntrypointFaucetResilience stops a transient faucet-funding failure
+// from killing the entire dev environment. The chain (RPC, indexer, GraphQL)
+// is already fully up by this point — failing to fund one account is a
+// narrow, recoverable problem (the operator can retry with
+// `efctl env faucet --address <addr>`), not a reason to tear down everything
+// and force a full `env down && env up` cycle.
+func patchEntrypointFaucetResilience(content string) string {
+	if strings.Contains(content, "will not be funded automatically") {
+		return content
+	}
+
+	old := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }`
+
+	resilientScript := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] WARNING: faucet failed for $alias after 3 attempts; it will not be funded automatically. Retry later with: efctl env faucet --address <address>" >&2
+    }`
+
+	return strings.ReplaceAll(content, old, resilientScript)
 }
