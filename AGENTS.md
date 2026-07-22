@@ -29,6 +29,12 @@ Prioritize security in every change. Avoid hardcoding credentials, ensure proper
 
 The Agent is authorized to operate independently. Continue working through sub-tasks and error resolution unattended until the primary objective is fully complete or a critical blocker is reached.
 
+## 5.1 GitHub Repository Policies
+
+- Use GitHub **Rulesets** for repository-policy changes.
+- Do not create or modify legacy branch-protection rules unless the user explicitly requests them.
+- Before changing a policy, verify its target branches and enforcement scope.
+
 ## 6. Environmental Isolation
 
 To maintain a non-breaking flow and avoid permission requests:
@@ -81,6 +87,11 @@ Prioritize security in every change. Avoid hardcoding credentials.
 
 ## 5. Independent Operation
 The Agent is authorized to operate independently.
+
+## 5.1 GitHub Repository Policies
+- Use GitHub **Rulesets** for repository-policy changes.
+- Do not create or modify legacy branch-protection rules unless the user explicitly requests them.
+- Before changing a policy, verify its target branches and enforcement scope.
 
 ## 6. Environmental Isolation
 - Use ./tmp for temporary files.

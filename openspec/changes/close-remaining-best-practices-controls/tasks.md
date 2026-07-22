@@ -15,3 +15,7 @@
 - [ ] 3.1 Have an authorized bestpractices.dev editor review and save only the accurate repository proposals for project 13754.
 - [ ] 3.2 Verify the project endpoint and README badge after the documented propagation interval, recording the resulting score and every remaining control if the score is not complete.
 - [ ] 3.3 Run `go test ./...` and all pre-commit hooks, then review the diff to confirm no unsupported private assertions, optional Silver/Gold claims, runtime changes, or dependency changes were introduced.
+
+## 4. Consolidate Pull Requests
+
+- [x] 4.1 Consolidate all active pull requests for this change into one pull request before requesting further review or CI runs, then close superseded pull requests.

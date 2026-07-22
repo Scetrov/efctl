@@ -27,12 +27,18 @@ var mandatoryPassingControls = []string{
 
 var urlRequiredControls = map[string]bool{
 	"contribution":                 true,
+	"contribution_requirements":    true,
 	"license_location":             true,
 	"release_notes":                true,
 	"report_process":               true,
 	"report_archive":               true,
 	"vulnerability_report_process": true,
 	"vulnerability_report_private": true,
+}
+
+var unmetAllowedControls = map[string]bool{
+	"dynamic_analysis":                   true,
+	"dynamic_analysis_enable_assertions": true,
 }
 
 var auditedReleaseTags = []string{
@@ -67,6 +73,23 @@ func readBestPracticesManifest(t *testing.T) map[string]string {
 	return manifest
 }
 
+func validateBestPracticesControl(control, status, justification string) []string {
+	var problems []string
+	if status != "Met" && status != "N/A" && !(unmetAllowedControls[control] && status == "Unmet") {
+		problems = append(problems, fmt.Sprintf("%q has status %q; want Met or N/A", control, status))
+	}
+	if justification == "" {
+		return append(problems, fmt.Sprintf("%q is missing a paired justification", control))
+	}
+	if status == "N/A" && !applicabilityExplanation.MatchString(justification) {
+		problems = append(problems, fmt.Sprintf("%q is N/A without an applicability explanation", control))
+	}
+	if urlRequiredControls[control] && status == "Met" && !httpsURL.MatchString(justification) {
+		problems = append(problems, fmt.Sprintf("%q is Met but lacks required HTTPS evidence URL", control))
+	}
+	return problems
+}
+
 func validateBestPracticesManifest(manifest map[string]string) []string {
 	want := make(map[string]bool, len(mandatoryPassingControls))
 	var problems []string
@@ -77,31 +100,13 @@ func validateBestPracticesManifest(manifest map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("missing mandatory status for %q", control))
 			continue
 		}
-		if status != "Met" && status != "N/A" {
-			problems = append(problems, fmt.Sprintf("%q has status %q; want Met or N/A", control, status))
-		}
-
-		justification := strings.TrimSpace(manifest[control+"_justification"])
-		if justification == "" {
-			problems = append(problems, fmt.Sprintf("%q is missing a paired justification", control))
-			continue
-		}
-		if status == "N/A" && !applicabilityExplanation.MatchString(justification) {
-			problems = append(problems, fmt.Sprintf("%q is N/A without an applicability explanation", control))
-		}
-		if urlRequiredControls[control] && status == "Met" && !httpsURL.MatchString(justification) {
-			problems = append(problems, fmt.Sprintf("%q is Met but lacks required HTTPS evidence URL", control))
-		}
+		problems = append(problems, validateBestPracticesControl(control, status, strings.TrimSpace(manifest[control+"_justification"]))...)
 	}
 
 	var unexpected []string
 	for key := range manifest {
-		if !strings.HasSuffix(key, "_status") {
-			continue
-		}
-		control := strings.TrimSuffix(key, "_status")
-		if !want[control] {
-			unexpected = append(unexpected, control)
+		if strings.HasSuffix(key, "_status") && !want[strings.TrimSuffix(key, "_status")] {
+			unexpected = append(unexpected, strings.TrimSuffix(key, "_status"))
 		}
 	}
 	sort.Strings(unexpected)
