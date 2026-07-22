@@ -13,16 +13,16 @@ import (
 )
 
 var mandatoryPassingControls = []string{
-	"description_good", "interact", "contribution", "floss_license", "license_location",
-	"documentation_basics", "documentation_interface", "sites_https", "discussion", "maintained",
-	"repo_public", "repo_track", "repo_interim", "version_unique", "release_notes",
-	"release_notes_vulns", "report_process", "report_responses", "report_archive",
+	"description_good", "interact", "contribution", "contribution_requirements", "floss_license", "license_location",
+	"documentation_basics", "documentation_interface", "english", "sites_https", "discussion", "maintained",
+	"repo_public", "repo_track", "repo_interim", "version_unique", "version_semver", "version_tags", "release_notes",
+	"release_notes_vulns", "report_process", "report_tracker", "report_responses", "report_archive", "enhancement_responses",
 	"vulnerability_report_process", "vulnerability_report_private", "vulnerability_report_response",
-	"build", "test", "test_policy", "tests_are_added", "warnings", "warnings_fixed",
+	"build", "build_floss_tools", "test", "test_policy", "test_invocation", "test_most", "test_continuous_integration", "tests_are_added", "tests_documented_added", "warnings", "warnings_fixed", "warnings_strict",
 	"know_secure_design", "know_common_errors", "crypto_published", "crypto_floss", "crypto_keylength",
-	"crypto_working", "crypto_password_storage", "crypto_random", "delivery_mitm", "delivery_unsigned",
-	"vulnerabilities_fixed_60_days", "no_leaked_credentials", "static_analysis", "static_analysis_fixed",
-	"dynamic_analysis_fixed",
+	"crypto_working", "crypto_password_storage", "crypto_random", "crypto_call", "crypto_weaknesses", "crypto_pfs", "delivery_mitm", "delivery_unsigned",
+	"vulnerabilities_fixed_60_days", "vulnerabilities_critical_fixed", "no_leaked_credentials", "static_analysis", "static_analysis_fixed", "static_analysis_common_vulnerabilities", "static_analysis_often",
+	"dynamic_analysis_fixed", "dynamic_analysis", "dynamic_analysis_unsafe", "dynamic_analysis_enable_assertions",
 }
 
 var urlRequiredControls = map[string]bool{
@@ -67,30 +67,30 @@ func readBestPracticesManifest(t *testing.T) map[string]string {
 	return manifest
 }
 
-func TestBestPracticesMandatoryControlAttestation(t *testing.T) {
-	manifest := readBestPracticesManifest(t)
+func validateBestPracticesManifest(manifest map[string]string) []string {
 	want := make(map[string]bool, len(mandatoryPassingControls))
+	var problems []string
 	for _, control := range mandatoryPassingControls {
 		want[control] = true
 		status, ok := manifest[control+"_status"]
 		if !ok {
-			t.Errorf("missing mandatory status for %q", control)
+			problems = append(problems, fmt.Sprintf("missing mandatory status for %q", control))
 			continue
 		}
 		if status != "Met" && status != "N/A" {
-			t.Errorf("%q has status %q; want Met or N/A", control, status)
+			problems = append(problems, fmt.Sprintf("%q has status %q; want Met or N/A", control, status))
 		}
 
 		justification := strings.TrimSpace(manifest[control+"_justification"])
 		if justification == "" {
-			t.Errorf("%q is missing a paired justification", control)
+			problems = append(problems, fmt.Sprintf("%q is missing a paired justification", control))
 			continue
 		}
 		if status == "N/A" && !applicabilityExplanation.MatchString(justification) {
-			t.Errorf("%q is N/A without an applicability explanation", control)
+			problems = append(problems, fmt.Sprintf("%q is N/A without an applicability explanation", control))
 		}
 		if urlRequiredControls[control] && status == "Met" && !httpsURL.MatchString(justification) {
-			t.Errorf("%q is Met but lacks required HTTPS evidence URL", control)
+			problems = append(problems, fmt.Sprintf("%q is Met but lacks required HTTPS evidence URL", control))
 		}
 	}
 
@@ -106,7 +106,30 @@ func TestBestPracticesMandatoryControlAttestation(t *testing.T) {
 	}
 	sort.Strings(unexpected)
 	if len(unexpected) > 0 {
-		t.Errorf("unexpected non-mandatory status keys: %s", strings.Join(unexpected, ", "))
+		problems = append(problems, "unexpected non-mandatory status keys: "+strings.Join(unexpected, ", "))
+	}
+	return problems
+}
+
+func TestBestPracticesMandatoryControlAttestation(t *testing.T) {
+	for _, problem := range validateBestPracticesManifest(readBestPracticesManifest(t)) {
+		t.Error(problem)
+	}
+}
+
+func TestBestPracticesManifestRejectsIncompleteOrUnsupportedEvidence(t *testing.T) {
+	manifest := readBestPracticesManifest(t)
+	manifest["english_status"] = ""
+	manifest["static_analysis_often_justification"] = ""
+
+	problems := strings.Join(validateBestPracticesManifest(manifest), "\n")
+	for _, want := range []string{
+		`"english" has status ""; want Met or N/A`,
+		`"static_analysis_often" is missing a paired justification`,
+	} {
+		if !strings.Contains(problems, want) {
+			t.Errorf("validation problems %q do not contain %q", problems, want)
+		}
 	}
 }
 
