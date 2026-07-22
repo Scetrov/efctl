@@ -13,4 +13,4 @@
 
 ## 3. Confirm Published Security Result
 
-- [ ] 3.1 After the remediation reaches the default branch, inspect the next OpenSSF Scorecard result and confirm its Vulnerabilities check no longer reports GO-2026-5970.
+- [x] 3.1 After the remediation reaches the default branch, inspect the next OpenSSF Scorecard result and confirm its Vulnerabilities check no longer reports GO-2026-5970.
