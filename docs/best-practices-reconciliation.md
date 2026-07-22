@@ -26,6 +26,7 @@ A subsequent editor review identified 21 additional unanswered score-relevant co
 | `contribution_requirements`, `english`, `version_semver`, `version_tags`, `report_tracker`, `enhancement_responses` | `Met` | `CONTRIBUTING.md`, `README.md`, `CHANGELOG.md`, Git tags, and the public issue tracker |
 | `build_floss_tools`, `test_invocation`, `test_most`, `test_continuous_integration`, `tests_documented_added`, `warnings_strict` | `Met` | `CONTRIBUTING.md`, the Go test suite, Make targets, pre-commit, and GitHub Actions |
 | `vulnerabilities_critical_fixed`, `static_analysis_common_vulnerabilities`, `static_analysis_often` | `Met` | `SECURITY.md`, CodeQL, gosec, govulncheck, go vet, CI, and pre-commit |
-| `crypto_call`, `crypto_weaknesses`, `crypto_pfs`, `dynamic_analysis`, `dynamic_analysis_unsafe`, `dynamic_analysis_enable_assertions` | `N/A` | efctl does not implement the cryptographic protocols or dynamic-analysis tooling to which these controls apply |
+| `crypto_call`, `crypto_weaknesses`, `crypto_pfs`, `dynamic_analysis_unsafe` | `N/A` | efctl does not implement the cryptographic protocols or memory-unsafe software to which these controls apply |
+| `dynamic_analysis`, `dynamic_analysis_enable_assertions` | `Unmet` | These Suggested criteria do not allow `N/A`; efctl does not currently make a dynamic-analysis or assertion-enablement claim |
 
 No repository-controlled enforcement gap was identified by this audit. The remaining score gap is pending authorized-editor review and acceptance; the expanded manifest proposals have not yet been saved to the service.
