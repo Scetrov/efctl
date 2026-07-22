@@ -51,7 +51,16 @@ For every user-visible change or security fix, add a concise human-readable entr
 
 ## Best Practices Badge Owner Workflow
 
-After this change merges to the default branch, an authorized bestpractices.dev editor must open [project 13754](https://www.bestpractices.dev/projects/13754), review the proposals imported from `.bestpractices.json`, save the reviewed answers, and verify both the project JSON endpoint and the live README badge. The repository file proposes answers only; it does not change the service assessment by itself. If an answer is inaccurate, correct it in the service and submit a repository follow-up; reverting this repository change does not roll back an already saved service answer.
+[`.bestpractices.json`](.bestpractices.json) is a version-controlled proposal, not the live assessment. After an attestation change merges, an authorized bestpractices.dev editor must:
+
+1. Open [project 13754](https://www.bestpractices.dev/projects/13754) and compare every Passing control with the proposal and the current Passing criteria.
+2. Record the audit in [`docs/best-practices-reconciliation.md`](docs/best-practices-reconciliation.md), including the audit date, merged commit, project URL, score, badge state, affected control, proposed and live values, classification (`pending owner acceptance`, `unsupported repository evidence`, or `service-side discrepancy`), and required follow-up. Do not record credentials, private report details, or maintainer identities.
+3. Review and save only accurate public-evidence proposals. Do not save a `Met` answer that needs an unconfirmed private fact; retain `N/A` where allowed or record the control as unresolved.
+4. Wait **24 hours**, then check the project JSON endpoint and the live README badge. Record the resulting score and every remaining control. If the state did not propagate, classify it as a service-side discrepancy and inspect or correct the project in the service.
+
+For unsupported repository evidence, open a bounded follow-up that names the control, missing evidence or enforcement, validation required, and owner. Do not change the manifest speculatively. If a relevant change modifies `.bestpractices.json`, `SECURITY.md`, the release process, a cited quality gate, or the service's Passing criteria, repeat the audit after it merges.
+
+To roll back an incorrect repository claim, revert the repository change and update the reconciliation record. Repository rollback does not undo an answer already saved in bestpractices.dev: an authorized editor must correct that answer in the service, wait the same 24-hour interval, and re-verify the endpoint and badge.
 
 ## Bug Reports & Feature Requests
 
