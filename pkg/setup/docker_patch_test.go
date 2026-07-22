@@ -192,7 +192,7 @@ echo "[sui-dev] Node ready."`
 
 	result := patchEntrypointFaucetWait(content)
 	assert.Contains(t, result, "Waiting for faucet on port 9123")
-	assert.Contains(t, result, "curl -s -o /dev/null http://127.0.0.1:9123")
+	assert.Contains(t, result, "curl --max-time 10 -s -o /dev/null http://127.0.0.1:9123")
 	assert.Contains(t, result, `echo "[sui-dev] Node ready."`)
 	// The unconditional fixed sleep must be gone in favour of a bounded poll.
 	assert.NotContains(t, result, "sleep 5\necho \"[sui-dev] Node ready.\"")

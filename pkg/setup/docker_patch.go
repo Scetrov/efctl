@@ -270,7 +270,7 @@ sleep 2
 echo "[sui-dev] Waiting for faucet on port 9123..."
 FAUCET_READY=0
 for i in $(seq 1 60); do
-  curl -s -o /dev/null http://127.0.0.1:9123 2>/dev/null && { FAUCET_READY=1; break; }
+  curl --max-time 10 -s -o /dev/null http://127.0.0.1:9123 2>/dev/null && { FAUCET_READY=1; break; }
   sleep 1
 done
 if [ "$FAUCET_READY" -ne 1 ]; then
