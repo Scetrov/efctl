@@ -86,7 +86,7 @@
   "dynamic_analysis_fixed_status": "N/A",
   "dynamic_analysis_fixed_justification": "No dynamic-analysis finding is currently applicable; the project does not operate a dynamic-analysis tool that has reported an unresolved issue.",
   "contribution_requirements_status": "Met",
-  "contribution_requirements_justification": "CONTRIBUTING.md defines the contribution process, required checks, tests, review expectations, and release-note requirements.",
+  "contribution_requirements_justification": "CONTRIBUTING.md defines the contribution process, required checks, tests, review expectations, and release-note requirements: https://github.com/Scetrov/efctl/blob/main/CONTRIBUTING.md.",
   "english_status": "Met",
   "english_justification": "The README, contributor guide, security policy, source comments, and published documentation are written in English.",
   "version_semver_status": "Met",
@@ -121,10 +121,10 @@
   "static_analysis_common_vulnerabilities_justification": "CodeQL, gosec, and govulncheck scan for common implementation and dependency vulnerabilities in CI and local quality gates.",
   "static_analysis_often_status": "Met",
   "static_analysis_often_justification": "CodeQL, go vet, gosec, and govulncheck run through CI or the documented pre-commit quality gate.",
-  "dynamic_analysis_status": "N/A",
-  "dynamic_analysis_justification": "The project has no applicable dynamic-analysis tool; its Go test, integration, and E2E suites are not presented as a dynamic-analysis claim.",
+  "dynamic_analysis_status": "Unmet",
+  "dynamic_analysis_justification": "The project does not currently apply a dynamic-analysis tool to proposed major releases; no unsupported dynamic-analysis claim is made.",
   "dynamic_analysis_unsafe_status": "N/A",
   "dynamic_analysis_unsafe_justification": "The project does not use a dynamic-analysis tool with an unsafe-language check requiring a project-specific response.",
-  "dynamic_analysis_enable_assertions_status": "N/A",
-  "dynamic_analysis_enable_assertions_justification": "The project does not use a dynamic-analysis tool with assertions that require an enablement configuration."
+  "dynamic_analysis_enable_assertions_status": "Unmet",
+  "dynamic_analysis_enable_assertions_justification": "The project does not currently run dynamic analysis with a configuration that enables many assertions; no unsupported assertion claim is made."
 }
