@@ -29,4 +29,8 @@ A subsequent editor review identified 21 additional unanswered score-relevant co
 | `crypto_call`, `crypto_weaknesses`, `crypto_pfs`, `dynamic_analysis_unsafe` | `N/A` | efctl does not implement the cryptographic protocols or memory-unsafe software to which these controls apply |
 | `dynamic_analysis`, `dynamic_analysis_enable_assertions` | `Unmet` | These Suggested criteria do not allow `N/A`; efctl does not currently make a dynamic-analysis or assertion-enablement claim |
 
-No repository-controlled enforcement gap was identified by this audit. The remaining score gap is pending authorized-editor review and acceptance; the expanded manifest proposals have not yet been saved to the service.
+No repository-controlled enforcement gap was identified by this audit. The expanded manifest proposals are pending authorized-editor review and acceptance.
+
+## 2026-07-22 final verification
+
+After the authorized editor saved the accurate proposals and confirmed propagation, project [13754](https://www.bestpractices.dev/projects/13754.json) reported `achieve_passing: Met`. All 64 attested control statuses matched the merged `.bestpractices.json` manifest, with no remaining Passing control discrepancy. The [live README badge](https://www.bestpractices.dev/projects/13754/badge) reported **passing**.
