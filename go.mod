@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/jedib0t/go-pretty/v6 v6.8.2
+	github.com/jedib0t/go-pretty/v6 v6.8.3
 	github.com/lithammer/fuzzysearch v1.1.8
 	github.com/pterm/pterm v0.12.84-0.20260711211409-bacb2fc434b3
 	github.com/spf13/cobra v1.10.2
