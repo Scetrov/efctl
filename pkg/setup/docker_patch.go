@@ -76,6 +76,14 @@ func patchDockerfile(dockerDir string) {
 		warnPatchUnmatched("postgresql-client", "Dockerfile")
 	}
 
+	if strings.Contains(content, "libatomic1") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, `postgresql-client \`) {
+		content = strings.Replace(content, `postgresql-client \`, `postgresql-client \`+"\n"+`    libatomic1 \`, 1)
+	} else {
+		warnPatchUnmatched("libatomic1", "Dockerfile")
+	}
+
 	if strings.Contains(content, "ENV SUI_CONFIG_DIR=/workspace/.sui") {
 		// already-applied — quiet no-op
 	} else if strings.Contains(content, "ENV SUI_CONFIG_DIR=/root/.sui") {
