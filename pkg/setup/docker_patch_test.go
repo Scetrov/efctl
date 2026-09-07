@@ -47,7 +47,7 @@ func TestPrepareDockerEnvironment(t *testing.T) {
 	dockerfileContent := `FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENV SUI_CONFIG_DIR=/root/.sui
@@ -88,6 +88,9 @@ echo "[sui-dev] RPC ready."
 	dockerfileBody, _ := os.ReadFile(dockerfilePath)
 	bodyStr := string(dockerfileBody)
 	assert.Contains(t, bodyStr, "postgresql-client \\", "Dockerfile should contain postgresql-client")
+	assert.Equal(t, 1, strings.Count(bodyStr, "libatomic1 \\"), "Dockerfile should contain exactly one libatomic1 entry")
+	assert.Contains(t, bodyStr, "apt-get install -y --no-install-recommends", "libatomic1 must use the existing minimal apt layer")
+	assert.Contains(t, bodyStr, "rm -rf /var/lib/apt/lists/*", "Dockerfile must retain apt-list cleanup")
 	assert.Contains(t, bodyStr, `ENV SUI_CONFIG_DIR=/workspace/.sui`, "Dockerfile should contain patched SUI_CONFIG_DIR")
 	assert.Contains(t, bodyStr, `sed -i`, "Dockerfile should contain sed safety-net")
 
@@ -449,6 +452,42 @@ echo "[sui-dev] RPC ready."
 }
 
 // --- 1.2 Unmatched patches emit warnings --------------------------------------
+
+func TestPatchDockerfile_Libatomic1AlreadyPatchedIsQuietAndIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := strings.Replace(fullDockerfile(), `    dos2unix \`, `    dos2unix \`+"\n"+`    libatomic1 \`, 1)
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	patchDockerfile(tmpDir)
+	first, err := os.ReadFile(dockerfilePath)
+	require.NoError(t, err)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+	body, err := os.ReadFile(dockerfilePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, string(first), string(body), "an already-patched Dockerfile must not change")
+	assert.Equal(t, 1, strings.Count(string(body), `libatomic1 \`))
+	assert.NotContains(t, buf.String(), "libatomic1")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedLibatomic1(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := `FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "libatomic1")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
 
 func TestPatchDockerfile_WarnsOnUnmatchedPostgresqlClient(t *testing.T) {
 	tmpDir := t.TempDir()
