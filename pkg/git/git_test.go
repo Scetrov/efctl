@@ -71,8 +71,15 @@ func TestCloneRepository_DirectoryExists(t *testing.T) {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
 
+	// A local bare remote makes this a hermetic integration test: no network,
+	// upstream changes, credentials, or mutation of another checkout.
+	remote := filepath.Join(tempDir, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("Failed to initialize fixture remote: %v\n%s", err, out)
+	}
+
 	// Should return nil because directory already exists and remote was added/fetched successfully
-	err = CloneRepository("https://github.com/evefrontier/world-contracts.git", dest)
+	err = CloneRepository(remote, dest)
 	if err != nil {
 		t.Errorf("Expected nil error when directory already exists and remote updated, got: %v", err)
 	}
@@ -85,6 +92,7 @@ func TestCloneRepository_DirectoryExistsNotGitRepoFails(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(tempDir))
 	dest := filepath.Join(tempDir, "not-a-repo")
 	if err := os.Mkdir(dest, 0750); err != nil {
 		t.Fatalf("Failed to create directory: %v", err)
@@ -107,6 +115,7 @@ func TestCheckoutBranch_NonGitRepoFails(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(tempDir))
 	err = CheckoutRef(tempDir, "main")
 	if err == nil {
 		t.Fatal("Expected checkout to fail for non-git directory")

@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,9 @@ import (
 // dependencies on the cmd package.
 type Options struct {
 	Workspace string
+	// Context cancels new bounded probes; legacy gatherers retain their behavior.
+	Context context.Context
+	Runner  DiagnosticRunner
 
 	// Version fields from cmd.Version / cmd.CommitSHA / cmd.BuildDate.
 	Version   string
@@ -144,16 +148,17 @@ type ConfigEntry struct {
 
 // Report is the complete diagnostic report produced by Gather.
 type Report struct {
-	Efctl     EfctlInfo
-	System    SystemInfo
-	Container ContainerRuntimeInfo
-	Node      NodeInfo
-	Git       GitInfo
-	Env       EnvironmentInfo
-	Ports     []PortInfo
-	Repos     []RepoInfo
-	Sui       SuiClientInfo
-	Config    ConfigInfo
+	Diagnostics RuntimeDiagnostics
+	Efctl       EfctlInfo
+	System      SystemInfo
+	Container   ContainerRuntimeInfo
+	Node        NodeInfo
+	Git         GitInfo
+	Env         EnvironmentInfo
+	Ports       []PortInfo
+	Repos       []RepoInfo
+	Sui         SuiClientInfo
+	Config      ConfigInfo
 }
 
 // ── Entry point ────────────────────────────────────────────────────
@@ -185,6 +190,7 @@ func Gather(opts Options) *Report {
 	r.Repos = gatherRepos(opts.Workspace)
 	r.Sui = gatherSuiClient()
 	r.Config = gatherConfig(opts.Config, opts.ConfigLoaded, opts.ConfigPath)
+	r.Diagnostics = gatherRuntimeDiagnostics(opts, prereqs)
 
 	return r
 }

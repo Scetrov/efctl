@@ -20,7 +20,23 @@ var doctorCmd = &cobra.Command{
 	Long: `Prints a non-destructive summary of the local environment useful for debugging
 and bug reports, including: efctl version, OS details, container runtime, Node.js,
 git, the state of running containers, port availability, and the git ref of any
-checked-out builder-scaffold and world-contracts repositories.`,
+checked-out builder-scaffold and world-contracts repositories.
+
+Also reports source-labelled CPU features, runtime client/server platforms, actual
+Sui image identity, and host/container Sui versions. When the managed Sui container
+is stopped or absent, doctor may create a transient isolated probe of an existing
+local immutable image. It never pulls images, starts the managed environment,
+initializes a Sui client, or mounts host/managed data. Probes override the entrypoint,
+disable networking, use a read-only root and resource limits, and are cleaned up.
+Unsupported isolation or image-declared volumes cause probing to be skipped.
+
+New probes share a 20-second budget with five seconds per command and up to three
+additional seconds for cleanup; existing report gatherers are not covered by this
+budget. Local, remote/VM server, image, and execution-time CPU views are distinct.
+Unavailable fields include reasons. Version success is not proof of node health;
+architecture mismatch suggests possible emulation, not a confirmed crash cause.
+Update efctl, run doctor from your workspace, and review the report before sharing
+it with support. A cleanup failure identifies the probe to inspect/remove.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		prereqs := env.CheckPrerequisites()
 
@@ -36,6 +52,7 @@ checked-out builder-scaffold and world-contracts repositories.`,
 		}
 
 		r := doctor.Gather(doctor.Options{
+			Context:      cmd.Context(),
 			Workspace:    doctorWorkspace,
 			Version:      Version,
 			CommitSHA:    CommitSHA,
@@ -55,6 +72,7 @@ const doctorFmt = "%-22s %s\n"
 func printDoctorReport(r *doctor.Report) {
 	printIdentitySection(r)
 	printToolsSection(r)
+	printRuntimeDiagnosticSection(r)
 	printEnvSection(r)
 	printPortsSection(r)
 	printSuiSection(r)
