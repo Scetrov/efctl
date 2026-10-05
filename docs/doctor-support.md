@@ -22,6 +22,16 @@ Local-image observations describe the current runtime server execution view, not
 
 New external probes share a 20-second collection budget, with at most five seconds per command. Captured output is limited to 64 KiB per stream; over-limit sources are unavailable. Error excerpts are limited to 512 characters, omit raw stderr, redact potentially sensitive fields and escape terminal controls. Legacy gatherers are not covered by this new budget.
 
+## Opt-in crash correlation
+
+Default `efctl doctor` does not query systemd, `coredumpctl`, `journalctl`, or a debugger, and it does not add a crash section. `efctl doctor --crash` appends that section after the existing report. Unavailable crash evidence does not by itself change the doctor exit status. The isolated version and CPU probe still disables core dumps; `--crash` does not start `sui-playground`, enable dumps, or raise `RLIMIT_CORE`.
+
+Container exit code `132` and an illegal-instruction log line are shell/container hints, not the background `sui start` child status and not journal attribution. On a proven-local Linux kernel, doctor may read field-limited crash metadata for the inspected `sui-playground` container id. Remote engines, Docker Desktop, an unestablished remote/VM boundary, macOS, Windows, and a missing `coredumpctl` skip that query. Doctor does not SSH into a Podman machine or remote context, prompt for polkit, or install `coredumpctl` or `gdb`.
+
+The crash section does not include crash environment, process maps, aux vectors, resource limits, open file descriptors, or core-file paths. An unwind, when `gdb` is already installed and one attributed core is present, is a non-interactive instruction view and at most eight frames. efctl does not write a core into the workspace or repository. `coredumpctl debug` may still use its own temporary file; efctl does not name or retain that path.
+
+Crash collection has a separate 20-second budget, at most five seconds per metadata command, and at most eight seconds for one debugger invocation. Review the section before sharing it. Do not attach core files, crash environment, or maps to a support request.
+
 ## Cleanup
 
 Doctor attempts ownership-verified force-removal of only its uniquely labelled disposable probe on completion, failure, timeout and cancellation, with a separate three-second allowance. Anonymous volumes are not intentionally created. A cleanup failure identifies the precise tracked target. Verify its `org.efctl.doctor-probe` label and identity before manually removing it; never remove `sui-playground` as diagnostic cleanup. If ownership cannot be verified, no object is removed automatically.

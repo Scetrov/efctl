@@ -25,6 +25,16 @@ architecture mismatch suggests possible emulation, not a confirmed crash cause.
 Update efctl, run doctor from your workspace, and review the report before sharing
 it with support. A cleanup failure identifies the probe to inspect/remove.
 
+--crash is opt-in and off by default. Default doctor does not query systemd,
+coredumpctl, journalctl, or a debugger, and it does not add a crash section.
+With --crash, doctor appends container exit/log hints and, only on a proven-local
+Linux kernel, field-limited host crash metadata. It does not enable core dumps,
+extract a core, print crash environment or maps, install helpers, or change the
+doctor exit status when crash evidence is unavailable. Crash collection has its
+own 20-second budget, five seconds per metadata command, and eight seconds for
+one debugger invocation. Review that section before sharing it; do not attach
+core files.
+
 ```
 efctl doctor [flags]
 ```
@@ -32,6 +42,7 @@ efctl doctor [flags]
 ### Options
 
 ```
+      --crash              Opt-in local crash correlation; review before sharing and do not attach core files
   -h, --help               help for doctor
   -w, --workspace string   Path to the workspace directory (default ".")
 ```

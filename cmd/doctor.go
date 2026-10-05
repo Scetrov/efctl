@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"efctl/pkg/config"
@@ -13,6 +14,11 @@ import (
 )
 
 var doctorWorkspace string
+var doctorCrash bool
+
+// collectDoctorCrash is replaced in command tests so default doctor can prove it
+// does not query crash helpers.
+var collectDoctorCrash = doctor.CollectCrash
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -36,7 +42,17 @@ budget. Local, remote/VM server, image, and execution-time CPU views are distinc
 Unavailable fields include reasons. Version success is not proof of node health;
 architecture mismatch suggests possible emulation, not a confirmed crash cause.
 Update efctl, run doctor from your workspace, and review the report before sharing
-it with support. A cleanup failure identifies the probe to inspect/remove.`,
+it with support. A cleanup failure identifies the probe to inspect/remove.
+
+--crash is opt-in and off by default. Default doctor does not query systemd,
+coredumpctl, journalctl, or a debugger, and it does not add a crash section.
+With --crash, doctor appends container exit/log hints and, only on a proven-local
+Linux kernel, field-limited host crash metadata. It does not enable core dumps,
+extract a core, print crash environment or maps, install helpers, or change the
+doctor exit status when crash evidence is unavailable. Crash collection has its
+own 20-second budget, five seconds per metadata command, and eight seconds for
+one debugger invocation. Review that section before sharing it; do not attach
+core files.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		prereqs := env.CheckPrerequisites()
 
@@ -61,9 +77,24 @@ it with support. A cleanup failure identifies the probe to inspect/remove.`,
 			ConfigLoaded: cfgLoaded,
 			ConfigPath:   cfgPath,
 			Config:       config.Loaded,
+			Crash:        doctorCrash,
 		})
 
+		var crash *doctor.CrashResult
+		if doctorCrash {
+			collected := collectDoctorCrash(doctor.CrashOptions{
+				Context:  cmd.Context(),
+				GOOS:     runtime.GOOS,
+				Engine:   r.Container.Engine,
+				Boundary: r.Diagnostics.Runtime.Boundary,
+			})
+			crash = &collected
+		}
+
 		printDoctorReport(r)
+		if crash != nil {
+			printCrashSection(*crash)
+		}
 	},
 }
 
@@ -241,5 +272,6 @@ func repoLabel(r doctor.RepoInfo) string {
 
 func init() {
 	doctorCmd.Flags().StringVarP(&doctorWorkspace, "workspace", "w", ".", "Path to the workspace directory")
+	doctorCmd.Flags().BoolVar(&doctorCrash, "crash", false, "Opt-in local crash correlation; review before sharing and do not attach core files")
 	rootCmd.AddCommand(doctorCmd)
 }

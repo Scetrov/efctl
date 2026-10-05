@@ -12,6 +12,12 @@ func printRuntimeDiagnosticSection(r *doctor.Report) {
 	renderRuntimeDiagnostics(os.Stdout, r.Diagnostics)
 }
 
+func printCrashSection(r doctor.CrashResult) {
+	fmt.Fprintln(os.Stdout, "crash diagnostics:")
+	doctor.RenderCrash(os.Stdout, r)
+	fmt.Fprintln(os.Stdout)
+}
+
 func diagnosticLabel(e doctor.Evidence) string {
 	source := doctor.SanitizeDiagnostic(e.Source)
 	if source == "" {
