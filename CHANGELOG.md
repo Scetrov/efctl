@@ -6,6 +6,12 @@ All notable user-visible and security-relevant changes to efctl are documented h
 
 - Add human-readable entries here for user-visible changes and security fixes. Identify any publicly known efctl runtime vulnerability fixed by the release.
 
+## v0.4.0
+
+- Add Sui runtime diagnostics to `efctl doctor`, including CPU, image, and engine-boundary evidence.
+- Add opt-in `efctl doctor --crash` for local crash correlation. Default doctor does not query crash dumps or change its exit status when crash evidence is unavailable.
+- This release does not fix a publicly known efctl runtime vulnerability.
+
 ## v0.3.6
 
 - Remove a vulnerable `x/crypto` dependency and refresh project dependencies and contracts.
