@@ -44,7 +44,7 @@ var unmetAllowedControls = map[string]bool{
 var auditedReleaseTags = []string{
 	"v0.0.1", "v0.0.2", "v0.0.3", "v0.0.4", "v0.0.5", "v0.0.6", "v0.0.7", "v0.0.8", "v0.0.9",
 	"v0.1.0", "v0.1.1", "v0.1.2", "v0.2.0", "v0.2.1", "v0.2.2", "v0.2.3", "v0.2.4", "v0.3.0",
-	"v0.3.1", "v0.3.2", "v0.3.3", "v0.3.4", "v0.3.5", "v0.3.6",
+	"v0.3.1", "v0.3.2", "v0.3.3", "v0.3.4", "v0.3.5", "v0.3.6", "v0.4.0",
 }
 
 var httpsURL = regexp.MustCompile(`https://[^\s)]+`)
