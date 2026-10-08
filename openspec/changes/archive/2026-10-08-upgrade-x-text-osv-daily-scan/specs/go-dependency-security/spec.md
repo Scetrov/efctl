@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Select a remediated text module
 The project SHALL select `golang.org/x/text` v0.41.0 or later, and this change SHALL target v0.42.0 without introducing unrelated dependency upgrades.
@@ -21,14 +21,3 @@ The project's security scans SHALL complete without reporting GO-2026-6629 (CVE-
 #### Scenario: Run OpenSSF Scorecard
 - **WHEN** OpenSSF Scorecard evaluates the merged remediation on the default branch
 - **THEN** its Vulnerabilities check does not report GO-2026-6629
-
-### Requirement: Preserve build integrity and behavior
-The dependency remediation SHALL preserve efctl's existing build, test, and command behavior and SHALL retain verifiable Go module checksums.
-
-#### Scenario: Verify module integrity
-- **WHEN** `go mod verify` is run after the dependency update
-- **THEN** all downloaded modules are verified successfully
-
-#### Scenario: Execute project quality gates
-- **WHEN** the repository's required tests and pre-commit hooks run with the remediated dependency
-- **THEN** they complete successfully without changes to efctl's application behavior
