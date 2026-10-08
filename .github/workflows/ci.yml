@@ -76,4 +76,43 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
           EFCTL_ENGINE: docker
 
+  workflow-lint:
+    name: Workflow linting (actionlint + pinning gate)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check action SHA pinning
+        run: bash scripts/check-action-pinning.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Lint workflows with actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+
+      - name: Generate SARIF report
+        if: always()
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
+            -format "$(cat scripts/actionlint-sarif-template.txt)" \
+            .github/workflows/*.yml > actionlint.sarif || true
+
+      - name: Upload SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: actionlint.sarif
+          category: workflow-lint
+
+      - name: Remove SARIF from workspace
+        if: always()
+        run: rm -f actionlint.sarif
+
 
