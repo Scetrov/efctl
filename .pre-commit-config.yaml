@@ -59,6 +59,20 @@ repos:
         types: [go]
         args: ["-over", "15", "."]
         pass_filenames: false
+  - repo: local
+    hooks:
+      - id: actionlint
+        name: actionlint (workflow linter, v1.7.12)
+        entry: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        language: system
+        files: ^\.github/workflows/
+        pass_filenames: true
+      - id: check-action-pinning
+        name: action SHA pinning check
+        entry: bash scripts/check-action-pinning.sh
+        language: system
+        files: ^\.github/workflows/
+        pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
