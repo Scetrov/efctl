@@ -29,13 +29,10 @@ jobs:
           scan-args: |
             --lockfile
             go.mod
-            --lockfile
-            go.sum
             --format
             sarif
-            --output
+            --output-file
             osv-results.sarif
-            --fail
 
       - name: Upload SARIF to Code Scanning
         if: always()

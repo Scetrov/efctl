@@ -1,4 +1,9 @@
-## ADDED Requirements
+# workflow-linting Specification
+
+## Purpose
+Validate GitHub Actions workflows, enforce SHA-pinned actions, and publish workflow lint findings to Code Scanning.
+
+## Requirements
 
 ### Requirement: Lint workflow files with actionlint
 The repository SHALL lint all GitHub Actions workflow files with actionlint v1.7.12 in both the pre-commit hook set and CI, and a failing lint SHALL block the commit (pre-commit) or the CI job (on push/PR to the default branch).
