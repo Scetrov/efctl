@@ -31,7 +31,7 @@
 
 - [x] 5.1 Commit (signed, conventional commit, agent/model attribution) and push a branch
 - [x] 5.2 Open the PR against `main` referencing Code Scanning alert #7 and GO-2026-6629
-- [ ] 5.3 After CI passes, confirm the SARIF upload path (via `workflow_dispatch` if possible) and archive the OpenSpec change
+- [x] 5.3 After CI passes, confirm the SARIF upload path (via `workflow_dispatch` if possible) and archive the OpenSpec change
 
 ## Finalization evidence
 
@@ -40,4 +40,6 @@
 - Manual run https://github.com/Scetrov/efctl/actions/runs/37782620217 exposed unsupported `--fail` and `go.sum` inputs before SARIF generation. Both failures were reproduced locally with the v2.6.0 action image (digest `sha256:13cef841c7b8de79248e572de0c278d64eaf0a4006e2973fa690b777be30eee4`).
 - Corrected arguments produced SARIF 2.1.0 with zero findings locally. A regression test rejects the original invalid arguments.
 - The three synced main specs now have required Purpose/Requirements headers and pass OpenSpec validation. The stale active copy is removed; this archive is retained as the canonical record.
-- Hosted verification of the corrected workflow remains pending.
+- Hosted verification passed: https://github.com/Scetrov/efctl/actions/runs/37783355579 scanned successfully, uploaded SARIF, and removed the workspace report. Code Scanning records `osv-scanner` / `osv-scan` with zero findings and no processing error for commit `0f8f7841975fd4253bb92f976c497ed4bad7661c`.
+- All pre-commit hooks passed in a clean worktree (including build, tests, govulncheck, actionlint, and action pinning). The installed gosec v2.26.1 was rebuilt with Go 1.27 for toolchain compatibility; no project dependency versions changed.
+- Six unrelated main specs already fail OpenSpec structural validation; they are outside this change's scope. All three specs touched by this change validate successfully.
