@@ -1,4 +1,9 @@
-## ADDED Requirements
+# go-dependency-security Specification
+
+## Purpose
+Keep the Go dependency graph free of the targeted vulnerabilities while preserving module integrity and application behavior.
+
+## Requirements
 
 ### Requirement: Select a remediated text module
 The project SHALL select `golang.org/x/text` v0.41.0 or later, and this change SHALL target v0.42.0 without introducing unrelated dependency upgrades.

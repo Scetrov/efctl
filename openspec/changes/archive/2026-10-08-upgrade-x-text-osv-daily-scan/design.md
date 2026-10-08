@@ -25,12 +25,12 @@ Constraints: all GitHub Actions are SHA-pinned in this repository; commits must 
    Constitution requires the latest applicable released version, and v0.42.0 is a superset of the v0.41.0 fix. Alternative considered: v0.41.0 to minimize churn — rejected because it would immediately be one release behind.
 
 2. **Use the official `google/osv-scanner-action` Docker action, SHA-pinned.**
-   Pin `google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc` (tag v2.6.0, verified via `git/ref/tags`), which runs the `ghcr.io/google/osv-scanner-action:v2.6.0` image, so the action ref and the image tag are released together. Scan arguments are passed via the action's `scan-args` input (`--lockfile go.mod --lockfile go.sum --format sarif --output osv-results.sarif --fail`). Alternative considered: the legacy `google/osv-scanner/actions/scanner` action — rejected (upstream marks it experimental/legacy and redirects to `google/osv-scanner-action`).
+   Pin `google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc` (tag v2.6.0, verified via `git/ref/tags`), which runs the `ghcr.io/google/osv-scanner-action:v2.6.0` image, so the action ref and the image tag are released together. Scan arguments are passed via the action's `scan-args` input (`--lockfile go.mod --format sarif --output-file osv-results.sarif`). Alternative considered: the legacy `google/osv-scanner/actions/scanner` action — rejected (upstream marks it experimental/legacy and redirects to `google/osv-scanner-action`).
 
 3. **Reuse the already-pinned `github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2` (v4.38.2).**
    Same action/SHA already used in `codeql.yml`, so no new action provenance. Use `category: osv-scan` so OSV alerts are grouped separately from CodeQL alerts.
 
-4. **Scan runs with `--fail`; `upload-sarif` runs with `if: always()`.**
+4. **Scan uses the default non-zero exit on vulnerabilities; `upload-sarif` runs with `if: always()`.**
    A failing scan marks the scheduled run red (visible in Actions) while the SARIF is always uploaded so Code Scanning alerts are always created/updated. Alternative considered: never fail — rejected because silent green runs reduce detection signal.
 
 5. **Least-privilege token permissions on the workflow.**
@@ -55,8 +55,8 @@ Constraints: all GitHub Actions are SHA-pinned in this repository; commits must 
 
 - [New advisories published between now and merge] → the daily scan will surface them as fresh alerts; triage follows the repo's reproduce-then-fix loop rather than blind upgrades.
 - [`x/text` v0.42.0 pulls new transitive checksums] → constrained by checking the `go.mod`/`go.sum` diff; `go mod verify` plus full test suite and `pre-commit` gate the merge.
-- [Daily `--fail` runs create noise for long-unfixed findings] → acceptable: red scheduled runs are the intended visibility channel; alerts deduplicate by location.
-- [osv-scanner false positives on lockless module scanning] → `osv-scanner` reads `go.mod`/`go.sum` for Go projects and reports the selected graph; findings are advisory until confirmed.
+- [Daily scans failing on vulnerabilities create noise for long-unfixed findings] → acceptable: red scheduled runs are the intended visibility channel; alerts deduplicate by location.
+- [osv-scanner false positives on lockless module scanning] → `osv-scanner` reads `go.mod` for Go projects and reports the selected graph; findings are advisory until confirmed.
 - [SARIF template is maintained upstream in actionlint testdata] → template is vendored into `scripts/` and only updated when actionlint is upgraded; a mismatch would fail the `upload-sarif` step, making drift visible.
 - [actionlint false positives on existing workflows] → the new CI job runs on the current tree during PR validation; any findings must be fixed (or `-ignore`d with justification) before merge, keeping the gate clean at introduction.
 

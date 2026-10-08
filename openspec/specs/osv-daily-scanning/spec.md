@@ -1,4 +1,9 @@
-## ADDED Requirements
+# osv-daily-scanning Specification
+
+## Purpose
+Detect dependency vulnerabilities daily and publish OSV-Scanner results securely to GitHub Code Scanning.
+
+## Requirements
 
 ### Requirement: Run a daily OSV dependency scan
 The repository SHALL run a scheduled GitHub Actions workflow that executes `osv-scanner` at least once per day against the Go module graph of the default branch, producing SARIF output.
