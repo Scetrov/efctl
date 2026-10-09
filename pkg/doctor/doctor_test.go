@@ -73,6 +73,9 @@ func TestGatherRepo_Missing(t *testing.T) {
 
 func TestGatherRepo_NotGit(t *testing.T) {
 	tmp := t.TempDir()
+	// Keep repository-local TMPDIR fixtures from discovering the parent checkout.
+	// This ceiling applies only to this test, not production repository detection.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(tmp))
 	// Directory exists but is not a git repo.
 	info := gatherRepo("test-repo", tmp)
 	if info.Found {

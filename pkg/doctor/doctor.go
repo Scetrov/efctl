@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,12 @@ import (
 // dependencies on the cmd package.
 type Options struct {
 	Workspace string
+	// Context cancels new bounded probes; legacy gatherers retain their behavior.
+	Context context.Context
+	Runner  DiagnosticRunner
+	// Crash is set only by `efctl doctor --crash`. Gather does not collect crash data;
+	// the command calls CollectCrash separately so default doctor stays unchanged.
+	Crash bool
 
 	// Version fields from cmd.Version / cmd.CommitSHA / cmd.BuildDate.
 	Version   string
@@ -144,16 +151,17 @@ type ConfigEntry struct {
 
 // Report is the complete diagnostic report produced by Gather.
 type Report struct {
-	Efctl     EfctlInfo
-	System    SystemInfo
-	Container ContainerRuntimeInfo
-	Node      NodeInfo
-	Git       GitInfo
-	Env       EnvironmentInfo
-	Ports     []PortInfo
-	Repos     []RepoInfo
-	Sui       SuiClientInfo
-	Config    ConfigInfo
+	Diagnostics RuntimeDiagnostics
+	Efctl       EfctlInfo
+	System      SystemInfo
+	Container   ContainerRuntimeInfo
+	Node        NodeInfo
+	Git         GitInfo
+	Env         EnvironmentInfo
+	Ports       []PortInfo
+	Repos       []RepoInfo
+	Sui         SuiClientInfo
+	Config      ConfigInfo
 }
 
 // ── Entry point ────────────────────────────────────────────────────
@@ -161,6 +169,9 @@ type Report struct {
 // Gather collects all diagnostic information and returns a populated Report.
 // It never panics; individual sub-gatherers capture errors into their fields.
 func Gather(opts Options) *Report {
+	// Crash collection is intentionally outside Gather so default doctor cannot
+	// query systemd or a debugger, even if Options.Crash is set.
+	_ = opts.Crash
 	prereqs := opts.Prereqs
 	if prereqs == nil {
 		prereqs = env.CheckPrerequisites()
@@ -185,6 +196,7 @@ func Gather(opts Options) *Report {
 	r.Repos = gatherRepos(opts.Workspace)
 	r.Sui = gatherSuiClient()
 	r.Config = gatherConfig(opts.Config, opts.ConfigLoaded, opts.ConfigPath)
+	r.Diagnostics = gatherRuntimeDiagnostics(opts, prereqs)
 
 	return r
 }
