@@ -68,6 +68,7 @@ func patchDockerfile(dockerDir string) {
 		return
 	}
 	content := string(dockerfile)
+
 	if strings.Contains(content, "postgresql-client") {
 		// already-applied — quiet no-op
 	} else if strings.Contains(content, "dos2unix \\") {
@@ -91,9 +92,10 @@ func patchDockerfile(dockerDir string) {
 	} else {
 		warnPatchUnmatched("sui-config-dir", "Dockerfile")
 	}
+
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
-	// at build time.  This uses a broad global replacement (not just the
+	// at build time. This uses a broad global replacement (not just the
 	// ENV_FILE assignment) so it survives even when podman-compose reuses a
 	// cached COPY layer that still contains the unpatched upstream file.
 	// The command is idempotent — a no-op when the path is already correct.
@@ -107,6 +109,29 @@ func patchDockerfile(dockerDir string) {
 		content = strings.Replace(content, oldSed, "", 1)
 	}
 
+	// Handle custom Sui binary in helper to lower complexity.
+	content = patchGlobalSui(content)
+
+	if strings.Contains(content, sedSafetyNet) {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
+		content = strings.Replace(
+			content,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
+			1,
+		)
+	} else {
+		warnPatchUnmatched("sed-safety-net", "Dockerfile")
+	}
+
+	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
+		log.Printf("patch: failed to write Dockerfile: %v", err)
+	}
+}
+
+// patchGlobalSui manages custom Sui binary and default suiup.
+func patchGlobalSui(content string) string {
 	// Move sui and suiup to /usr/local/bin so they are globally accessible
 	// for non-root users (critical for Podman keep-id).
 	const globalSui = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
@@ -114,30 +139,24 @@ func patchDockerfile(dockerDir string) {
     mv "$SUIUP_PATH" /usr/local/bin/suiup && \
     chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
 
-	if strings.Contains(content, globalSui) {
-		// already-applied — quiet no-op
+	if strings.Contains(content, `COPY sui /usr/local/bin/sui`) {
+		// Custom Sui is being used
+		// Remove the Sui relocation block.
+		content = strings.Replace(content, globalSui, "", 1)
+	} else if strings.Contains(content, globalSui) {
+		// Check if Dockerfile already defines Sui binary
 	} else if strings.Contains(content, `&& sui --version`) {
-		content = strings.Replace(content,
+		content = strings.Replace(
+			content,
 			`&& sui --version`,
 			`&& sui --version`+"\n"+globalSui,
-			1)
+			1,
+		)
 	} else {
 		warnPatchUnmatched("global-sui", "Dockerfile")
 	}
 
-	if strings.Contains(content, sedSafetyNet) {
-		// already-applied — quiet no-op
-	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
-		content = strings.Replace(content,
-			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
-			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
-			1)
-	} else {
-		warnPatchUnmatched("sed-safety-net", "Dockerfile")
-	}
-	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
-		log.Printf("patch: failed to write Dockerfile: %v", err)
-	}
+	return content
 }
 
 func patchEntrypoint(dockerDir string) {
@@ -146,7 +165,7 @@ func patchEntrypoint(dockerDir string) {
 		log.Printf("patch: invalid entrypoint path: %v", err)
 		return
 	}
-	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 -- path validated by safePath
+	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 G703 -- path validated by safePath
 	if err != nil {
 		return
 	}

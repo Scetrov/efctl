@@ -66,7 +66,7 @@ func StartEnvironment(c container.ContainerClient, workspace string, withGraphql
 	if err := c.CreateNetwork(ctx, c.NetworkName()); err != nil {
 		return fmt.Errorf("failed to create network: %w", err)
 	}
-	if err := c.BuildImage(ctx, dockerDir, "Dockerfile", container.ImageSuiDev); err != nil {
+	if err := c.BuildImage(ctx, filepath.Dir(dockerDir), "docker/Dockerfile", container.ImageSuiDev); err != nil {
 		return err
 	}
 	if err := c.CreateVolume(ctx, container.VolumeSuiConfig); err != nil {
