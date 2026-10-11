@@ -411,6 +411,9 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 
 // ── patchDockerfile custom-sui tests ──────────────────────────────────────
 
+// TestPatchCustomSuiIfPresent_CustomBinaryAvailable verifies that a
+// custom Sui binary can be copied into the Docker image and that the default
+// suiup installation is omitted.
 func TestPatchCustomSuiIfPresent_CustomBinaryAvailable(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -433,6 +436,8 @@ WORKDIR /workspace
 	assert.Equal(t, 1, strings.Count(result, "COPY sui /usr/local/bin/sui"))
 }
 
+// TestPatchCustomSuiIfPresent_NoBinaryUsesFallback verifies that the default
+// suiup installation is retained when no custom Sui binary is available.
 func TestPatchCustomSuiIfPresent_NoBinaryUsesFallback(t *testing.T) {
 	dockerDir := t.TempDir()
 
@@ -450,6 +455,9 @@ WORKDIR /workspace
 	assert.Equal(t, 1, strings.Count(result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`))
 }
 
+// TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback verifies that an empty
+// custom Sui binary is treated as unavailable and triggers the default
+// suiup installation. (don't think testing for an empty file is needed).
 func TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -467,6 +475,9 @@ func TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback(t *testing.T) {
 	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
 }
 
+// TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns verifies that
+// the patch emits a diagnostic instead of inserting custom Sui instructions
+// when the Dockerfile has no recognized WORKDIR insertion point.
 func TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -483,6 +494,9 @@ func TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns(t *testing.T) {
 	assert.Contains(t, warnings.String(), "Dockerfile")
 }
 
+// TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns verifies that the
+// patch warns instead of inserting default Sui installation instructions
+// when the Dockerfile has no recognized insertion point.
 func TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns(t *testing.T) {
 	dockerDir := t.TempDir()
 
@@ -494,6 +508,8 @@ func TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns(t *testing.T) {
 	assert.Contains(t, warnings.String(), "Dockerfile")
 }
 
+// TestPatchCustomSuiIfPresent_IsIdempotent verifies that applying the custom
+// Sui patch repeatedly does not duplicate installation instructions.
 func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -514,6 +530,8 @@ func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
 	assert.NotContains(t, second, "suiup install sui")
 }
 
+// testGlobalSuiBlock returns the expected default suiup installation block
+// used by the custom-Sui patch tests.
 // Keep these test fixtures aligned with the current production constants.
 func testGlobalSuiBlock() string {
 	return `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
@@ -523,6 +541,8 @@ RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.s
     && sui --version`
 }
 
+// testRelocationBlock returns the expected commands that move the installed
+// Sui and suiup executables into /usr/local/bin.
 func testRelocationBlock() string {
 	return `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
     mv "$SUI_PATH" /usr/local/bin/sui && \
