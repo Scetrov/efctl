@@ -110,10 +110,10 @@ func patchDockerfile(dockerDir string) {
 	}
 
 	// Handle custom Sui binary in helper to lower complexity.
-	content = patchGlobalSui(content)
+	content = patchCustomSuiIfPresent(content, dockerDir)
 
 	if strings.Contains(content, sedSafetyNet) {
-		// already-applied — quiet no-op
+		// already-applied - quiet no-op
 	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
 		content = strings.Replace(
 			content,
@@ -130,34 +130,73 @@ func patchDockerfile(dockerDir string) {
 	}
 }
 
-// patchGlobalSui manages custom Sui binary and default suiup.
-func patchGlobalSui(content string) string {
-	// Move sui and suiup to /usr/local/bin so they are globally accessible
-	// for non-root users (critical for Podman keep-id).
+// patchCustomSuiIfPresent handles a custom Sui binary when it exists
+// in the Docker build context and the Dockerfile uses it.
+func patchCustomSuiIfPresent(content, dockerDir string) string {
 	const globalSui = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
-    mv "$SUI_PATH" /usr/local/bin/sui && \
-    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
-    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
+mv "$SUI_PATH" /usr/local/bin/sui && \
+mv "$SUIUP_PATH" /usr/local/bin/suiup && \
+chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
 
-	if strings.Contains(content, `COPY sui /usr/local/bin/sui`) {
-		// Custom Sui is being used
-		// Remove the Sui relocation block.
-		content = strings.Replace(content, globalSui, "", 1)
-	} else if strings.Contains(content, globalSui) {
-		// Check if Dockerfile already defines Sui binary
-	} else if strings.Contains(content, `&& sui --version`) {
-		content = strings.Replace(
+	const customSuiCopy = "COPY sui /usr/local/bin/sui"
+
+	// Detect an active COPY instruction, ignoring commented lines.
+	activeCopy := false
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.TrimSpace(line) == customSuiCopy {
+			activeCopy = true
+			break
+		}
+	}
+
+	// Use the custom binary only if COPY instruction is active and the Sui binary exists.
+
+	if activeCopy {
+		suiPath, err := safePath(dockerDir, "sui")
+		if err != nil {
+			log.Printf("patch: invalid custom Sui binary path: %v", err)
+		} else {
+			info, statErr := os.Stat(suiPath)
+			if statErr == nil && info.Mode().IsRegular() {
+				// Custom binary is available: remove the normal Sui/suiup fallback.
+				return strings.Replace(content, globalSui, "", 1)
+			}
+			if statErr != nil {
+				log.Printf("patch: cannot use custom Sui binary: %v", statErr)
+			} else {
+				warnPatchUnmatched("custom-sui-binary-not-regular", "Docker build context")
+			}
+		}
+
+		// Active COPY but custom binary is unusable: warn and avoid the
+		// normal fallback. Docker will report a COPY/build error.
+		warnPatchUnmatched("custom-sui-binary-unavailable", "Docker build context")
+		return strings.Replace(content, globalSui, "", 1)
+	}
+
+
+	// No active COPY instruction: retain the Sui/suiup fallback.
+	if strings.Contains(content, globalSui) {
+		return content
+	}
+
+	if strings.Contains(content, `&& sui --version`) {
+		return strings.Replace(
 			content,
 			`&& sui --version`,
 			`&& sui --version`+"\n"+globalSui,
 			1,
 		)
-	} else {
-		warnPatchUnmatched("global-sui", "Dockerfile")
 	}
 
+	warnPatchUnmatched("global-sui", "Dockerfile")
 	return content
 }
+
 
 func patchEntrypoint(dockerDir string) {
 	entrypointPath, err := safePath(dockerDir, "scripts", "entrypoint.sh")
