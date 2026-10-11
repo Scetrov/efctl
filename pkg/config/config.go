@@ -55,7 +55,10 @@ type Config struct {
 const DefaultWorldContractsURL = "https://github.com/evefrontier/world-contracts.git"
 
 // DefaultBuilderScaffoldURL is the default git clone URL for builder-scaffold.
-const DefaultBuilderScaffoldURL = "https://github.com/evefrontier/builder-scaffold.git"
+// const DefaultBuilderScaffoldURL = "https://github.com/evefrontier/builder-scaffold.git"
+
+// ForkBuilderScaffoldURL is cloned repository of the builder-scaffold using a custom Sui Binary
+const DefaultBuilderScaffoldURL = "https://github.com/hazard-program/builder-scaffold-no-BMI2.git"
 
 // DefaultBranch is the canonical upstream branch name when branch semantics are needed.
 const DefaultBranch = "main"

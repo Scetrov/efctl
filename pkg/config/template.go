@@ -5,7 +5,11 @@ import "fmt"
 // Recommended refs track the CCP-documented compatible repository pair.
 const RecommendedWorldContractsRef = "v0.0.31"
 
-const RecommendedBuilderScaffoldRef = "v0.0.2"
+// Default Scaffold Branch Reference
+// const RecommendedBuilderScaffoldRef = "v0.0.2"
+
+// Custom Scaffold Branch with Sui Binary
+const RecommendedBuilderScaffoldRef = "no-avx2-sui-binary"
 
 // DefaultConfigYAML returns the scaffolded efctl config file content.
 func DefaultConfigYAML() string {
