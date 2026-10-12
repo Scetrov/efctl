@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"efctl/pkg/doctor"
 )
@@ -43,9 +44,11 @@ func renderRuntimeDiagnostics(w io.Writer, d doctor.RuntimeDiagnostics) {
 		line(prefix+" machine arch", c.Architecture)
 		line(prefix+" CPU flags", c.Flags)
 
-		if prefix == "local" {
-			// The warning call used to display CPU warnings.
-			printCPUCompatibilityWarning()
+		if missing, known := doctor.MissingSuiCPUFeatures(c); known && len(missing) > 0 {
+			fmt.Fprintf(w, doctorFmt, prefix+" CPU warning:",
+				"CPU does not expose "+strings.Join(missing, " and ")+
+					". Some x86-64 Sui builds use these instructions and may fail with SIGILL; "+
+					"this is not a crash diagnosis. See docs/create-your-own-sui-binary.md.")
 		}
 
 		if c.Heterogeneous {

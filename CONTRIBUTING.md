@@ -43,6 +43,11 @@ make security        # gosec and govulncheck security checks
 pre-commit run --all-files # complete local quality gate
 ```
 
+`make test-e2e` defaults to a 60-minute suite deadline. Override it with
+`make test-e2e E2E_TIMEOUT=90m` (or the `E2E_TIMEOUT` environment variable).
+CI uses the same target with `E2E_TIMEOUT=30m`, within a 35-minute job limit.
+Individual command/startup deadlines are separate from the suite deadline.
+
 All applicable checks must pass. Regenerate CLI documentation with `make docs` when a command or its output changes.
 
 ## Release Notes

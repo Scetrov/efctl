@@ -48,8 +48,10 @@ func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool,
 		log.Printf("cleanup: failed to remove legacy override file: %v", err)
 	}
 
-	// Patch Dockerfile (add postgresql-client, sed safety net)
-	patchDockerfile(dockerDir)
+	// Mandatory Sui preparation must succeed before other scaffold files change.
+	if err := patchDockerfile(dockerDir); err != nil {
+		return fmt.Errorf("prepare Dockerfile: %w", err)
+	}
 
 	// Patch entrypoint.sh (env path, postgres wait, sui start args, loop timings)
 	patchEntrypoint(dockerDir)
@@ -57,15 +59,14 @@ func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool,
 	return nil
 }
 
-func patchDockerfile(dockerDir string) {
+func patchDockerfile(dockerDir string) error {
 	dockerfilePath, err := safePath(dockerDir, "Dockerfile")
 	if err != nil {
-		log.Printf("patch: invalid Dockerfile path: %v", err)
-		return
+		return fmt.Errorf("invalid Dockerfile path: %w", err)
 	}
-	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304 -- path validated by safePath
+	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304 G703 -- path validated by safePath
 	if err != nil {
-		return
+		return fmt.Errorf("read Dockerfile: %w", err)
 	}
 	content := string(dockerfile)
 
@@ -109,14 +110,11 @@ func patchDockerfile(dockerDir string) {
 		content = strings.Replace(content, oldSed, "", 1)
 	}
 
-	// Find regardless if indented.
-	relocationPattern := regexp.MustCompile(
-		`(?ms)^RUN SUI_PATH=\$\(command -v sui\).*?chmod \+x /usr/local/bin/sui /usr/local/bin/suiup[ \t]*\r?$`,
-	)
-	// Handle custom Sui binary in helper to lower complexity.
-	content = relocationPattern.ReplaceAllString(content, "")
-	content = patchCustomSuiIfPresent(content, dockerDir)
-
+	// Transform in memory; never persist partially patched setup on failure.
+	content, err = patchCustomSuiIfPresent(content, dockerDir)
+	if err != nil {
+		return err
+	}
 	if strings.Contains(content, sedSafetyNet) {
 		// already-applied - quiet no-op
 	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
@@ -131,77 +129,9 @@ func patchDockerfile(dockerDir string) {
 	}
 
 	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
-		log.Printf("patch: failed to write Dockerfile: %v", err)
+		return fmt.Errorf("write Dockerfile: %w", err)
 	}
-}
-
-// If a Sui binary exists in the docker/ folder, its used instead of the globalSuiBlock.
-// patchCustomSuiIfPresent uses custom Sui binary if it exists in the docker folder if
-// if a sui binary doesn't exist, we fall back to the global Sui relocation block
-func patchCustomSuiIfPresent(content, dockerDir string) string {
-	const customSuiBlock = `# Custom Sui CLI compiled without AVX2
-COPY sui /usr/local/bin/sui
-RUN chmod +x /usr/local/bin/sui \
-    && sui --version`
-
-	const globalSuiBlock = `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
-ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
-RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
-    && echo y | suiup install sui \
-    && sui --version`
-
-	const relocationBlock = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
-    mv "$SUI_PATH" /usr/local/bin/sui && \
-    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
-    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
-
-	suiPath, err := safePath(dockerDir, "sui")
-	customAvailable := false
-	if err != nil {
-		log.Printf("patch: invalid custom Sui binary path: %v", err)
-	} else if info, statErr := os.Stat(suiPath); statErr == nil &&
-		info.Mode().IsRegular() && info.Size() > 0 {
-		customAvailable = true
-	}
-
-	// Remove known Sui setup blocks so repeated patching doesn't duplicate them.
-	content = strings.ReplaceAll(content, customSuiBlock, "")
-	content = strings.ReplaceAll(content, globalSuiBlock, "")
-	content = strings.ReplaceAll(content, relocationBlock, "")
-
-	// Remove extra blank lines left by removing the blocks.
-	content = regexp.MustCompile(`\n[ \t]*\n(?:[ \t]*\n)+`).ReplaceAllString(content, "\n\n")
-
-	if customAvailable {
-		if strings.Contains(content, "WORKDIR /workspace") {
-			content = strings.Replace(
-				content,
-				"WORKDIR /workspace",
-				customSuiBlock+"\n\nWORKDIR /workspace",
-				1,
-			)
-		} else {
-			warnPatchUnmatched("custom-sui-insertion", "Dockerfile")
-		}
-		return content
-	}
-	// No custom binary: restore the default installation and relocation.
-	if strings.Contains(content, "WORKDIR /workspace") {
-		content = strings.Replace(
-			content,
-			"WORKDIR /workspace",
-			globalSuiBlock+"\n\n"+relocationBlock+"\n\nWORKDIR /workspace",
-			1,
-		)
-		content = strings.ReplaceAll(
-			content,
-			"&& apt-get clean\n\n# Sui CLI",
-			"&& apt-get clean\n# Sui CLI",
-		)
-	} else {
-		warnPatchUnmatched("global-sui-insertion", "Dockerfile")
-	}
-	return content
+	return nil
 }
 
 func patchEntrypoint(dockerDir string) {

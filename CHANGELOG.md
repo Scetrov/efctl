@@ -4,7 +4,9 @@ All notable user-visible and security-relevant changes to efctl are documented h
 
 ## Unreleased
 
-- Add human-readable entries here for user-visible changes and security fixes. Identify any publicly known efctl runtime vulnerability fixed by the release.
+- Preserve scaffold files and stop environment builds when custom Sui setup is unsupported or contains an unhydrated Git LFS pointer; normalize supported Sui installation instructions without relying on comments.
+- Render architecture-qualified CPU compatibility hints from collected local/runtime evidence without re-probing or bypassing captured reports.
+- Make the local E2E suite deadline configurable with `E2E_TIMEOUT` (60 minutes by default), while retaining a 30-minute CI deadline; correct the custom-binary startup example.
 
 ## v0.4.0
 

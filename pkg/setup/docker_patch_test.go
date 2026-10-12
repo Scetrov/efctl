@@ -45,6 +45,7 @@ func TestPrepareDockerEnvironment(t *testing.T) {
 	// Create dummy Dockerfile
 	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
 	dockerfileContent := `FROM ubuntu:24.04
+WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -124,7 +125,7 @@ func TestPrepareDockerEnvironment_CleansUpStaleOverride(t *testing.T) {
 	os.WriteFile(overridePath, []byte("services:\n  postgres:\n"), 0644)
 
 	// Minimal files for prepareDockerEnvironment to not fail
-	os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM ubuntu:24.04\n"), 0644)
+	os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM ubuntu:24.04\nWORKDIR /workspace\n"), 0644)
 	os.WriteFile(filepath.Join(scriptsDir, "entrypoint.sh"), []byte("#!/bin/bash\n"), 0755)
 
 	err := prepareDockerEnvironment(dockerDir, "docker", false, false)
@@ -344,6 +345,7 @@ func TestPatchDockerfile_InjectsSedSafetyNet(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
@@ -369,6 +371,7 @@ func TestPatchDockerfile_ReplacesOldNarrowSed(t *testing.T) {
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	// Simulate a Dockerfile that already has the OLD narrow sed from a previous efctl version
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
@@ -394,6 +397,7 @@ func TestPatchDockerfile_SedIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
@@ -411,9 +415,9 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 
 // ── patchDockerfile custom-sui tests ──────────────────────────────────────
 
-// TestPatchCustomSuiIfPresent_CustomBinaryAvailable verifies that a
-// custom Sui binary can be copied into the Docker image and that the default
-// suiup installation is omitted.
+// TestPatchCustomSuiIfPresent_CustomBinaryAvailable verifies generated
+// instructions select the custom artifact and omit the suiup installation.
+// Execution is covered separately by the opt-in container selection test.
 func TestPatchCustomSuiIfPresent_CustomBinaryAvailable(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -427,7 +431,8 @@ func TestPatchCustomSuiIfPresent_CustomBinaryAvailable(t *testing.T) {
 WORKDIR /workspace
 `
 
-	result := patchCustomSuiIfPresent(content, dockerDir)
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
 
 	assert.Contains(t, result, "COPY sui /usr/local/bin/sui")
 	assert.Contains(t, result, "RUN chmod +x /usr/local/bin/sui")
@@ -445,7 +450,8 @@ func TestPatchCustomSuiIfPresent_NoBinaryUsesFallback(t *testing.T) {
 WORKDIR /workspace
 `
 
-	result := patchCustomSuiIfPresent(content, dockerDir)
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
 
 	assert.Contains(t, result, "suiup install sui")
 	assert.Contains(t, result, `mv "$SUI_PATH" /usr/local/bin/sui`)
@@ -455,10 +461,9 @@ WORKDIR /workspace
 	assert.Equal(t, 1, strings.Count(result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`))
 }
 
-// TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback verifies that an empty
-// custom Sui binary is treated as unavailable and triggers the default
-// suiup installation. (don't think testing for an empty file is needed).
-func TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback(t *testing.T) {
+// TestPatchCustomSuiIfPresent_EmptyBinaryRejected prevents silently using
+// a different executable when the user supplied an invalid custom artifact.
+func TestPatchCustomSuiIfPresent_EmptyBinaryRejected(t *testing.T) {
 	dockerDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dockerDir, "sui"),
@@ -468,10 +473,11 @@ func TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback(t *testing.T) {
 
 	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
 
-	result := patchCustomSuiIfPresent(content, dockerDir)
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.Error(t, err)
 
-	assert.Contains(t, result, "suiup install sui")
-	assert.Contains(t, result, testRelocationBlock())
+	assert.Equal(t, content, result)
+	assert.Contains(t, err.Error(), "non-empty regular file")
 	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
 }
 
@@ -487,7 +493,8 @@ func TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns(t *testing.T) {
 	))
 
 	warnings := captureWarnings(t)
-	result := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	require.Error(t, err)
 
 	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
 	assert.Contains(t, warnings.String(), "custom-sui-insertion")
@@ -501,7 +508,8 @@ func TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns(t *testing.T) {
 	dockerDir := t.TempDir()
 
 	warnings := captureWarnings(t)
-	result := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	require.Error(t, err)
 
 	assert.NotContains(t, result, "suiup install sui")
 	assert.Contains(t, warnings.String(), "global-sui-insertion")
@@ -520,14 +528,15 @@ func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
 
 	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
 
-	first := patchCustomSuiIfPresent(content, dockerDir)
-	second := patchCustomSuiIfPresent(first, dockerDir)
+	first, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+	second, err := patchCustomSuiIfPresent(first, dockerDir)
+	require.NoError(t, err)
 
 	assert.Equal(t, 1, strings.Count(second, "COPY sui /usr/local/bin/sui"))
 	assert.Equal(t, 1, strings.Count(second, "RUN chmod +x /usr/local/bin/sui"))
 	assert.NotContains(t, second, "suiup install sui")
-	assert.Equal(t, 1, strings.Count(second, "COPY sui /usr/local/bin/sui"))
-	assert.NotContains(t, second, "suiup install sui")
+	assert.Equal(t, first, second)
 }
 
 // testGlobalSuiBlock returns the expected default suiup installation block
@@ -560,11 +569,11 @@ func fullDockerfile() string {
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     && apt-get clean
+` + testGlobalSuiBlock() + `
 WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENV SUI_CONFIG_DIR=/root/.sui
-&& sui --version
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 `
 }
@@ -620,6 +629,7 @@ func TestPatchDockerfile_WarnsOnUnmatchedLibatomic1(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 RUN apt-get update && apt-get install -y curl
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 `
@@ -637,6 +647,7 @@ func TestPatchDockerfile_WarnsOnUnmatchedPostgresqlClient(t *testing.T) {
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	// No "dos2unix \" backslash → postgresql-client source absent.
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 RUN apt-get update
 ENV SUI_CONFIG_DIR=/root/.sui
 && sui --version
@@ -655,6 +666,7 @@ func TestPatchDockerfile_WarnsOnUnmatchedSuiConfigDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 RUN apt-get install -y dos2unix \
     && apt-get clean
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
@@ -672,7 +684,7 @@ RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 func TestPatchDockerfile_WarnsOnUnmatchedGlobalSui(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	// No "&& sui --version" source → globalSui cannot be injected.
+	// No WORKDIR /workspace insertion point: mandatory Sui setup must fail.
 	content := `FROM ubuntu:24.04
 RUN apt-get install -y dos2unix \
     && apt-get clean
@@ -693,6 +705,7 @@ func TestPatchDockerfile_WarnsOnUnmatchedSedSafetyNet(t *testing.T) {
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	// No "RUN dos2unix …" source line → sed safety-net cannot be injected.
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN apt-get install -y dos2unix \
     && apt-get clean

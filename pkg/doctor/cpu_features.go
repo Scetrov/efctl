@@ -1,14 +1,11 @@
 package doctor
 
-import (
-	"context"
-	"runtime"
-	"strings"
-)
+import "strings"
 
 var requiredCPUFeatures = []string{"adx", "bmi2"}
 
-// MissingCPUFeatures reports which required CPU features are absent.
+// MissingCPUFeatures reports missing features used by some x86-64 Sui builds.
+// Callers interpreting Sui compatibility must first check observed architecture.
 // The boolean is false when the feature data is unavailable.
 func MissingCPUFeatures(flags Evidence) ([]string, bool) {
 	if flags.Reason != "" || flags.Source == "" {
@@ -28,20 +25,14 @@ func MissingCPUFeatures(flags Evidence) ([]string, bool) {
 	}
 
 	return missing, true
-
 }
 
-// LocalMissingCPUFeatures checks the CPU features exposed to this process.
-func LocalMissingCPUFeatures() ([]string, bool) {
-	ctx, cancel := newProbeContext(context.Background())
-	defer cancel()
-
-	p := probes{
-		ctx: ctx,
-		run: runDiagnostic,
+// MissingSuiCPUFeatures interprets collected evidence only; it launches no probes.
+// ARM and unknown architectures do not establish x86 instruction requirements.
+func MissingSuiCPUFeatures(cpu CPUInfo) ([]string, bool) {
+	arch := cpu.Architecture
+	if arch.Source == "" || arch.Reason != "" || NormalizeArchitecture(arch.Value) != "amd64" {
+		return nil, false
 	}
-
-	cpu := gatherLocalCPU(p, runtime.GOOS)
 	return MissingCPUFeatures(cpu.Flags)
-
 }

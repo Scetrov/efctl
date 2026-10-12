@@ -6,6 +6,7 @@ BINARY_PATH := $(OUTPUT_DIR)/$(BINARY)
 GO ?= go
 GOFLAGS ?=
 LDFLAGS ?= -s -w
+E2E_TIMEOUT ?= 60m
 
 .DEFAULT_GOAL := help
 
@@ -39,9 +40,9 @@ test-integration:
 	$(GO) test $(GOFLAGS) -count=1 -tags integration -v ./tests/integration/...
 
 ## test-e2e: Build efctl and run Docker-backed end-to-end tests.
-## Note: Doubled timeout from 30m to 60m so e2e could finish without going past timelimit (on my device).
+## Override the suite deadline with E2E_TIMEOUT (CI uses 30m).
 test-e2e: build
-	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout 60m -v ./tests/e2e/...
+	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout "$(E2E_TIMEOUT)" -v ./tests/e2e/...
 
 ## test-all: Run unit, integration, and end-to-end tests.
 test-all: test test-integration test-e2e
@@ -59,7 +60,8 @@ fmt:
 
 ## fmt-check: Fail if any Go source file needs formatting.
 fmt-check:
-	@test -z "$$(gofmt -l .)" || { echo "Go files need formatting; run 'make fmt'."; gofmt -l .; exit 1; }
+	@files="$$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)"; \
+		test -z "$$files" || { echo "Go files need formatting; run 'make fmt'."; printf '%s\n' "$$files"; exit 1; }
 
 ## vet: Run the Go static analyzer.
 vet:

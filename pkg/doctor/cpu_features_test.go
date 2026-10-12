@@ -76,11 +76,19 @@ func TestMissingCPUFeatures(t *testing.T) {
 	}
 }
 
-func TestLocalMissingCPUFeaturesLive(t *testing.T) {
-	missing, known := LocalMissingCPUFeatures()
-	t.Logf("Local CPU feature data available: %v", known)
-	t.Logf("Missing CPU features: %v", missing)
-	if !known {
-		t.Skip("local CPU feature data unavailable in this environment")
+func TestMissingSuiCPUFeaturesArchitecture(t *testing.T) {
+	for _, arch := range []string{"amd64", "x86_64", "arm64", "aarch64", "", "386"} {
+		t.Run(arch, func(t *testing.T) {
+			cpu := CPUInfo{Architecture: Evidence{Source: "fixture", Value: arch}, Flags: Evidence{Source: "fixture", Value: "sse"}}
+			missing, known := MissingSuiCPUFeatures(cpu)
+			wantKnown := arch == "amd64" || arch == "x86_64"
+			if known != wantKnown || (known && len(missing) != 2) {
+				t.Fatalf("missing=%v known=%v for %s", missing, known, arch)
+			}
+			cpu.Architecture.Reason = "unavailable"
+			if _, known := MissingSuiCPUFeatures(cpu); known {
+				t.Fatal("unavailable architecture treated as confirmed x86")
+			}
+		})
 	}
 }

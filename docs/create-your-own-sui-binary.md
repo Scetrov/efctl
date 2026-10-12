@@ -8,7 +8,7 @@ Please read the entire guide once before you start going through all the steps.
 
 If you experianced a `SIGILL` or illegal instruction error, use `efctl doctor` to check your CPU flags, this allows you to check the CPU flags exposed to the WSL & Linux environment, see if your getting a warning, or if the flags include `ADX` and `BMI2`
 
-The known error results from the offical Sui release not having the `blst` library/package built --portable for runtime support for CPU's that don't have the ADX & BMI2 flag or intruction set features.
+Some x86-64 Sui builds or dependencies (including `blst`) can use ADX/BMI2 instructions unavailable on older CPUs. Missing flags are a compatibility hint, not proof of a SIGILL cause. ARM CPUs do not require these x86 instructions; keep local and container/remote-runtime CPU evidence separate.
 
 You can also check in WSL with
 
@@ -93,7 +93,7 @@ Keep a record of the source commit, Rust toolchain version, compiler flags, and 
 ## 5 Test The Sui binary
 
 ```
-sui start --force-regenesis
+./target/release/sui start --force-regenesis
 ```
 
 `Ctrl C` if you get the first epoch starts
@@ -119,8 +119,9 @@ The builder Dockerfile expects the custom executable in the `docker` folder (jus
 builder-scaffold/docker/sui
 ```
 
-efctl will handle it automatically once its in the `docker/` folder
-you can start your environment with `efctl env up`
+efctl will select a non-empty regular `docker/sui` file without executing it during preparation. A symlink, empty file, unhydrated Git LFS pointer, or unsupported Dockerfile layout produces an error before modifying the Dockerfile or entrypoint. For an LFS-backed artifact, run `git lfs pull` inside `builder-scaffold` first.
+
+These input checks do not authenticate the executable or guarantee architecture/library compatibility. Use trusted source and retain the build provenance described above. You can start your environment with `efctl env up`.
 
 **Important:** Changes in `builder-scaffold/docker/` will be lost if you change the repository references in `efctl.yaml`, keep a duplicate of your `sui` binary elsewhere so you don't lose it
 

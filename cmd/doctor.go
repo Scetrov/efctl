@@ -9,7 +9,6 @@ import (
 	"efctl/pkg/config"
 	"efctl/pkg/doctor"
 	"efctl/pkg/env"
-	"efctl/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -97,24 +96,6 @@ core files.`,
 			printCrashSection(*crash)
 		}
 	},
-}
-
-// Gives a warning if ADX and BMI2 intructions sets are not supported by the CPU.
-func printCPUCompatibilityWarning() {
-	missing, known := doctor.LocalMissingCPUFeatures()
-	if !known || len(missing) == 0 {
-		return
-	}
-
-	// Adds One blank line so its not written in the same paragrah as the info information
-	fmt.Println()
-	ui.Warn.Println(
-		"The CPU does not expose " +
-			strings.Join(missing, " and ") +
-			", which the Sui release requires. " +
-			"Sui can crash on a illegal-instruction error. " +
-			"Read create-your-own-sui-binary.md in efctl/docs on how to build a compatible Sui binary.",
-	)
 }
 
 const doctorFmt = "%-22s %s\n"

@@ -27,7 +27,7 @@ type containerRuntime struct {
 }
 
 const (
-	worldDependencyMarker    = "world = {"
+	worldDependencyMarker = "world = {"
 	// Doubled the timeout limits so the tests could pass
 	defaultE2ECommandTimeout = 10 * time.Minute
 	envUpE2ECommandTimeout   = 30 * time.Minute
