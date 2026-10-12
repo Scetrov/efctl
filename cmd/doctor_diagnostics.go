@@ -42,6 +42,12 @@ func renderRuntimeDiagnostics(w io.Writer, d doctor.RuntimeDiagnostics) {
 		line(prefix+" CPU model", c.Model)
 		line(prefix+" machine arch", c.Architecture)
 		line(prefix+" CPU flags", c.Flags)
+
+		if prefix == "local" {
+			// The warning call used to display CPU warnings.
+			printCPUCompatibilityWarning()
+		}
+
 		if c.Heterogeneous {
 			fmt.Fprintf(w, doctorFmt, prefix+" CPU scope:", "per-CPU features differ; flags are their conservative intersection")
 		}
