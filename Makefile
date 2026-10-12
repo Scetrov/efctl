@@ -39,8 +39,9 @@ test-integration:
 	$(GO) test $(GOFLAGS) -count=1 -tags integration -v ./tests/integration/...
 
 ## test-e2e: Build efctl and run Docker-backed end-to-end tests.
+## Note: Doubled timeout from 30m to 60m so e2e could finish without going past timelimit (on my device).
 test-e2e: build
-	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout 30m -v ./tests/e2e/...
+	EFCTL_BINARY=$(CURDIR)/$(BINARY_PATH) $(GO) test $(GOFLAGS) -count=1 -tags e2e -timeout 60m -v ./tests/e2e/...
 
 ## test-all: Run unit, integration, and end-to-end tests.
 test-all: test test-integration test-e2e

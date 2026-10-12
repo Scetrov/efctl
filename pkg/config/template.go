@@ -5,6 +5,7 @@ import "fmt"
 // Recommended refs track the CCP-documented compatible repository pair.
 const RecommendedWorldContractsRef = "v0.0.31"
 
+// Default Scaffold Branch Reference
 const RecommendedBuilderScaffoldRef = "v0.0.2"
 
 // DefaultConfigYAML returns the scaffolded efctl config file content.

@@ -409,15 +409,158 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	assert.Equal(t, string(first), string(second), "Dockerfile sed patch must be idempotent")
 }
 
+// ── patchDockerfile custom-sui tests ──────────────────────────────────────
+
+// TestPatchCustomSuiIfPresent_CustomBinaryAvailable verifies that a
+// custom Sui binary can be copied into the Docker image and that the default
+// suiup installation is omitted.
+func TestPatchCustomSuiIfPresent_CustomBinaryAvailable(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	content := `FROM ubuntu:24.04
+` + testGlobalSuiBlock() + "\n" + testRelocationBlock() + `
+WORKDIR /workspace
+`
+
+	result := patchCustomSuiIfPresent(content, dockerDir)
+
+	assert.Contains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Contains(t, result, "RUN chmod +x /usr/local/bin/sui")
+	assert.NotContains(t, result, "suiup install sui")
+	assert.NotContains(t, result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+	assert.Equal(t, 1, strings.Count(result, "COPY sui /usr/local/bin/sui"))
+}
+
+// TestPatchCustomSuiIfPresent_NoBinaryUsesFallback verifies that the default
+// suiup installation is retained when no custom Sui binary is available.
+func TestPatchCustomSuiIfPresent_NoBinaryUsesFallback(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+`
+
+	result := patchCustomSuiIfPresent(content, dockerDir)
+
+	assert.Contains(t, result, "suiup install sui")
+	assert.Contains(t, result, `mv "$SUI_PATH" /usr/local/bin/sui`)
+	assert.Contains(t, result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Equal(t, 1, strings.Count(result, "suiup install sui"))
+	assert.Equal(t, 1, strings.Count(result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`))
+}
+
+// TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback verifies that an empty
+// custom Sui binary is treated as unavailable and triggers the default
+// suiup installation. (don't think testing for an empty file is needed).
+func TestPatchCustomSuiIfPresent_EmptyBinaryUsesFallback(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte{},
+		0755,
+	))
+
+	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
+
+	result := patchCustomSuiIfPresent(content, dockerDir)
+
+	assert.Contains(t, result, "suiup install sui")
+	assert.Contains(t, result, testRelocationBlock())
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+}
+
+// TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns verifies that
+// the patch emits a diagnostic instead of inserting custom Sui instructions
+// when the Dockerfile has no recognized WORKDIR insertion point.
+func TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	warnings := captureWarnings(t)
+	result := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Contains(t, warnings.String(), "custom-sui-insertion")
+	assert.Contains(t, warnings.String(), "Dockerfile")
+}
+
+// TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns verifies that the
+// patch warns instead of inserting default Sui installation instructions
+// when the Dockerfile has no recognized insertion point.
+func TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	warnings := captureWarnings(t)
+	result := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+
+	assert.NotContains(t, result, "suiup install sui")
+	assert.Contains(t, warnings.String(), "global-sui-insertion")
+	assert.Contains(t, warnings.String(), "Dockerfile")
+}
+
+// TestPatchCustomSuiIfPresent_IsIdempotent verifies that applying the custom
+// Sui patch repeatedly does not duplicate installation instructions.
+func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
+
+	first := patchCustomSuiIfPresent(content, dockerDir)
+	second := patchCustomSuiIfPresent(first, dockerDir)
+
+	assert.Equal(t, 1, strings.Count(second, "COPY sui /usr/local/bin/sui"))
+	assert.Equal(t, 1, strings.Count(second, "RUN chmod +x /usr/local/bin/sui"))
+	assert.NotContains(t, second, "suiup install sui")
+	assert.Equal(t, 1, strings.Count(second, "COPY sui /usr/local/bin/sui"))
+	assert.NotContains(t, second, "suiup install sui")
+}
+
+// testGlobalSuiBlock returns the expected default suiup installation block
+// used by the custom-Sui patch tests.
+// Keep these test fixtures aligned with the current production constants.
+func testGlobalSuiBlock() string {
+	return `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui \
+    && sui --version`
+}
+
+// testRelocationBlock returns the expected commands that move the installed
+// Sui and suiup executables into /usr/local/bin.
+func testRelocationBlock() string {
+	return `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
+    mv "$SUI_PATH" /usr/local/bin/sui && \
+    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
+    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
+}
+
 // ── Patch diagnostic tests (tasks 1.2 + 1.3) ────────────────────────
 
 // fullDockerfile returns Dockerfile content whose source texts are all
 // matched by the required patches.
+// Note: workspace insertion point for Sui setup added.
 func fullDockerfile() string {
 	return `FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     && apt-get clean
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENV SUI_CONFIG_DIR=/root/.sui

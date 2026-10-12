@@ -68,6 +68,7 @@ func patchDockerfile(dockerDir string) {
 		return
 	}
 	content := string(dockerfile)
+
 	if strings.Contains(content, "postgresql-client") {
 		// already-applied — quiet no-op
 	} else if strings.Contains(content, "dos2unix \\") {
@@ -91,9 +92,10 @@ func patchDockerfile(dockerDir string) {
 	} else {
 		warnPatchUnmatched("sui-config-dir", "Dockerfile")
 	}
+
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
-	// at build time.  This uses a broad global replacement (not just the
+	// at build time. This uses a broad global replacement (not just the
 	// ENV_FILE assignment) so it survives even when podman-compose reuses a
 	// cached COPY layer that still contains the unpatched upstream file.
 	// The command is idempotent — a no-op when the path is already correct.
@@ -107,37 +109,99 @@ func patchDockerfile(dockerDir string) {
 		content = strings.Replace(content, oldSed, "", 1)
 	}
 
-	// Move sui and suiup to /usr/local/bin so they are globally accessible
-	// for non-root users (critical for Podman keep-id).
-	const globalSui = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
+	// Find regardless if indented.
+	relocationPattern := regexp.MustCompile(
+		`(?ms)^RUN SUI_PATH=\$\(command -v sui\).*?chmod \+x /usr/local/bin/sui /usr/local/bin/suiup[ \t]*\r?$`,
+	)
+	// Handle custom Sui binary in helper to lower complexity.
+	content = relocationPattern.ReplaceAllString(content, "")
+	content = patchCustomSuiIfPresent(content, dockerDir)
+
+	if strings.Contains(content, sedSafetyNet) {
+		// already-applied - quiet no-op
+	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
+		content = strings.Replace(
+			content,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
+			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
+			1,
+		)
+	} else {
+		warnPatchUnmatched("sed-safety-net", "Dockerfile")
+	}
+
+	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
+		log.Printf("patch: failed to write Dockerfile: %v", err)
+	}
+}
+
+// If a Sui binary exists in the docker/ folder, its used instead of the globalSuiBlock.
+// patchCustomSuiIfPresent uses custom Sui binary if it exists in the docker folder if
+// if a sui binary doesn't exist, we fall back to the global Sui relocation block
+func patchCustomSuiIfPresent(content, dockerDir string) string {
+	const customSuiBlock = `# Custom Sui CLI compiled without AVX2
+COPY sui /usr/local/bin/sui
+RUN chmod +x /usr/local/bin/sui \
+    && sui --version`
+
+	const globalSuiBlock = `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui \
+    && sui --version`
+
+	const relocationBlock = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
     mv "$SUI_PATH" /usr/local/bin/sui && \
     mv "$SUIUP_PATH" /usr/local/bin/suiup && \
     chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
 
-	if strings.Contains(content, globalSui) {
-		// already-applied — quiet no-op
-	} else if strings.Contains(content, `&& sui --version`) {
-		content = strings.Replace(content,
-			`&& sui --version`,
-			`&& sui --version`+"\n"+globalSui,
-			1)
-	} else {
-		warnPatchUnmatched("global-sui", "Dockerfile")
+	suiPath, err := safePath(dockerDir, "sui")
+	customAvailable := false
+	if err != nil {
+		log.Printf("patch: invalid custom Sui binary path: %v", err)
+	} else if info, statErr := os.Stat(suiPath); statErr == nil &&
+		info.Mode().IsRegular() && info.Size() > 0 {
+		customAvailable = true
 	}
 
-	if strings.Contains(content, sedSafetyNet) {
-		// already-applied — quiet no-op
-	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
-		content = strings.Replace(content,
-			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
-			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
-			1)
+	// Remove known Sui setup blocks so repeated patching doesn't duplicate them.
+	content = strings.ReplaceAll(content, customSuiBlock, "")
+	content = strings.ReplaceAll(content, globalSuiBlock, "")
+	content = strings.ReplaceAll(content, relocationBlock, "")
+
+	// Remove extra blank lines left by removing the blocks.
+	content = regexp.MustCompile(`\n[ \t]*\n(?:[ \t]*\n)+`).ReplaceAllString(content, "\n\n")
+
+	if customAvailable {
+		if strings.Contains(content, "WORKDIR /workspace") {
+			content = strings.Replace(
+				content,
+				"WORKDIR /workspace",
+				customSuiBlock+"\n\nWORKDIR /workspace",
+				1,
+			)
+		} else {
+			warnPatchUnmatched("custom-sui-insertion", "Dockerfile")
+		}
+		return content
+	}
+	// No custom binary: restore the default installation and relocation.
+	if strings.Contains(content, "WORKDIR /workspace") {
+		content = strings.Replace(
+			content,
+			"WORKDIR /workspace",
+			globalSuiBlock+"\n\n"+relocationBlock+"\n\nWORKDIR /workspace",
+			1,
+		)
+		content = strings.ReplaceAll(
+			content,
+			"&& apt-get clean\n\n# Sui CLI",
+			"&& apt-get clean\n# Sui CLI",
+		)
 	} else {
-		warnPatchUnmatched("sed-safety-net", "Dockerfile")
+		warnPatchUnmatched("global-sui-insertion", "Dockerfile")
 	}
-	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
-		log.Printf("patch: failed to write Dockerfile: %v", err)
-	}
+	return content
 }
 
 func patchEntrypoint(dockerDir string) {
@@ -146,7 +210,7 @@ func patchEntrypoint(dockerDir string) {
 		log.Printf("patch: invalid entrypoint path: %v", err)
 		return
 	}
-	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 -- path validated by safePath
+	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 G703 -- path validated by safePath
 	if err != nil {
 		return
 	}
