@@ -530,7 +530,6 @@ func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
 	assert.NotContains(t, second, "suiup install sui")
 }
 
-
 // testGlobalSuiBlock returns the expected default suiup installation block
 // used by the custom-Sui patch tests.
 // Keep these test fixtures aligned with the current production constants.
