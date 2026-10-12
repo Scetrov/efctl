@@ -61,16 +61,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build efctl
-        run: go build -trimpath -ldflags="-s -w" -o output/efctl main.go
-
       - name: Verify Docker
         run: docker info
 
       - name: E2E Tests
-        run: |
-          EFCTL_BINARY=${{ github.workspace }}/output/efctl \
-          go test -v -count=1 -tags e2e -timeout 30m ./tests/e2e/...
+        run: make test-e2e E2E_TIMEOUT=30m
         env:
           CI: "true"
           DOCKER_HOST: unix:///var/run/docker.sock

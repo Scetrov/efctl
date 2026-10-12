@@ -411,6 +411,11 @@ func TestFindDefaultConfigPath_FindsInParentDirectory(t *testing.T) {
 
 func TestFindDefaultConfigPath_NotFound(t *testing.T) {
 	dir := t.TempDir()
+	// TMPDIR may be inside a checkout whose ancestors contain efctl.yaml.
+	// Use a unique absent name to test exhaustion without depending on host files.
+	original := DefaultConfigFiles
+	DefaultConfigFiles = []string{"missing-" + filepath.Base(filepath.Dir(dir)) + ".yaml"}
+	t.Cleanup(func() { DefaultConfigFiles = original })
 	path, found, err := FindDefaultConfigPath(dir)
 	require.NoError(t, err)
 	assert.False(t, found)
