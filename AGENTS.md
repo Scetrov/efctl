@@ -53,6 +53,15 @@ To maintain a non-breaking flow and avoid permission requests:
 - Keep responses concise and write substantial artifacts to files instead of long inline output.
 - Utility commands: `ctx stats`, `ctx doctor`, `ctx upgrade`.
 
+## 7.1 Graphify Code Insights
+
+- Before investigating code, architecture, dependencies, or file relationships, check for the ignored `graphify-out/` directory at the repository root.
+- When `graphify-out/graph.json` exists, use the existing graph first: `graphify query "<question>" --budget 1500`. Use `graphify path "<source>" "<target>"` to trace relationships and `graphify explain "<node>"` for focused insights.
+- Consult `graphify-out/GRAPH_REPORT.md` when available for an architectural overview, central nodes, communities, and suggested questions. Route large graph data and query output through context-mode rather than dumping the full JSON.
+- Treat graph insights as navigation aids, not authoritative proof: verify relevant source files before editing or making definitive claims. Cite source locations and distinguish extracted relationships from inferred or ambiguous ones; the graph may be stale or incomplete.
+- If the directory, graph, or CLI is unavailable, fall back to targeted source inspection (and available graph artifacts). Do not automatically install graphify or rebuild the graph unless requested.
+- Keep `graphify-out/` ignored and untracked; do not commit generated graph artifacts.
+
 ## 8. Development Cheat Sheet
 
 Quick reference for common `efctl` operations:

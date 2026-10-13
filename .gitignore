@@ -33,4 +33,5 @@ tmp/
 .github/context-mode/
 .pi/
 .pi-subagents/
+graphify-out/
 
