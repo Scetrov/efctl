@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"efctl/pkg/doctor"
+
+	"github.com/pterm/pterm"
 )
 
 func diagnosticFixture() doctor.RuntimeDiagnostics {
@@ -58,6 +60,17 @@ func TestUnavailableFlagsAreNotEmptyFeatures(t *testing.T) {
 }
 
 func TestCompleteDoctorReportDiagnosticSecurity(t *testing.T) {
+	// Disable trusted UI styling so any escape sequence here must come from
+	// untrusted diagnostic evidence. Badge styling is covered separately.
+	wasColor := pterm.PrintColor
+	pterm.DisableColor()
+	t.Cleanup(func() {
+		if wasColor {
+			pterm.EnableColor()
+		} else {
+			pterm.DisableColor()
+		}
+	})
 	d := diagnosticFixture()
 	d.HostSui.Value = "mnemonic=words"
 	d.HostSui.Reason = ""

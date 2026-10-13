@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"efctl/pkg/doctor"
+	"efctl/pkg/ui"
 )
 
 func printRuntimeDiagnosticSection(r *doctor.Report) {
@@ -45,10 +46,11 @@ func renderRuntimeDiagnostics(w io.Writer, d doctor.RuntimeDiagnostics) {
 		line(prefix+" CPU flags", c.Flags)
 
 		if missing, known := doctor.MissingSuiCPUFeatures(c); known && len(missing) > 0 {
+			fmt.Fprintln(w)
 			fmt.Fprintf(w, doctorFmt, prefix+" CPU warning:",
-				"CPU does not expose "+strings.Join(missing, " and ")+
+				ui.Warn.Sprint("CPU does not expose "+strings.Join(missing, " and ")+
 					". Some x86-64 Sui builds use these instructions and may fail with SIGILL; "+
-					"this is not a crash diagnosis. See docs/create-your-own-sui-binary.md.")
+					"this is not a crash diagnosis. See docs/create-your-own-sui-binary.md."))
 		}
 
 		if c.Heterogeneous {
