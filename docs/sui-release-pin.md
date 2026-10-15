@@ -53,15 +53,17 @@ When selecting a new default Sui release, do all of the following before committ
 
 1. **Confirm compatibility.** Verify the candidate release still serves the fullnode JSON-RPC endpoint and answers a required method — `sui_getNormalizedMoveFunction` for a known published function — not just an open port or a generic HTTP response.
 2. **Verify the reference digests.** Download the official `x86_64` and `aarch64` release assets into `./tmp`, compute their SHA-256 digests, and record the values in the pinned block comments and this document.
-3. **Run the one-shot container build.** With the opt-in validation enabled, build the actual generated block and confirm the installed `sui` reports the pinned release:
+3. **Run the one-shot container build.** Stage a clean builder-scaffold checkout at `./tmp/pin-validation/builder-scaffold` with no custom `docker/sui` artifact. On amd64 with Podman and network access, run the opt-in validation to build the actual generated block and assert the installed `sui` reports the exact pinned release. Disable test caching so each acceptance run builds and executes the image:
 
    ```
-   EFCTL_PIN_VALIDATE=1 go test ./pkg/setup/ -run TestManualPinValidation -v
+   EFCTL_PIN_VALIDATE=1 go test ./pkg/setup/ -run TestManualPinValidation -count=1 -v
    ```
+
+   This test checks the build and version only; it does not start a fullnode or verify JSON-RPC. Separately record a successful live-node `sui_getNormalizedMoveFunction` response for a known published function (step 1), then run the full lifecycle (step 4). A passing version check alone is not compatibility acceptance.
 
 4. **Run the full lifecycle.** Run the existing E2E lifecycle (`go test -tags e2e -run TestE2E_FullLifecycle ./tests/e2e/`) and confirm the required subtests execute and pass. Do not add a new skip pattern to hide a compatibility failure.
 5. **Review security advisories.** Check for open advisories affecting the candidate release and note the pin is a compatibility pin, not a security pin.
-6. **Update the managed block and tests.** Change the tag in `globalSuiBlock`, update the reference-digest comments, and update the unit/container expectations so the pinned-not-floating and legacy-migration tests pass.
+6. **Update the managed block and tests.** Change the tag in `globalSuiBlock`, update the reference-digest comments, and update the unit/container expectations and the manual test's exact expected version so the pinned-not-floating, legacy-migration, and version checks pass.
 
 ## Rollback
 
