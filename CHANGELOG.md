@@ -4,6 +4,8 @@ All notable user-visible and security-relevant changes to efctl are documented h
 
 ## Unreleased
 
+- Pin the default container Sui runtime to `testnet-1.81.1` to preserve the fullnode JSON-RPC methods required by world configuration; migrate legacy floating installations during preparation.
+- Raise the minimum Go version to 1.27.2 for standard-library security fixes.
 - Preserve scaffold files and stop environment builds when custom Sui setup is unsupported or contains an unhydrated Git LFS pointer; normalize supported Sui installation instructions without relying on comments.
 - Render architecture-qualified CPU compatibility hints from collected local/runtime evidence without re-probing or bypassing captured reports.
 - Make the local E2E suite deadline configurable with `E2E_TIMEOUT` (60 minutes by default), while retaining a 30-minute CI deadline; correct the custom-binary startup example.

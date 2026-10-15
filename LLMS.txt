@@ -122,6 +122,7 @@ Changes to `efctl` commands, flags, configuration keys, operational environment 
 - [Security Policy](SECURITY.md) — supported versions and how to report vulnerabilities
 - [Threat Model](docs/threat-model.md) — security threat analysis and mitigation approach
 - [Toolchain Setup](docs/toolchain-setup.md) — toolchain and environment setup guidance
+- [Sui Release Pin](docs/sui-release-pin.md) — default container Sui release tag, reference digests, and pin-update checklist
 
 ## Development and contributor references
 

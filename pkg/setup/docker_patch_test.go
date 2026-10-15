@@ -453,12 +453,50 @@ WORKDIR /workspace
 	result, err := patchCustomSuiIfPresent(content, dockerDir)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "suiup install sui")
+	assert.Contains(t, result, "suiup install sui@testnet-1.81.1")
 	assert.Contains(t, result, `mv "$SUI_PATH" /usr/local/bin/sui`)
 	assert.Contains(t, result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
 	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
-	assert.Equal(t, 1, strings.Count(result, "suiup install sui"))
+	assert.Equal(t, 1, strings.Count(result, "suiup install sui@testnet-1.81.1"))
 	assert.Equal(t, 1, strings.Count(result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`))
+}
+
+// TestPatchCustomSuiIfPresent_DefaultIsPinnedNotFloating verifies the default
+// block selects the pinned compatibility release and never the unversioned
+// floating form that silently drifted to the JSON-RPC-removing release.
+func TestPatchCustomSuiIfPresent_DefaultIsPinnedNotFloating(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\nWORKDIR /workspace\n", dockerDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(result, "suiup install sui@testnet-1.81.1"))
+	assert.NotContains(t, result, "echo y | suiup install sui \\")
+	assert.Contains(t, result, "d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4")
+	assert.Contains(t, result, "4c2d948417af9f55cdd1f2f5d8e558533502672004c34f6429aa6cb114a51583")
+}
+
+// TestPatchCustomSuiIfPresent_LegacyFloatingBlockMigrated verifies existing
+// scaffolds holding the pre-pin floating block transition to exactly one
+// pinned installation and remain idempotent afterwards.
+func TestPatchCustomSuiIfPresent_LegacyFloatingBlockMigrated(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	content := `FROM ubuntu:24.04
+` + testLegacyGlobalSuiBlock() + "\n" + testRelocationBlock() + `
+WORKDIR /workspace
+`
+
+	first, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(first, "suiup install sui@testnet-1.81.1"))
+	assert.NotContains(t, first, "echo y | suiup install sui \\")
+	assert.Contains(t, first, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+
+	second, err := patchCustomSuiIfPresent(first, dockerDir)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
 }
 
 // TestPatchCustomSuiIfPresent_EmptyBinaryRejected prevents silently using
@@ -543,6 +581,20 @@ func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
 // used by the custom-Sui patch tests.
 // Keep these test fixtures aligned with the current production constants.
 func testGlobalSuiBlock() string {
+	return `# Sui CLI via suiup pinned to testnet-1.81.1 (last release with fullnode JSON-RPC)
+# Reference SHA-256 (not verified at build time):
+#   x86_64  d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
+#   aarch64 4c2d948417af9f55cdd1f2f5d8e558533502672004c34f6429aa6cb114a51583
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui@testnet-1.81.1 \
+    && sui --version`
+}
+
+// testLegacyGlobalSuiBlock returns the pre-pin floating default block that
+// existing scaffolds may still contain; it must be recognized only so it can
+// be replaced by the pinned testGlobalSuiBlock on the next preparation.
+func testLegacyGlobalSuiBlock() string {
 	return `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
 ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
 RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \

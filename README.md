@@ -84,7 +84,7 @@ cd ~ && curl -fsSL "https://github.com/Scetrov/efctl/releases/latest/download/ef
 
 ### From Source
 
-Ensure you have [Go 1.27.1+](https://go.dev/dl/) installed. CI and release builds select the baseline from `go.mod`.
+Ensure you have [Go 1.27.2+](https://go.dev/dl/) installed. CI and release builds select the baseline from `go.mod`.
 
 ```bash
 git clone https://github.com/Scetrov/efctl.git

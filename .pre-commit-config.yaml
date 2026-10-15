@@ -63,7 +63,7 @@ repos:
     hooks:
       - id: actionlint
         name: actionlint (workflow linter, v1.7.12)
-        entry: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        entry: actionlint
         language: system
         files: ^\.github/workflows/
         pass_filenames: true

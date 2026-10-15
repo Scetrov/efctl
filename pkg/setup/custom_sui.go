@@ -14,7 +14,22 @@ COPY sui /usr/local/bin/sui
 RUN chmod +x /usr/local/bin/sui \
     && /usr/local/bin/sui --version`
 
-const globalSuiBlock = `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
+// globalSuiBlock pins the last Sui release that still serves fullnode JSON-RPC
+// (removed in its successor, testnet-v1.82.1). The digests are a non-enforced
+// integrity reference for the official release assets.
+const globalSuiBlock = `# Sui CLI via suiup pinned to testnet-1.81.1 (last release with fullnode JSON-RPC)
+# Reference SHA-256 (not verified at build time):
+#   x86_64  d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
+#   aarch64 4c2d948417af9f55cdd1f2f5d8e558533502672004c34f6429aa6cb114a51583
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui@testnet-1.81.1 \
+    && sui --version`
+
+// legacyGlobalSuiBlock is the pre-pin floating default that existing
+// scaffolds may still contain. It is recognized only so preparation can
+// replace it with the pinned globalSuiBlock.
+const legacyGlobalSuiBlock = `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
 ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
 RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
     && echo y | suiup install sui \
@@ -86,8 +101,8 @@ func dockerInstructionKey(instruction string) string {
 
 func knownSuiInstructions() map[string]bool {
 	known := make(map[string]bool)
-	for _, block := range []string{globalSuiBlock, relocationBlock, customSuiBlock,
-		"RUN chmod +x /usr/local/bin/sui \\\n    && sui --version"} {
+	for _, block := range []string{globalSuiBlock, legacyGlobalSuiBlock, relocationBlock,
+		customSuiBlock, "RUN chmod +x /usr/local/bin/sui \\\n    && sui --version"} {
 		for _, instruction := range dockerInstructions(block) {
 			known[dockerInstructionKey(instruction)] = true
 		}

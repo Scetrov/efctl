@@ -46,7 +46,7 @@ func TestPrepareDockerEnvironment_PreservesFilesOnInvalidSuiSetup(t *testing.T) 
 
 func TestCustomSui_InstructionVariations(t *testing.T) {
 	for _, tc := range []struct{ name, block string }{
-		{"changed comment", strings.Replace(testGlobalSuiBlock(), "# Sui CLI via suiup (native binary for build arch – works on ARM and x86)", "# Install Sui", 1)},
+		{"changed comment", strings.Replace(testGlobalSuiBlock(), "# Sui CLI via suiup pinned to testnet-1.81.1 (last release with fullnode JSON-RPC)", "# Install Sui", 1)},
 		{"CRLF", strings.ReplaceAll(testGlobalSuiBlock()+"\n"+testRelocationBlock(), "\n", "\r\n")},
 		{"indented", strings.ReplaceAll(testGlobalSuiBlock()+"\n"+testRelocationBlock(), "\nRUN ", "\n  RUN ")},
 		{"existing custom", "# My custom build\nCOPY sui /usr/local/bin/sui\nRUN chmod +x /usr/local/bin/sui \\\n    && sui --version"},

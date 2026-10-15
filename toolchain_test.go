@@ -16,14 +16,14 @@ func TestProjectGoBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`(?m)^go 1\.27\.1$`).Match(data) {
-		t.Fatal("project minimum Go version must be 1.27.1")
+	if !regexp.MustCompile(`(?m)^go 1\.27\.2$`).Match(data) {
+		t.Fatal("project minimum Go version must be 1.27.2")
 	}
 	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(readme), "[Go 1.27.1+]") {
+	if !strings.Contains(string(readme), "[Go 1.27.2+]") {
 		t.Fatal("source installation documentation must match the Go baseline")
 	}
 }

@@ -43,7 +43,7 @@ func TestCustomSuiContainerSelection(t *testing.T) {
 			if custom {
 				require.NoError(t, os.WriteFile(filepath.Join(dir, "sui"), []byte("#!/bin/sh\nprintf 'CUSTOM-FIXTURE\\n'\n"), 0700))
 			}
-			content := "FROM " + image + "\nUSER 0\nCOPY fixtures/ /opt/fixtures/\nCOPY fixtures/curl /usr/local/bin/curl\nRUN chmod +x /usr/local/bin/curl\n" + strings.Replace(testGlobalSuiBlock(), "# Sui CLI via suiup (native binary for build arch – works on ARM and x86)", "# Installer comment intentionally changed", 1) + "\nWORKDIR /workspace\n"
+			content := "FROM " + image + "\nUSER 0\nCOPY fixtures/ /opt/fixtures/\nCOPY fixtures/curl /usr/local/bin/curl\nRUN chmod +x /usr/local/bin/curl\n" + strings.Replace(testGlobalSuiBlock(), "# Sui CLI via suiup pinned to testnet-1.81.1 (last release with fullnode JSON-RPC)", "# Installer comment intentionally changed", 1) + "\nWORKDIR /workspace\n"
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(content), 0600))
 			require.NoError(t, patchDockerfile(dir))
 			tag := fmt.Sprintf("localhost/efctl-sui-selection-%d", time.Now().UnixNano())
