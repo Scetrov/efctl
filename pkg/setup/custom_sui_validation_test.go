@@ -60,7 +60,7 @@ func TestCustomSuiRemovalRestoresFallback(t *testing.T) {
 	first, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
 	require.NoError(t, err)
 	require.NotContains(t, string(first), "COPY sui")
-	require.Equal(t, 1, strings.Count(string(first), "suiup install sui"))
+	require.Equal(t, 1, strings.Count(string(first), "suiup install sui@testnet-1.81.1"))
 	require.NoError(t, patchDockerfile(dir))
 	second, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
 	require.NoError(t, err)
