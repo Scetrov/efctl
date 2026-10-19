@@ -32,7 +32,7 @@ func resetFlags() {
 		f.Value.Set(f.DefValue)
 		f.Changed = false
 	})
-	
+
 	if worldCmd, _, err := root.Find([]string{"world"}); err == nil {
 		worldCmd.Flags().VisitAll(func(f *pflag.Flag) {
 			f.Value.Set(f.DefValue)
@@ -48,7 +48,7 @@ func TestWorldQuery_SSU(t *testing.T) {
 			"data": map[string]interface{}{
 				"object": map[string]interface{}{
 					"address": "0x1111",
-					"owner": map[string]interface{}{"__typename": "AddressOwner"},
+					"owner":   map[string]interface{}{"__typename": "AddressOwner"},
 					"asMoveObject": map[string]interface{}{
 						"contents": map[string]interface{}{
 							"type": map[string]interface{}{"repr": "0xpkg::smart_storage_unit::SmartStorageUnit"},
@@ -786,5 +786,3 @@ func TestWorldQuery_AdminACL(t *testing.T) {
 	// "AdminACL" should be overridden as "Admin Access Control List"
 	assert.Contains(t, output, "Admin Access Control List (0x7b6e)")
 }
-
-

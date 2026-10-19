@@ -4,11 +4,29 @@ import (
 	"bytes"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pterm/pterm"
 )
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
 
 func TestSpacedSpinner_Success_Inactive(t *testing.T) {
 	// Temporarily redirect pterm output
@@ -44,10 +62,14 @@ func TestSpacedSpinner_Success_Inactive(t *testing.T) {
 }
 
 func TestSpacedSpinner_Success_Active(t *testing.T) {
-	// Temporarily redirect pterm output
-	var buf bytes.Buffer
+	// Configure output before starting the spinner; its writer is read by the
+	// animation goroutine while active.
+	var buf lockedBuffer
 	pterm.SetDefaultOutput(&buf)
 	defer pterm.SetDefaultOutput(os.Stdout)
+	oldSpinnerWriter := pterm.DefaultSpinner.Writer
+	pterm.DefaultSpinner.SetWriter(&buf)
+	defer pterm.DefaultSpinner.SetWriter(oldSpinnerWriter)
 
 	// Save and restore state
 	oldProgress := ProgressEnabled
@@ -59,13 +81,6 @@ func TestSpacedSpinner_Success_Active(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create spinner: %v", err)
 	}
-
-	spinner.SetWriter(&buf)
-
-	// We need to route the global success printer output to the buffer as well,
-	// because pterm's Success() method might write to default output instead of spinner writer depending on context.
-	// Oh wait, Spin() initializes Success with `SpacedPrinter{pterm.PrefixPrinter{Prefix: pterm.Prefix{Text: "SUCCESS"}}}`.
-	// And SpacedSpinner.Success() calls s.SpinnerPrinter.Success(), which might use pterm.Printo() bypassing the spinner writer if not set on the success printer...
 
 	// Allow to spin briefly
 	time.Sleep(10 * time.Millisecond)

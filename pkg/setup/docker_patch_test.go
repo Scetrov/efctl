@@ -1,14 +1,37 @@
 package setup
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pterm/pterm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"efctl/pkg/ui"
 )
+
+// ── Test helpers ────────────────────────────────────────────────────
+
+// captureWarnings redirects ui.Warn output to a buffer and disables pterm
+// styling so assertions can match plain text. It returns a pointer to the
+// buffer; the original writer and styling mode are restored automatically.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	ui.Warn.Writer = w
+	pterm.DisableStyling()
+	t.Cleanup(func() {
+		ui.Warn.Writer = nil
+		pterm.EnableStyling()
+	})
+	return &buf
+}
 
 // ── prepareDockerEnvironment (integration) ─────────────────────────
 
@@ -22,9 +45,10 @@ func TestPrepareDockerEnvironment(t *testing.T) {
 	// Create dummy Dockerfile
 	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
 	dockerfileContent := `FROM ubuntu:24.04
+WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENV SUI_CONFIG_DIR=/root/.sui
@@ -65,6 +89,9 @@ echo "[sui-dev] RPC ready."
 	dockerfileBody, _ := os.ReadFile(dockerfilePath)
 	bodyStr := string(dockerfileBody)
 	assert.Contains(t, bodyStr, "postgresql-client \\", "Dockerfile should contain postgresql-client")
+	assert.Equal(t, 1, strings.Count(bodyStr, "libatomic1 \\"), "Dockerfile should contain exactly one libatomic1 entry")
+	assert.Contains(t, bodyStr, "apt-get install -y --no-install-recommends", "libatomic1 must use the existing minimal apt layer")
+	assert.Contains(t, bodyStr, "rm -rf /var/lib/apt/lists/*", "Dockerfile must retain apt-list cleanup")
 	assert.Contains(t, bodyStr, `ENV SUI_CONFIG_DIR=/workspace/.sui`, "Dockerfile should contain patched SUI_CONFIG_DIR")
 	assert.Contains(t, bodyStr, `sed -i`, "Dockerfile should contain sed safety-net")
 
@@ -98,7 +125,7 @@ func TestPrepareDockerEnvironment_CleansUpStaleOverride(t *testing.T) {
 	os.WriteFile(overridePath, []byte("services:\n  postgres:\n"), 0644)
 
 	// Minimal files for prepareDockerEnvironment to not fail
-	os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM ubuntu:24.04\n"), 0644)
+	os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM ubuntu:24.04\nWORKDIR /workspace\n"), 0644)
 	os.WriteFile(filepath.Join(scriptsDir, "entrypoint.sh"), []byte("#!/bin/bash\n"), 0755)
 
 	err := prepareDockerEnvironment(dockerDir, "docker", false, false)
@@ -183,12 +210,142 @@ sui start --with-faucet --force-regenesis &
 	assert.Contains(t, string(body), `/workspace/.sui/.env.sui`)
 }
 
+// ── patchEntrypointFaucetWait ────────────────────────────────────────
+
+func TestPatchEntrypointFaucetWait_ReplacesFixedSleep(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	result := patchEntrypointFaucetWait(content)
+	assert.Contains(t, result, "Waiting for faucet on port 9123")
+	assert.Contains(t, result, "curl --max-time 10 -s -o /dev/null http://127.0.0.1:9123")
+	assert.Contains(t, result, `echo "[sui-dev] Node ready."`)
+	// The unconditional fixed sleep must be gone in favour of a bounded poll.
+	assert.NotContains(t, result, "sleep 5\necho \"[sui-dev] Node ready.\"")
+}
+
+func TestPatchEntrypointFaucetWait_Idempotent(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	first := patchEntrypointFaucetWait(content)
+	second := patchEntrypointFaucetWait(first)
+	assert.Equal(t, first, second)
+}
+
+func TestPatchEntrypointFaucetWait_NoOpWhenMarkerAbsent(t *testing.T) {
+	// If upstream has already changed this section beyond recognition, the
+	// patch must not corrupt the file — it should leave it untouched.
+	content := `echo "[sui-dev] Something else entirely"`
+	result := patchEntrypointFaucetWait(content)
+	assert.Equal(t, content, result)
+}
+
+// ── patchEntrypointFaucetResilience ──────────────────────────────────
+
+func TestPatchEntrypointFaucetResilience_ReplacesExitWithWarning(t *testing.T) {
+	content := `for alias in ADMIN PLAYER_A PLAYER_B; do
+  sui client switch --address "$alias"
+  for attempt in 1 2 3; do
+    sui client faucet 2>&1 && break
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+    sleep 2
+  done
+done`
+
+	result := patchEntrypointFaucetResilience(content)
+	assert.Contains(t, result, "will not be funded automatically")
+	assert.Contains(t, result, "efctl env faucet --address")
+	// A single funding failure must no longer terminate the whole script.
+	assert.NotContains(t, result, "exit 1")
+}
+
+func TestPatchEntrypointFaucetResilience_Idempotent(t *testing.T) {
+	content := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }`
+
+	first := patchEntrypointFaucetResilience(content)
+	second := patchEntrypointFaucetResilience(first)
+	assert.Equal(t, first, second)
+}
+
+func TestPatchEntrypointFaucetResilience_NoOpWhenMarkerAbsent(t *testing.T) {
+	content := `echo "[sui-dev] Something else entirely"`
+	result := patchEntrypointFaucetResilience(content)
+	assert.Equal(t, content, result)
+}
+
+// ── patchEntrypoint end-to-end: faucet patches applied together ─────
+
+func TestPatchEntrypoint_FaucetPatchesAppliedTogether(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptsDir := filepath.Join(tmpDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+
+	// Mirrors the real upstream builder-scaffold entrypoint.sh shape for the
+	// node-start-through-funding section.
+	content := `#!/usr/bin/env bash
+set -e
+SUI_CFG="${SUI_CONFIG_DIR:-/root/.sui}"
+ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
+
+# ---------- start local node ----------
+sui start --with-faucet --force-regenesis &
+NODE_PID=$!
+
+echo "[sui-dev] Waiting for RPC on port 9000..."
+for i in $(seq 1 30); do
+  curl -s -o /dev/null http://127.0.0.1:9000 2>/dev/null && break
+  if [ "$i" -eq 30 ]; then
+    echo "[sui-dev] ERROR: RPC did not become ready" >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."
+
+# ---------- fund accounts ----------
+echo "[sui-dev] Funding accounts from faucet..."
+for alias in ADMIN PLAYER_A PLAYER_B; do
+  sui client switch --address "$alias"
+  for attempt in 1 2 3; do
+    sui client faucet 2>&1 && break
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+    sleep 2
+  done
+done
+`
+	os.WriteFile(entrypointPath, []byte(content), 0755)
+
+	patchEntrypoint(tmpDir)
+
+	body, _ := os.ReadFile(entrypointPath)
+	bodyStr := string(body)
+	assert.Contains(t, bodyStr, "Waiting for faucet on port 9123", "faucet-wait patch should be applied")
+	assert.Contains(t, bodyStr, "will not be funded automatically", "faucet-resilience patch should be applied")
+	assert.NotContains(t, bodyStr, "exit 1\n    }", "faucet funding failure must no longer be fatal")
+}
+
 // ── patchDockerfile safety-net ──────────────────────────────────────
 
 func TestPatchDockerfile_InjectsSedSafetyNet(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
@@ -214,6 +371,7 @@ func TestPatchDockerfile_ReplacesOldNarrowSed(t *testing.T) {
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	// Simulate a Dockerfile that already has the OLD narrow sed from a previous efctl version
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 RUN sed -i 's|ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"|ENV_FILE="/root/.sui/.env.sui"|' /workspace/scripts/entrypoint.sh
@@ -239,6 +397,7 @@ func TestPatchDockerfile_SedIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	content := `FROM ubuntu:24.04
+WORKDIR /workspace
 COPY scripts/ /workspace/scripts/
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
@@ -252,4 +411,599 @@ ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
 	second, _ := os.ReadFile(dockerfilePath)
 
 	assert.Equal(t, string(first), string(second), "Dockerfile sed patch must be idempotent")
+}
+
+// ── patchDockerfile custom-sui tests ──────────────────────────────────────
+
+// TestPatchCustomSuiIfPresent_CustomBinaryAvailable verifies generated
+// instructions select the custom artifact and omit the suiup installation.
+// Execution is covered separately by the opt-in container selection test.
+func TestPatchCustomSuiIfPresent_CustomBinaryAvailable(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	content := `FROM ubuntu:24.04
+` + testGlobalSuiBlock() + "\n" + testRelocationBlock() + `
+WORKDIR /workspace
+`
+
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Contains(t, result, "RUN chmod +x /usr/local/bin/sui")
+	assert.NotContains(t, result, "suiup install sui")
+	assert.NotContains(t, result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+	assert.Equal(t, 1, strings.Count(result, "COPY sui /usr/local/bin/sui"))
+}
+
+// TestPatchCustomSuiIfPresent_NoBinaryUsesFallback verifies that the default
+// suiup installation is retained when no custom Sui binary is available.
+func TestPatchCustomSuiIfPresent_NoBinaryUsesFallback(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+`
+
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, result, "suiup install sui@testnet-1.81.1")
+	assert.Contains(t, result, `mv "$SUI_PATH" /usr/local/bin/sui`)
+	assert.Contains(t, result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Equal(t, 1, strings.Count(result, "suiup install sui@testnet-1.81.1"))
+	assert.Equal(t, 1, strings.Count(result, `mv "$SUIUP_PATH" /usr/local/bin/suiup`))
+}
+
+// TestPatchCustomSuiIfPresent_DefaultIsPinnedNotFloating verifies the default
+// block selects the pinned compatibility release and never the unversioned
+// floating form that silently drifted to the JSON-RPC-removing release.
+func TestPatchCustomSuiIfPresent_DefaultIsPinnedNotFloating(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\nWORKDIR /workspace\n", dockerDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(result, "suiup install sui@testnet-1.81.1"))
+	assert.NotContains(t, result, "echo y | suiup install sui \\")
+	assert.Contains(t, result, "d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4")
+	assert.Contains(t, result, "4c2d948417af9f55cdd1f2f5d8e558533502672004c34f6429aa6cb114a51583")
+}
+
+// TestPatchCustomSuiIfPresent_LegacyFloatingBlockMigrated verifies existing
+// scaffolds holding the pre-pin floating block transition to exactly one
+// pinned installation and remain idempotent afterwards.
+func TestPatchCustomSuiIfPresent_LegacyFloatingBlockMigrated(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	content := `FROM ubuntu:24.04
+` + testLegacyGlobalSuiBlock() + "\n" + testRelocationBlock() + `
+WORKDIR /workspace
+`
+
+	first, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(first, "suiup install sui@testnet-1.81.1"))
+	assert.NotContains(t, first, "echo y | suiup install sui \\")
+	assert.Contains(t, first, `mv "$SUIUP_PATH" /usr/local/bin/suiup`)
+
+	second, err := patchCustomSuiIfPresent(first, dockerDir)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+}
+
+// TestPatchCustomSuiIfPresent_EmptyBinaryRejected prevents silently using
+// a different executable when the user supplied an invalid custom artifact.
+func TestPatchCustomSuiIfPresent_EmptyBinaryRejected(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte{},
+		0755,
+	))
+
+	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
+
+	result, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.Error(t, err)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, err.Error(), "non-empty regular file")
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+}
+
+// TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns verifies that
+// the patch emits a diagnostic instead of inserting custom Sui instructions
+// when the Dockerfile has no recognized WORKDIR insertion point.
+func TestPatchCustomSuiIfPresent_CustomBinaryWithoutWorkdirWarns(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	warnings := captureWarnings(t)
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	require.Error(t, err)
+
+	assert.NotContains(t, result, "COPY sui /usr/local/bin/sui")
+	assert.Contains(t, warnings.String(), "custom-sui-insertion")
+	assert.Contains(t, warnings.String(), "Dockerfile")
+}
+
+// TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns verifies that the
+// patch warns instead of inserting default Sui installation instructions
+// when the Dockerfile has no recognized insertion point.
+func TestPatchCustomSuiIfPresent_NoBinaryWithoutWorkdirWarns(t *testing.T) {
+	dockerDir := t.TempDir()
+
+	warnings := captureWarnings(t)
+	result, err := patchCustomSuiIfPresent("FROM ubuntu:24.04\n", dockerDir)
+	require.Error(t, err)
+
+	assert.NotContains(t, result, "suiup install sui")
+	assert.Contains(t, warnings.String(), "global-sui-insertion")
+	assert.Contains(t, warnings.String(), "Dockerfile")
+}
+
+// TestPatchCustomSuiIfPresent_IsIdempotent verifies that applying the custom
+// Sui patch repeatedly does not duplicate installation instructions.
+func TestPatchCustomSuiIfPresent_IsIdempotent(t *testing.T) {
+	dockerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dockerDir, "sui"),
+		[]byte("dummy Sui binary"),
+		0755,
+	))
+
+	content := "FROM ubuntu:24.04\nWORKDIR /workspace\n"
+
+	first, err := patchCustomSuiIfPresent(content, dockerDir)
+	require.NoError(t, err)
+	second, err := patchCustomSuiIfPresent(first, dockerDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(second, "COPY sui /usr/local/bin/sui"))
+	assert.Equal(t, 1, strings.Count(second, "RUN chmod +x /usr/local/bin/sui"))
+	assert.NotContains(t, second, "suiup install sui")
+	assert.Equal(t, first, second)
+}
+
+// testGlobalSuiBlock returns the expected default suiup installation block
+// used by the custom-Sui patch tests.
+// Keep these test fixtures aligned with the current production constants.
+func testGlobalSuiBlock() string {
+	return `# Sui CLI via suiup pinned to testnet-1.81.1 (last release with fullnode JSON-RPC)
+# Reference SHA-256 (not verified at build time):
+#   x86_64  d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
+#   aarch64 4c2d948417af9f55cdd1f2f5d8e558533502672004c34f6429aa6cb114a51583
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui@testnet-1.81.1 \
+    && sui --version`
+}
+
+// testLegacyGlobalSuiBlock returns the pre-pin floating default block that
+// existing scaffolds may still contain; it must be recognized only so it can
+// be replaced by the pinned testGlobalSuiBlock on the next preparation.
+func testLegacyGlobalSuiBlock() string {
+	return `# Sui CLI via suiup (native binary for build arch – works on ARM and x86)
+ENV PATH="/root/.local/bin:/root/.suiup/bin:${PATH}"
+RUN curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | sh \
+    && echo y | suiup install sui \
+    && sui --version`
+}
+
+// testRelocationBlock returns the expected commands that move the installed
+// Sui and suiup executables into /usr/local/bin.
+func testRelocationBlock() string {
+	return `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
+    mv "$SUI_PATH" /usr/local/bin/sui && \
+    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
+    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
+}
+
+// ── Patch diagnostic tests (tasks 1.2 + 1.3) ────────────────────────
+
+// fullDockerfile returns Dockerfile content whose source texts are all
+// matched by the required patches.
+// Note: workspace insertion point for Sui setup added.
+func fullDockerfile() string {
+	return `FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dos2unix \
+    && apt-get clean
+` + testGlobalSuiBlock() + `
+WORKDIR /workspace
+COPY scripts/ /workspace/scripts/
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+ENV SUI_CONFIG_DIR=/root/.sui
+ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
+`
+}
+
+// fullEntrypoint returns entrypoint content whose source texts are all
+// matched by the required patches.
+func fullEntrypoint() string {
+	return `#!/usr/bin/env bash
+set -e
+SUI_CFG="${SUI_CONFIG_DIR:-/workspace/.sui}"
+ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"
+
+# ---------- start local node ----------
+sui start --with-faucet --force-regenesis &
+
+for i in $(seq 1 30); do
+  if [ "$i" -eq 30 ]; then
+    echo "Fail"
+  fi
+done
+sleep 2
+echo "[sui-dev] RPC ready."
+    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }
+`
+}
+
+// --- 1.2 Unmatched patches emit warnings --------------------------------------
+
+func TestPatchDockerfile_Libatomic1AlreadyPatchedIsQuietAndIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := strings.Replace(fullDockerfile(), `    dos2unix \`, `    dos2unix \`+"\n"+`    libatomic1 \`, 1)
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	patchDockerfile(tmpDir)
+	first, err := os.ReadFile(dockerfilePath)
+	require.NoError(t, err)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+	body, err := os.ReadFile(dockerfilePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, string(first), string(body), "an already-patched Dockerfile must not change")
+	assert.Equal(t, 1, strings.Count(string(body), `libatomic1 \`))
+	assert.NotContains(t, buf.String(), "libatomic1")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedLibatomic1(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+RUN apt-get update && apt-get install -y curl
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "libatomic1")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedPostgresqlClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No "dos2unix \" backslash → postgresql-client source absent.
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+RUN apt-get update
+ENV SUI_CONFIG_DIR=/root/.sui
+&& sui --version
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "postgresql-client")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedSuiConfigDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+&& sui --version
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "sui-config-dir")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedGlobalSui(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No WORKDIR /workspace insertion point: mandatory Sui setup must fail.
+	content := `FROM ubuntu:24.04
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
+ENV SUI_CONFIG_DIR=/root/.sui
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "global-sui")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_WarnsOnUnmatchedSedSafetyNet(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// No "RUN dos2unix …" source line → sed safety-net cannot be injected.
+	content := `FROM ubuntu:24.04
+WORKDIR /workspace
+COPY scripts/ /workspace/scripts/
+RUN apt-get install -y dos2unix \
+    && apt-get clean
+ENV SUI_CONFIG_DIR=/root/.sui
+&& sui --version
+`
+	os.WriteFile(dockerfilePath, []byte(content), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Contains(t, buf.String(), "sed-safety-net")
+	assert.Contains(t, buf.String(), "Dockerfile")
+}
+
+func TestPatchDockerfile_NoWarningForLegacySedCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// Full content but the old narrow sed line is absent — that should NOT
+	// produce a warning because legacy cleanup is excluded from diagnostics.
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	// No warning about any legacy sed operation
+	assert.NotContains(t, buf.String(), "legacy-sed")
+	assert.NotContains(t, buf.String(), "old-narrow-sed")
+}
+
+func TestPatchEntrypointEnvPath_WarnsOnUnmatched(t *testing.T) {
+	content := `SUI_CFG="/workspace/.sui"
+ENV_FILE="/some/other/path"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	// Content must remain unchanged.
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "env-file-path")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointPostgresWait_WarnsOnUnmatched(t *testing.T) {
+	// Content without "# ---------- start local node ----------" source
+	// or "wait for postgres" marker.
+	content := `#!/bin/bash
+echo "completely different script"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointPostgresWait(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "postgres-wait")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointSuiStart_WarnsOnUnmatched(t *testing.T) {
+	// Content without "sui start --with-faucet --force-regenesis &" source
+	// or "SUI_START_ARGS" marker.
+	content := `#!/bin/bash
+some_other_command &
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointSuiStart(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "sui-start")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointLoopTimings_WarnsOnUnmatchedOnce(t *testing.T) {
+	// Content without any recognizable loop or RPC-ready patterns.
+	content := `#!/bin/bash
+for i in $(seq 1 10); do
+  echo "different loop"
+done
+echo "done"
+`
+	buf := captureWarnings(t)
+	result := patchEntrypointLoopTimings(content)
+
+	assert.Equal(t, content, result)
+	w := buf.String()
+	assert.Contains(t, w, "loop-timings", "warning must identify the patch operation")
+	// At most one warning per semantic patch attempt.
+	assert.Equal(t, 1, strings.Count(w, "loop-timings"))
+}
+
+func TestPatchEntrypointFaucetWait_WarnsOnUnmatched(t *testing.T) {
+	// Content without the sleep-5 + "RPC ready" source pattern or marker.
+	content := `echo "[sui-dev] Something else entirely"`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetWait(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "faucet-wait")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+func TestPatchEntrypointFaucetResilience_WarnsOnUnmatched(t *testing.T) {
+	content := `echo "[sui-dev] Something else entirely"`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetResilience(content)
+
+	assert.Equal(t, content, result)
+	assert.Contains(t, buf.String(), "faucet-resilience")
+	assert.Contains(t, buf.String(), "scripts/entrypoint.sh")
+}
+
+// --- 1.3 Successful and already-applied patches emit no warning -------------------
+
+func TestPatchDockerfile_NoWarningOnSuccessfulPatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Empty(t, buf.String(), "successful patches must not produce warnings")
+}
+
+func TestPatchDockerfile_NoWarningWhenAlreadyPatched(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+
+	// First pass: apply patches normally.
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+	patchDockerfile(tmpDir)
+
+	// Second pass: everything already applied — no warnings.
+	buf := captureWarnings(t)
+	patchDockerfile(tmpDir)
+
+	assert.Empty(t, buf.String(), "idempotent re-run must emit no warnings")
+}
+
+func TestPatchEntrypointEnvPath_NoWarningOnSuccess(t *testing.T) {
+	content := `ENV_FILE="/workspace/builder-scaffold/docker/.env.sui"`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	assert.Contains(t, result, `ENV_FILE="${SUI_CFG}/.env.sui"`)
+	assert.Empty(t, buf.String(), "successful patch must not warn")
+}
+
+func TestPatchEntrypointEnvPath_NoWarningWhenAlreadyPatched(t *testing.T) {
+	content := `ENV_FILE="${SUI_CFG}/.env.sui"`
+	buf := captureWarnings(t)
+	result := patchEntrypointEnvPath(content)
+
+	assert.Equal(t, content, result)
+	assert.Empty(t, buf.String(), "already-applied patch must not warn")
+}
+
+func TestPatchEntrypointPostgresWait_NoWarningWhenAlreadyPatched(t *testing.T) {
+	content := fullEntrypoint()
+	// Apply once
+	result := patchEntrypointPostgresWait(content)
+	assert.Contains(t, result, "wait for postgres")
+
+	// Apply again — already patched
+	buf := captureWarnings(t)
+	result2 := patchEntrypointPostgresWait(result)
+	assert.Equal(t, result, result2)
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointSuiStart_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointSuiStart(content)
+
+	assert.Contains(t, result, "SUI_START_ARGS")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointLoopTimings_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointLoopTimings(content)
+
+	assert.Contains(t, result, "seq 1 60")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointFaucetWait_NoWarningOnSuccess(t *testing.T) {
+	content := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetWait(content)
+
+	assert.Contains(t, result, "Waiting for faucet on port 9123")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypointFaucetResilience_NoWarningOnSuccess(t *testing.T) {
+	content := fullEntrypoint()
+	buf := captureWarnings(t)
+	result := patchEntrypointFaucetResilience(content)
+
+	assert.Contains(t, result, "will not be funded automatically")
+	assert.Empty(t, buf.String())
+}
+
+func TestPatchEntrypoint_FullRunWithNoWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := tmpDir
+	scriptsDir := filepath.Join(dockerDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+
+	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+	os.WriteFile(entrypointPath, []byte(fullEntrypoint()), 0755)
+
+	buf := captureWarnings(t)
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	assert.Empty(t, buf.String(), "full successful patch run must produce no warnings")
+}
+
+func TestPatchEntrypoint_IdempotentRunWithNoWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := tmpDir
+	scriptsDir := filepath.Join(dockerDir, "scripts")
+	os.MkdirAll(scriptsDir, 0755)
+
+	dockerfilePath := filepath.Join(dockerDir, "Dockerfile")
+	os.WriteFile(dockerfilePath, []byte(fullDockerfile()), 0644)
+
+	entrypointPath := filepath.Join(scriptsDir, "entrypoint.sh")
+	os.WriteFile(entrypointPath, []byte(fullEntrypoint()), 0755)
+
+	// First run: apply all patches.
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	// Second run: everything already applied — no warnings.
+	buf := captureWarnings(t)
+	patchDockerfile(dockerDir)
+	patchEntrypoint(dockerDir)
+
+	assert.Empty(t, buf.String(), "idempotent re-run must produce no warnings")
 }

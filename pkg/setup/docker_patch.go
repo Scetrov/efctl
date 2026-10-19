@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"efctl/pkg/ui"
 )
 
 // safePath constructs and validates a file path under the given base directory,
@@ -32,6 +34,13 @@ func safePath(base string, elem ...string) (string, error) {
 	return absP, nil
 }
 
+// warnPatchUnmatched emits a ui.Warn identifying a required patch whose target
+// text was not found. It is non-fatal and never includes file contents or
+// environment values.
+func warnPatchUnmatched(op, target string) {
+	ui.Warn.Printf("patch: %s — target not found in %s", op, target)
+}
+
 func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool, withFrontend bool) error {
 	// Clean up any stale compose override files from older efctl versions.
 	overridePath := filepath.Join(dockerDir, "docker-compose.override.yml")
@@ -39,8 +48,10 @@ func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool,
 		log.Printf("cleanup: failed to remove legacy override file: %v", err)
 	}
 
-	// Patch Dockerfile (add postgresql-client, sed safety net)
-	patchDockerfile(dockerDir)
+	// Mandatory Sui preparation must succeed before other scaffold files change.
+	if err := patchDockerfile(dockerDir); err != nil {
+		return fmt.Errorf("prepare Dockerfile: %w", err)
+	}
 
 	// Patch entrypoint.sh (env path, postgres wait, sui start args, loop timings)
 	patchEntrypoint(dockerDir)
@@ -48,24 +59,44 @@ func prepareDockerEnvironment(dockerDir string, engine string, withGraphql bool,
 	return nil
 }
 
-func patchDockerfile(dockerDir string) {
+func patchDockerfile(dockerDir string) error {
 	dockerfilePath, err := safePath(dockerDir, "Dockerfile")
 	if err != nil {
-		log.Printf("patch: invalid Dockerfile path: %v", err)
-		return
+		return fmt.Errorf("invalid Dockerfile path: %w", err)
 	}
-	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304 -- path validated by safePath
+	dockerfile, err := os.ReadFile(dockerfilePath) // #nosec G304 G703 -- path validated by safePath
 	if err != nil {
-		return
+		return fmt.Errorf("read Dockerfile: %w", err)
 	}
 	content := string(dockerfile)
-	if !strings.Contains(content, "postgresql-client") {
+
+	if strings.Contains(content, "postgresql-client") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, "dos2unix \\") {
 		content = strings.Replace(content, "dos2unix \\", "dos2unix \\\n    postgresql-client \\", 1)
+	} else {
+		warnPatchUnmatched("postgresql-client", "Dockerfile")
 	}
-	content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
+
+	if strings.Contains(content, "libatomic1") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, `postgresql-client \`) {
+		content = strings.Replace(content, `postgresql-client \`, `postgresql-client \`+"\n"+`    libatomic1 \`, 1)
+	} else {
+		warnPatchUnmatched("libatomic1", "Dockerfile")
+	}
+
+	if strings.Contains(content, "ENV SUI_CONFIG_DIR=/workspace/.sui") {
+		// already-applied — quiet no-op
+	} else if strings.Contains(content, "ENV SUI_CONFIG_DIR=/root/.sui") {
+		content = strings.Replace(content, "ENV SUI_CONFIG_DIR=/root/.sui", "ENV SUI_CONFIG_DIR=/workspace/.sui", 1)
+	} else {
+		warnPatchUnmatched("sui-config-dir", "Dockerfile")
+	}
+
 	// Safety net: inject a sed command into the Dockerfile that globally
 	// replaces the bind-mount .env.sui path with the internal config-dir path
-	// at build time.  This uses a broad global replacement (not just the
+	// at build time. This uses a broad global replacement (not just the
 	// ENV_FILE assignment) so it survives even when podman-compose reuses a
 	// cached COPY layer that still contains the unpatched upstream file.
 	// The command is idempotent — a no-op when the path is already correct.
@@ -79,29 +110,28 @@ func patchDockerfile(dockerDir string) {
 		content = strings.Replace(content, oldSed, "", 1)
 	}
 
-	// Move sui and suiup to /usr/local/bin so they are globally accessible
-	// for non-root users (critical for Podman keep-id).
-	const globalSui = `RUN SUI_PATH=$(command -v sui) && SUIUP_PATH=$(command -v suiup) && \
-    mv "$SUI_PATH" /usr/local/bin/sui && \
-    mv "$SUIUP_PATH" /usr/local/bin/suiup && \
-    chmod +x /usr/local/bin/sui /usr/local/bin/suiup`
-
-	if !strings.Contains(content, globalSui) {
-		content = strings.Replace(content,
-			`&& sui --version`,
-			`&& sui --version`+"\n"+globalSui,
-			1)
+	// Transform in memory; never persist partially patched setup on failure.
+	content, err = patchCustomSuiIfPresent(content, dockerDir)
+	if err != nil {
+		return err
 	}
-
-	if !strings.Contains(content, sedSafetyNet) {
-		content = strings.Replace(content,
+	if strings.Contains(content, sedSafetyNet) {
+		// already-applied - quiet no-op
+	} else if strings.Contains(content, `RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`) {
+		content = strings.Replace(
+			content,
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`,
 			`RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh`+"\n"+sedSafetyNet,
-			1)
+			1,
+		)
+	} else {
+		warnPatchUnmatched("sed-safety-net", "Dockerfile")
 	}
+
 	if err := os.WriteFile(dockerfilePath, []byte(content), 0600); err != nil { // #nosec G304 G703 -- path validated by safePath; error is handled via log.Printf below
-		log.Printf("patch: failed to write Dockerfile: %v", err)
+		return fmt.Errorf("write Dockerfile: %w", err)
 	}
+	return nil
 }
 
 func patchEntrypoint(dockerDir string) {
@@ -110,7 +140,7 @@ func patchEntrypoint(dockerDir string) {
 		log.Printf("patch: invalid entrypoint path: %v", err)
 		return
 	}
-	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 -- path validated by safePath
+	entrypoint, err := os.ReadFile(entrypointPath) // #nosec G304 G703 -- path validated by safePath
 	if err != nil {
 		return
 	}
@@ -120,6 +150,8 @@ func patchEntrypoint(dockerDir string) {
 	content = patchEntrypointPostgresWait(content)
 	content = patchEntrypointSuiStart(content)
 	content = patchEntrypointLoopTimings(content)
+	content = patchEntrypointFaucetWait(content)
+	content = patchEntrypointFaucetResilience(content)
 
 	// Post-patch validation: ensure the bind-mount .env.sui path was fully
 	// eliminated. If any patch above silently failed (e.g. upstream changed
@@ -158,8 +190,11 @@ func patchEntrypointEnvPath(content string) string {
 			prefix := envFileBindMountRe.FindStringSubmatch(match)[1]
 			return prefix + replacement
 		})
+		return content
 	}
 
+	// Neither source nor marker found — target unmatched.
+	warnPatchUnmatched("env-file-path", "scripts/entrypoint.sh")
 	return content
 }
 
@@ -212,9 +247,14 @@ fi
 
 # ---------- start local node ----------`
 
-	if !strings.Contains(content, "wait for postgres") {
-		content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
+	if strings.Contains(content, "wait for postgres") {
+		return content // already-applied
 	}
+	if strings.Contains(content, "# ---------- start local node ----------") {
+		content = strings.Replace(content, "# ---------- start local node ----------", postgresWaitScript, 1)
+		return content
+	}
+	warnPatchUnmatched("postgres-wait", "scripts/entrypoint.sh")
 	return content
 }
 
@@ -227,21 +267,117 @@ if [ "${SUI_GRAPHQL_ENABLED:-}" = "true" ]; then
   SUI_START_ARGS="$SUI_START_ARGS --with-graphql=0.0.0.0:9125"
 fi
 sui start $SUI_START_ARGS &`
-	if !strings.Contains(content, "SUI_START_ARGS") {
-		content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
+	if strings.Contains(content, "SUI_START_ARGS") {
+		return content // already-applied
 	}
+	if strings.Contains(content, "sui start --with-faucet --force-regenesis &") {
+		content = strings.Replace(content, "sui start --with-faucet --force-regenesis &", suiStartScript, 1)
+		return content
+	}
+	warnPatchUnmatched("sui-start", "scripts/entrypoint.sh")
 	return content
 }
 
 func patchEntrypointLoopTimings(content string) string {
-	content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
-	content = strings.ReplaceAll(content, "if [ \"$i\" -eq 30 ]; then", "if [ \"$i\" -eq 60 ]; then")
+	// Already-applied marker for the compound patch.
+	if strings.Contains(content, "RPC responding, waiting for full initialization") {
+		// Still apply seq changes in case of partial application.
+		content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
+		content = strings.ReplaceAll(content, `if [ "$i" -eq 30 ]; then`, `if [ "$i" -eq 60 ]; then`)
+		return content
+	}
 
-	if !strings.Contains(content, "RPC responding, waiting for full initialization") {
-		rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+	matched := false
+
+	// Track whether any source form is present, or the already-patched form
+	// ("seq 1 60") is present (indicating a prior run already patched these lines).
+	if strings.Contains(content, "for i in $(seq 1 30); do") ||
+		strings.Contains(content, `if [ "$i" -eq 30 ]; then`) ||
+		strings.Contains(content, "for i in $(seq 1 60); do") ||
+		strings.Contains(content, `if [ "$i" -eq 60 ]; then`) {
+		matched = true
+	}
+	content = strings.ReplaceAll(content, "for i in $(seq 1 30); do", "for i in $(seq 1 60); do")
+	content = strings.ReplaceAll(content, `if [ "$i" -eq 30 ]; then`, `if [ "$i" -eq 60 ]; then`)
+
+	rpcWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
 sleep 5
 echo "[sui-dev] Node ready."`
-		content = strings.ReplaceAll(content, "sleep 2\necho \"[sui-dev] RPC ready.\"", rpcWaitScript)
+
+	oldRPCReady := "sleep 2\necho \"[sui-dev] RPC ready.\""
+	if strings.Contains(content, oldRPCReady) {
+		content = strings.ReplaceAll(content, oldRPCReady, rpcWaitScript)
+		matched = true
 	}
+
+	if !matched {
+		warnPatchUnmatched("loop-timings", "scripts/entrypoint.sh")
+	}
+	return content
+}
+
+// patchEntrypointFaucetWait fixes a race condition in the upstream entrypoint:
+// `sui start --with-faucet` runs the RPC (port 9000) and the faucet HTTP
+// server (port 9123) as two independently-initializing components of the
+// same process, but the script only polls port 9000 and then assumes the
+// faucet is ready after a flat 5-second sleep. On a loaded host that's not
+// always enough, and the very next step (funding ADMIN/PLAYER_A/PLAYER_B)
+// gets connection-refused and aborts the whole container. This replaces the
+// fixed sleep with a real poll on port 9123 before proceeding.
+func patchEntrypointFaucetWait(content string) string {
+	if strings.Contains(content, "Waiting for faucet on port 9123") {
+		return content // already-applied
+	}
+
+	old := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 5
+echo "[sui-dev] Node ready."`
+
+	if strings.Contains(content, old) {
+		faucetWaitScript := `echo "[sui-dev] RPC responding, waiting for full initialization..."
+sleep 2
+echo "[sui-dev] Waiting for faucet on port 9123..."
+FAUCET_READY=0
+for i in $(seq 1 60); do
+  curl --max-time 10 -s -o /dev/null http://127.0.0.1:9123 2>/dev/null && { FAUCET_READY=1; break; }
+  sleep 1
+done
+if [ "$FAUCET_READY" -ne 1 ]; then
+  echo "[sui-dev] WARNING: faucet did not respond within 60s; funding may fail" >&2
+fi
+echo "[sui-dev] Node ready."`
+
+		return strings.ReplaceAll(content, old, faucetWaitScript)
+	}
+
+	warnPatchUnmatched("faucet-wait", "scripts/entrypoint.sh")
+	return content
+}
+
+// patchEntrypointFaucetResilience stops a transient faucet-funding failure
+// from killing the entire dev environment. The chain (RPC, indexer, GraphQL)
+// is already fully up by this point — failing to fund one account is a
+// narrow, recoverable problem (the operator can retry with
+// `efctl env faucet --address <addr>`), not a reason to tear down everything
+// and force a full `env down && env up` cycle.
+func patchEntrypointFaucetResilience(content string) string {
+	if strings.Contains(content, "will not be funded automatically") {
+		return content // already-applied
+	}
+
+	old := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] Faucet failed for $alias" >&2
+      exit 1
+    }`
+
+	if strings.Contains(content, old) {
+		resilientScript := `    [ "$attempt" -eq 3 ] && {
+      echo "[sui-dev] WARNING: faucet failed for $alias after 3 attempts; it will not be funded automatically. Retry later with: efctl env faucet --address <address>" >&2
+    }`
+
+		return strings.ReplaceAll(content, old, resilientScript)
+	}
+
+	warnPatchUnmatched("faucet-resilience", "scripts/entrypoint.sh")
 	return content
 }

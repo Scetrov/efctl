@@ -498,7 +498,7 @@ func socketHostExists(host string) bool {
 	if !allowed {
 		return false
 	}
-	_, err := os.Stat(path) // #nosec G304 -- path is restricted to known Podman socket locations
+	_, err := os.Stat(path) // #nosec G304 G703 -- path is matched against known Podman socket locations before use
 	return err == nil
 }
 

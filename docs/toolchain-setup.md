@@ -78,6 +78,31 @@ The configuration is automatically applied in `pkg/setup/pnpm_patch.go` via the 
 - **package.json**: Specifies `>=24.0.0` requirement
 - **pnpm Version**: `>=9.0.0` to align with the supported toolchain
 
+### Project-selected pnpm runtime
+
+World deployment runs in the `sui-playground` container, not the frontend
+`node:24-slim` container and not on the host. Its global `pnpm` launcher reads
+the `packageManager` declaration in `world-contracts/package.json`; that can
+select the standalone `@pnpm/exe@11.9.0` binary. On Ubuntu/Debian images that
+binary requires `libatomic.so.1`.
+
+`efctl` adds only `libatomic1` to the existing `apt-get install -y
+--no-install-recommends` layer when preparing the cloned scaffold Dockerfile.
+It retains apt-list cleanup, so the dependency belongs to the built
+`localhost/efctl-sui-dev` image rather than the host or a running container.
+Do not use host package installation or `docker exec apt-get install` as a
+recovery mechanism.
+
+Before `pnpm install`, deployment logs identify `sui-playground`, available OS
+and architecture information, the pnpm launcher, the project `packageManager`,
+the selected pnpm version, and `pnpm-workspace.yaml`. Pnpm stderr is preserved
+so dynamic-loader errors remain visible.
+
+To recover after a partial environment creation, run `efctl env down` and then
+`efctl env up`; this rebuilds the managed image and recreates the containers.
+The runtime fix was smoke-tested and remotely accepted on x86_64. Arm64 remains
+unverified because no arm64 Docker execution host was available.
+
 ## Testing
 
 All changes maintain:

@@ -25,7 +25,7 @@
 | `with-frontend` | Enable builder-scaffold web frontend (Vite) | `false` |
 | `with-graphql` | Enable SQL Indexer and GraphQL API | `false` |
 | `world-contracts-url` | Git URL for world contracts | `https://github.com/evefrontier/world-contracts.git` |
-| `world-contracts-ref` | Branch, tag, or commit for world contracts | `v0.0.23` |
+| `world-contracts-ref` | Branch, tag, or commit for world contracts | `v0.0.31` |
 | `builder-scaffold-url` | Git URL for builder-scaffold | `https://github.com/evefrontier/builder-scaffold.git` |
 | `builder-scaffold-ref` | Branch, tag, or commit for builder-scaffold | `v0.0.2` |
 | `git-autocrlf` | Enable Git `core.autocrlf` for clones | `false` |
@@ -40,7 +40,7 @@ with-frontend: true
 with-graphql: true
 
 # Control versions
-world-contracts-ref: "v0.0.23"
+world-contracts-ref: "v0.0.31"
 builder-scaffold-ref: "v0.0.2"
 
 # Custom mounts
